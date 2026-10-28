@@ -48,6 +48,7 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 
 ## Yeniləmələr (bazaya)
 - **002_tryos.sql** — TR-YÖS, şəkillər və yoxlama üçün yeni sütunlar. Supabase → SQL Editor → faylın hamısını yapışdır → Run.
+- **004_status.sql** — AI yoxlama statusları (keçib / yoxlama tələb edir / qaralama) və müəllim təsdiqi.
 - **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
 
 ## TR-YÖS rejimi
@@ -55,6 +56,13 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - Qrafik, Venn, cədvəl, sxem və şəkilli variantlar SVG kimi çəkilir.
 - Hər sual ikinci AI tərəfindən cavab açarı görmədən həll edilir: uyğun gəlirsə "✓ yoxlanılıb", gəlmirsə "⚠ yoxla".
 - Qaydalar: `api/_tryos.js`.
+
+## Nümunədən yaratma (TR-YÖS)
+- Hər nümunə əvvəlcə analiz olunur (`tryos_analyze`, Claude Sonnet, şəkil ilə): ailə, vizual quruluş, qayda, qorunmalı/dəyişən xüsusiyyətlər, qeyri-müəyyənlik, kəsiyin tamlığı. Natamam kəsik istifadə olunmur; qeyri-müəyyən nümunə müəllim təsdiqi ilə işlədilir.
+- Rejimlər (`api/_tryos.js` → `TRYOS_MODES`): izomorf / bənzər / fərqli quruluş. Bənzər və izomorfda sual ailəsi və təqdimat qorunur.
+- "Səhifədəki bütün suallar"da hər sual üçün orijinal səhifədən ayrıca kəsik götürülür və yaratmaya göndərilir.
+- Hər nümunəyə 1–5 sual; sorğular 2-lik hissələrə bölünür, çatışmayan bir dəfə avtomatik tamamlanır, sonra "Çatışmayanları yarat".
+- Yoxlama iki ayrı hissədir: (A) düzgünlük — cavab açarını görmədən, brauzerdə çəkilmiş yekun görüntü ilə; (B) nümunəyə uyğunluq — orijinal nümunə, analiz və rejimlə. Keçməyən sual bir dəfə yenidən yaradılır, yenə keçməsə qaralama olur. Müəllim təsdiqi ayrıca (Sual bankı → Təsdiqlə).
 
 ## PDF
 - Sual bankı → sualları seç → **PDF**; və ya AI nəticələrindən, test səhifəsindən.

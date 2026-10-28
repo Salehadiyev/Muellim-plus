@@ -315,3 +315,13 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 .run-row .model-pick { min-width: 240px; }
 
 body.capturing .sheet { box-shadow: none; }
+
+/* ---------- Nümunə analizi və statuslar ---------- */
+.sample.incomplete, .sample.uncertain { border-color: var(--amber); }
+.sample.incomplete { border-color: var(--red); }
+.warn-list { margin: 0; padding-left: 16px; color: var(--amber); }
+.analysis { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.q-fig { max-width: 640px; }
+.q-fig svg { max-height: 460px; }
+.fig-opts { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.opt-fig { width: 130px; }

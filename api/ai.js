@@ -6,7 +6,7 @@
 //   ANTHROPIC_MODEL     — (istəyə bağlı) model adı
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS } from './_tryos.js';
+import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS, TRYOS_MODES, TRYOS_ANALYSIS_SHAPE } from './_tryos.js';
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 // Köməkçi işlər (şəkil oxuma, ikinci yoxlama) üçün daha ucuz model
@@ -94,6 +94,7 @@ export default async function handler(req, res) {
       tryos_plan: () => tryosPlan(body),
       tryos_generate: async () => tag(await tryosGenerate(body)),
       verify: () => verify(body),
+      tryos_analyze: () => tryosAnalyze(body),
       tryos_from_examples: async () => tag(await tryosFromExamples(body))
     };
     if (!actions[action]) return res.status(400).json({ error: 'Naməlum əməliyyat' });
@@ -177,36 +178,109 @@ Bu formada qaytar: {"questions": [{"text": "...", "topic": "...", "section": "ma
   return { questions: questions.slice(0, 20) };
 }
 
-// Hər nümunə üçün yeni sual(lar): izomorf / bənzər / fərqli quruluş
+// Nümunənin strukturlaşdırılmış analizi: yaratmadan əvvəl (Claude Sonnet, şəkil ilə)
+async function tryosAnalyze(b) {
+  const img = imageBlock(b.image);
+  const text = String(b.text || '').slice(0, 4000).trim();
+  if (!img && !text) throw publicError('Nümunə boşdur');
+  const content = [];
+  if (img) content.push(img);
+  content.push({ type: 'text', text: `Bu, müəllimin TR-YÖS nümunə sualıdır${img ? ' (şəkil yuxarıdadır)' : ''}.
+${text ? 'Əvvəlcədən oxunmuş mətn (səhv ola bilər, şəkillə tutuşdur):\n"""\n' + text + '\n"""' : ''}
+${b.topic ? 'Müəllimin/sistemin mövzu etiketi: ' + String(b.topic).slice(0, 120) : ''}${b.section ? ' · bölmə etiketi: ' + b.section : ''}
+
+1) "text": sualın tam mətnini və variantlarını (A–E) şəkildən olduğu kimi yaz; riyazi ifadələr LaTeX ilə $...$; nömrəni yazma. Şəkil/kadr varsa sonda "[Şekil: ...]" ilə hər kadrı və hər variantı ayrıca, dəqiq təsvir et.
+2) Nümunəni analiz et (aşağıdakı forma).
+- "complete": şərt, BÜTÜN kadrlar/mərhələlər və BÜTÜN variantlar kəsikdə tam görünürsə true; nəsə kəsilib və ya çatışmırsa false.
+- "uncertain": oxunmayan, bulanıq və ya bir neçə cür yozula bilən hissələr. Təxmin etmə, burada yaz.
+- "conflict": mətn ilə şəkil, ya da etiket ilə şəkil arasında ziddiyyət varsa yaz.
+- "rule_hidden": qaydanı şagird özü kəşf etməlidirsə true.
+- "options_are_figures": variantlar şəkildirsə true. "figure_required": sualın əsas şəkli/qrafiki varsa true.
+Bu formada qaytar: {"text": "...", "analysis": ${TRYOS_ANALYSIS_SHAPE}}` });
+  const data = await askJSON(content, { system: 'Sən TR-YÖS sual analitikisən. Diqqətli ol, uydurma. Yalnız JSON qaytar. Bütün dəyərlər Azərbaycan və ya Türkiyə türkcəsində.', maxTokens: 6000 });
+  const a = data.analysis || {};
+  const arr = (v) => (Array.isArray(v) ? v : []).map((x) => String(x).slice(0, 240)).filter(Boolean).slice(0, 10);
+  const analysis = {
+    section: pick(a.section, ['matematik', 'sayisal'], pick(b.section, ['matematik', 'sayisal'], 'matematik')),
+    topic: String(a.topic || b.topic || '').slice(0, 120),
+    family: String(a.family || '').slice(0, 200),
+    visual: String(a.visual || '').slice(0, 600),
+    skill: String(a.skill || '').slice(0, 300),
+    rule: String(a.rule || '').slice(0, 800),
+    student_task: String(a.student_task || '').slice(0, 300),
+    rule_hidden: a.rule_hidden === true,
+    options_are_figures: a.options_are_figures === true,
+    figure_required: a.figure_required === true,
+    difficulty: pick(a.difficulty, ['asan', 'orta', 'çətin'], 'orta'),
+    preserve: arr(a.preserve),
+    variable: arr(a.variable),
+    uncertain: arr(a.uncertain),
+    complete: a.complete !== false,
+    conflict: String(a.conflict || '').slice(0, 300)
+  };
+  return { text: String(data.text || text).slice(0, 6000), analysis };
+}
+
+function analysisText(a) {
+  if (!a) return '';
+  return `Nümunə analizi:
+- Bölmə: ${a.section} · Mövzu: ${a.topic}
+- Sual ailəsi: ${a.family}
+- Vizual quruluş: ${a.visual}
+- Bacarıq: ${a.skill}
+- Qayda: ${a.rule}
+- Şagirddən tələb: ${a.student_task}
+- Qayda şagirddən gizlidir (kəşf edilməlidir): ${a.rule_hidden ? 'BƏLİ — şərtdə açıqlama' : 'xeyr'}
+- Variantlar şəkildir: ${a.options_are_figures ? 'BƏLİ — 5 option_figures məcburidir' : 'xeyr'}
+- Əsas şəkil: ${a.figure_required ? 'BƏLİ — figure məcburidir' : 'xeyr'}
+- Çətinlik: ${a.difficulty}
+- Qorunmalı: ${(a.preserve || []).join('; ') || '—'}
+- Dəyişdirilə bilər: ${(a.variable || []).join('; ') || '—'}`;
+}
+
+// Nümunədən yeni sual(lar). Brauzer hər sorğuda bir nümunə və ən çox 2 sual istəyir.
 async function tryosFromExamples(b) {
   const samples = (Array.isArray(b.samples) ? b.samples : []).slice(0, 3);
   if (!samples.length) throw publicError('Nümunə yoxdur');
   const per = clampInt(b.perSample, 1, 3, 1);
-  const mode = GEN_MODES[b.mode] ? b.mode : 'benzer';
+  const mode = TRYOS_MODES[b.mode] ? b.mode : 'benzer';
   const notes = String(b.notes || '').slice(0, 800).trim();
+  const feedback = String(b.feedback || '').slice(0, 1200).trim();
+  const avoid = (Array.isArray(b.avoid) ? b.avoid : []).slice(0, 20).map((t) => '- ' + String(t).slice(0, 200)).join('\n');
   const content = [];
   samples.forEach((smp, i) => {
-    content.push({ type: 'text', text: `### Nümunə ${i}\n${String(smp.text || '').slice(0, 4000)}` });
+    content.push({ type: 'text', text: `### Nümunə ${i}
+Bölmə: ${smp.section || '—'} · Mövzu: ${smp.topic || '—'}
+${String(smp.text || '').slice(0, 4000)}
+${analysisText(smp.analysis)}` });
     const img = imageBlock(smp.image);
     if (img) content.push(img);
   });
   content.push({ type: 'text', text: `Yuxarıdakı ${samples.length} nümunənin HƏR BİRİ üçün düz ${per} yeni sual yaz (cəmi ${samples.length * per}).
-${GEN_MODES[mode]}
-Əvvəl hər nümunənin hansı bacarığı yoxladığını və əsas həll ideyasını müəyyən et. Nümunənin bölməsini (matematik/sayisal) və mövzusunu saxla.
-Nümunədə şəkil/qrafik/cədvəl/sxem varsa, yeni sual üçün də uyğun SVG çək.
-${per > 1 ? 'Eyni nümunədən yaranan suallar bir-birinin ədəd dəyişdirilmiş surəti olmasın.' : ''}
+${TRYOS_MODES[mode]}
+Nümunənin bölməsini və mövzusunu saxla. Analizdəki "qorunmalı" bəndlərə tam əməl et.
+Analizdə "Variantlar şəkildir: BƏLİ" yazılıbsa, 5 option_figures məcburidir; "Əsas şəkil: BƏLİ" yazılıbsa, figure məcburidir.
+${per > 1 && mode !== 'izomorf' ? 'Eyni nümunədən yaranan suallar bir-birinin sadəcə ədəd dəyişdirilmiş surəti olmasın.' : ''}
+${avoid ? 'Bu nümunədən artıq yaradılıb (təkrarlama):\n' + avoid : ''}
+${feedback ? 'Əvvəlki cəhd yoxlamadan keçmədi. Bu problemləri aradan qaldır:\n' + feedback : ''}
 ${notes ? 'Müəllimin əlavə istəyi: ' + notes : ''}
 Hər sualda "sample" sahəsinə nümunənin nömrəsini (0-dan) yaz.
 Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE.replace('{', '{\n  "sample": 0,')} ]}` });
   const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 20000, model: b._model });
   const list = Array.isArray(data.questions) ? data.questions : [];
-  const questions = list.map((q) => {
+  const questions = [];
+  const rejected = [];
+  list.forEach((q) => {
     const sample = clampInt(q.sample, 0, samples.length - 1, 0);
-    const n = normalizeTryos(q, { topic: samples[sample].topic || '', section: samples[sample].section || 'matematik', subtype: '', difficulty: 'orta' });
-    return n ? { ...n, sample } : null;
-  }).filter(Boolean);
-  if (!questions.length) throw publicError('AI sual qaytarmadı, yenidən yoxlayın', 502);
-  return { questions };
+    const a = samples[sample].analysis || {};
+    const res = normalizeTryos(q, {
+      topic: samples[sample].topic || a.topic || '', section: samples[sample].section || a.section || 'matematik', subtype: '', difficulty: a.difficulty || 'orta'
+    }, { figureRequired: a.figure_required === true, optionsAreFigures: a.options_are_figures === true });
+    if (res.error) rejected.push({ sample, reason: res.error });
+    else questions.push({ ...res.q, sample });
+  });
+  if (!questions.length) throw publicError('AI yararlı sual qaytarmadı' + (rejected.length ? ': ' + rejected.map((r) => r.reason).join('; ') : ''), 502);
+  return { questions, rejected };
 }
 
 async function extract(b) {
@@ -327,23 +401,37 @@ Hər sualı yazmazdan əvvəl özün tam həll et və yoxla. Vizual "yok" deyils
 Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE} ]}`;
   const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 16000, model: b._model });
   const list = Array.isArray(data.questions) ? data.questions : [];
-  const questions = list.map((q, i) => normalizeTryos(q, items[i] || items[0])).filter(Boolean);
+  const questions = list.map((q, i) => normalizeTryos(q, items[i] || items[0], { figureRequired: (items[i] || items[0]).visual && (items[i] || items[0]).visual !== 'yok' }).q).filter(Boolean);
   if (!questions.length) throw publicError('AI sual qaytarmadı, yenidən yoxlayın', 502);
   return { questions };
 }
 
-function normalizeTryos(q, item) {
-  if (!q || typeof q !== 'object' || !q.body) return null;
+// Qaytarır: { q } və ya { error }. req: { figureRequired, optionsAreFigures }
+function normalizeTryos(q, item, req = {}) {
+  if (!q || typeof q !== 'object' || !q.body) return { error: 'sual mətni yoxdur' };
   const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o).trim()).slice(0, 5);
-  if (options.length !== 5 || options.some((o) => !o)) return null;
-  if (new Set(options).size !== 5) return null;
+  if (options.length !== 5 || options.some((o) => !o)) return { error: '5 variant yoxdur' };
+  if (new Set(options).size !== 5) return { error: 'eyni yazılmış variantlar var' };
   const idx = Number.isInteger(q.correct_index) ? q.correct_index : options.indexOf(String(q.answer || '').trim());
-  if (idx < 0 || idx > 4) return null;
-  let optionFigures = Array.isArray(q.option_figures) ? q.option_figures.map((f) => cleanSvg(f)) : [];
-  if (optionFigures.filter(Boolean).length !== 5) optionFigures = [];
-  return {
+  if (idx < 0 || idx > 4) return { error: 'cavab indeksi yanlışdır' };
+  const issues = [];
+  const fig = cleanSvg(q.figure);
+  if (fig.removed) issues.push('əsas şəkildən ' + fig.removed + ' icazəsiz element silindi');
+  const rawOpts = Array.isArray(q.option_figures) ? q.option_figures.filter((f) => String(f || '').trim()) : [];
+  const optFigs = rawOpts.map((f) => cleanSvg(f));
+  const wantsOptFigs = req.optionsAreFigures || rawOpts.length > 0;
+  let optionFigures = [];
+  if (wantsOptFigs) {
+    if (optFigs.length !== 5 || optFigs.some((f) => !f.svg)) return { error: 'variant şəkilləri natamamdır (' + optFigs.filter((f) => f.svg).length + '/5)' };
+    const norm = optFigs.map((f) => f.svg.replace(/\s+/g, ' ').replace(/\sid="[^"]*"/g, ''));
+    if (new Set(norm).size !== 5) return { error: 'eyni çəkilmiş variant şəkilləri var' };
+    optFigs.forEach((f, i) => { if (f.removed) issues.push('variant ' + 'ABCDE'[i] + ' şəklindən ' + f.removed + ' element silindi'); });
+    optionFigures = optFigs.map((f) => f.svg);
+  }
+  if (req.figureRequired && !fig.svg) return { error: 'əsas şəkil tələb olunur, amma çəkilməyib' };
+  return { q: {
     body: String(q.body).trim().slice(0, 4000),
-    figure: cleanSvg(q.figure),
+    figure: fig.svg,
     option_figures: optionFigures,
     qtype: 'mcq',
     options,
@@ -354,47 +442,117 @@ function normalizeTryos(q, item) {
     difficulty: pick(q.difficulty, ['asan', 'orta', 'çətin'], item.difficulty || 'orta'),
     section: pick(q.section, ['matematik', 'sayisal'], item.section || 'matematik'),
     exam: 'tryos',
-    grade: null
-  };
+    grade: null,
+    render_issues: issues
+  } };
 }
 
-// Server tərəfində SVG-ni sadə təmizləmə (brauzer də ayrıca təmizləyir)
+// Server tərəfində SVG təmizləmə: { svg, removed } qaytarır (brauzer də ayrıca təmizləyir)
 function cleanSvg(svg) {
   let s = String(svg || '').trim();
-  if (!/^<svg[\s>]/i.test(s) || s.length > 80000) return '';
+  if (!/^<svg[\s>]/i.test(s) || s.length > 120000) return { svg: '', removed: 0 };
+  let removed = 0;
+  const count = (re) => { const m = s.match(re); if (m) removed += m.length; };
+  count(/<script[\s\S]*?<\/script>/gi); count(/<foreignObject[\s\S]*?<\/foreignObject>/gi); count(/<(image|iframe|object|embed)[^>]*>/gi);
+  count(/<style[\s\S]*?<\/style>/gi);
   s = s.replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
     .replace(/<(image|iframe|object|embed)[^>]*>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, '')
     .replace(/(href\s*=\s*["'])\s*javascript:[^"']*/gi, '$1#');
-  return s;
+  return { svg: s, removed };
 }
 
+// İki ayrı yoxlama:
+//  A) Düzgünlük — cavab açarını görmədən həll edir; şəkilli sualda brauzerdə çəkilmiş YEKUN görüntünü görür.
+//  B) Nümunəyə uyğunluq və daxili ardıcıllıq — orijinal nümunəni, analizi, rejimi, açarı və həlli görür.
 async function verify(b) {
-  const qs = (Array.isArray(b.questions) ? b.questions : []).slice(0, 6);
+  const qs = (Array.isArray(b.questions) ? b.questions : []).slice(0, 3);
   if (!qs.length) throw publicError('Yoxlanılacaq sual yoxdur');
-  const prompt = `Sən müstəqil yoxlayıcısan. Aşağıdakı TR-YÖS üslubunda sualları cavab açarını görmədən özün həll et.
-Hər sual üçün: düzgün variantın indeksini (0-4) tap, birdən çox variant düzgün ola bilərsə və ya şərt çatışmırsa/ziddiyyətlidirsə, "issue" sahəsində Azərbaycan dilində qısa yaz.
-Şəkil SVG kodu kimi verilib; koordinatları və yazıları oxu.
+  const results = await Promise.all(qs.map((q) => verifyOne(q, b)));
+  return { results };
+}
 
-${qs.map((q, i) => `### Sual ${i + 1}
+async function verifyOne(q, b) {
+  const options = (q.options || []).slice(0, 5);
+  const expected = options.indexOf(q.answer);
+  const render = imageBlock(q.render);
+  const hasFigures = Boolean(q.figure) || (Array.isArray(q.option_figures) && q.option_figures.length > 0);
+
+  // A) Düzgünlük (kor həll)
+  const aContent = [];
+  if (render) aContent.push(render);
+  aContent.push({ type: 'text', text: `Sən müstəqil yoxlayıcısan. Aşağıdakı TR-YÖS sualını cavab açarını görmədən özün həll et.
+${render ? 'Sualın şəkli (əsas şəkil və A–E variant şəkilləri) yuxarıdakı görüntüdədir — şagirdin gördüyü kimi. Yalnız görüntüyə əsaslan.' : ''}
+Sual:
 ${String(q.body || '').slice(0, 4000)}
-${q.figure ? 'Şəkil (SVG):\n' + String(q.figure).slice(0, 20000) : ''}
 Variantlar:
-${(q.options || []).map((o, j) => `${'ABCDE'[j]}) ${o}${q.option_figures && q.option_figures[j] ? '\n   (SVG) ' + String(q.option_figures[j]).slice(0, 6000) : ''}`).join('\n')}`).join('\n\n')}
+${options.map((o, j) => `${'ABCDE'[j]}) ${o}`).join('\n')}
 
-Bu formada qaytar: {"results": [{"index": 0, "issue": ""}]} (sualların sırası ilə).`;
-  const data = await askJSON([{ type: 'text', text: prompt }], { system: 'Sən diqqətli riyaziyyat yoxlayıcısan. Yalnız JSON qaytar.', maxTokens: 8000 });
-  const results = (Array.isArray(data.results) ? data.results : []).slice(0, qs.length);
-  return {
-    results: qs.map((q, i) => {
-      const r = results[i] || {};
-      const expected = (q.options || []).indexOf(q.answer);
-      const index = Number.isInteger(r.index) ? r.index : -1;
-      const issue = String(r.issue || '').slice(0, 400);
-      return { ok: index === expected && !issue, index, expected, issue };
-    })
-  };
+Yoxla: şərt kifayətdirmi; yalnız bir variant düzgündürmü; mətn, əsas şəkil və variant şəkilləri bir-birinə uyğundurmu; başqa ağlabatan qayda başqa cavab verirmi.
+Bu formada qaytar: {"index": 0, "unique": true, "sufficient": true, "consistent": true, "issues": ["Azərbaycan dilində qısa; yoxdursa boş"]}` });
+  const taskA = askJSON(aContent, { system: 'Sən diqqətli riyaziyyat və məntiq yoxlayıcısan. Yalnız JSON qaytar.', maxTokens: 6000 });
+
+  // B) Uyğunluq + açar/həll ardıcıllığı
+  let taskB = null;
+  const smp = b.sample || q.sample_ref || null;
+  if (smp || q.solution) {
+    const bContent = [];
+    const sImg = smp ? imageBlock(smp.image) : null;
+    if (sImg) { bContent.push({ type: 'text', text: 'ORİJİNAL NÜMUNƏ:' }); bContent.push(sImg); }
+    if (render) { bContent.push({ type: 'text', text: 'YENİ SUAL (yekun görüntü):' }); bContent.push(render); }
+    const modeText = TRYOS_MODES[b.mode] || '';
+    bContent.push({ type: 'text', text: `${smp ? `Orijinal nümunənin mətni:\n${String(smp.text || '').slice(0, 3000)}\n${analysisText(smp.analysis)}\n${modeText}\n` : ''}
+Yeni sual:
+${String(q.body || '').slice(0, 4000)}
+Variantlar:
+${options.map((o, j) => `${'ABCDE'[j]}) ${o}`).join('\n')}
+Cavab açarı: ${'ABCDE'[expected] || '?'}
+Həll: ${String(q.solution || '').slice(0, 3000)}
+
+Qiymətləndir:
+${smp ? `- mode_ok: seçilən rejimə əməl olunubmu?
+- family_ok: sual ailəsi və təqdimat növü qorunubmu?
+- skill_ok: əsas bacarıq qorunubmu?
+- difficulty: "aşağı" | "eyni" | "yuxarı" (nümunəyə görə)
+- rule_revealed: şagirdin kəşf etməli olduğu qayda şərtdə səhvən açıqlanıbmı?` : ''}
+- key_matches_solution: həll məhz cavab açarındakı varianta gətirirmi?
+- text_figure_consistent: mətn və şəkillər bir-birinə uyğundurmu?
+Bu formada qaytar: {"mode_ok": true, "family_ok": true, "skill_ok": true, "difficulty": "eyni", "rule_revealed": false, "key_matches_solution": true, "text_figure_consistent": true, "issues": ["Azərbaycan dilində qısa"]}` });
+    taskB = askJSON(bContent, { system: 'Sən TR-YÖS redaktorusan: yeni sualın nümunəyə və qaydalara uyğunluğunu yoxlayırsan. Yalnız JSON qaytar.', maxTokens: 4000 });
+  }
+
+  const [ra, rb] = await Promise.allSettled([taskA, taskB || Promise.resolve(null)]);
+  const A = ra.status === 'fulfilled' ? ra.value : null;
+  const B = rb.status === 'fulfilled' ? rb.value : null;
+  const strs = (v) => (Array.isArray(v) ? v : []).map((x) => String(x).slice(0, 240)).filter(Boolean).slice(0, 6);
+
+  const index = A && Number.isInteger(A.index) ? A.index : -1;
+  const aIssues = A ? strs(A.issues) : ['düzgünlük yoxlaması alınmadı'];
+  if (hasFigures && !render) aIssues.push('şəkil görüntüsü göndərilmədi — vizual yoxlama edilmədi');
+  if (A && index !== expected) aIssues.unshift(`kor həll ${'ABCDE'[index] || '?'} variantını tapdı, açar ${'ABCDE'[expected] || '?'}`);
+  if (A && A.unique === false) aIssues.push('birdən çox variant düzgün ola bilər');
+  if (A && A.sufficient === false) aIssues.push('şərt kifayət deyil');
+  if (A && A.consistent === false) aIssues.push('mətn və şəkil uyğun deyil');
+  const correct = { ok: Boolean(A) && index === expected && A.unique !== false && A.sufficient !== false && A.consistent !== false && !(hasFigures && !render), index, issues: aIssues };
+
+  let fit = null;
+  if (taskB) {
+    const fIssues = B ? strs(B.issues) : ['uyğunluq yoxlaması alınmadı'];
+    const bad = [];
+    if (B) {
+      if (smp && B.mode_ok === false) bad.push('rejimə əməl olunmayıb');
+      if (smp && B.family_ok === false) bad.push('sual ailəsi dəyişib');
+      if (smp && B.skill_ok === false) bad.push('başqa bacarıq yoxlanılır');
+      if (smp && B.difficulty === 'aşağı') bad.push('çətinlik əsassız azalıb');
+      if (smp && B.rule_revealed === true) bad.push('kəşf edilməli qayda şərtdə açıqlanıb');
+      if (B.key_matches_solution === false) bad.push('həll cavab açarına uyğun deyil');
+      if (B.text_figure_consistent === false) bad.push('mətn və şəkil uyğun deyil');
+    }
+    fit = { ok: Boolean(B) && !bad.length, issues: [...bad, ...fIssues.filter((x) => !bad.includes(x))].slice(0, 8), difficulty: B ? String(B.difficulty || '') : '' };
+  }
+  return { ok: correct.ok && (!fit || fit.ok), correct, fit, index, expected, issue: [...correct.issues, ...(fit ? fit.issues : [])].join('; ').slice(0, 600) };
 }
 
 // ---------- Köməkçilər ----------

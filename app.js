@@ -97,7 +97,9 @@ const icons = {
 // AI-ın çəkdiyi SVG-ni təhlükəsiz hala gətirir (skript, xarici link, hadisə atributları silinir)
 const SVG_ALLOWED = new Set(['svg', 'g', 'path', 'line', 'polyline', 'polygon', 'rect', 'circle', 'ellipse', 'text', 'tspan',
   'defs', 'marker', 'title', 'desc', 'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern', 'use', 'symbol']);
+// qeyd: nodeName SVG-də kiçik/böyük hərflə gələ bilər (clipPath), müqayisə kiçik hərflə aparılır
 const svgCache = new Map();
+const svgRemovals = new Map(); // mənbə SVG → təmizləmədə silinən element sayı
 function safeSvg(src) {
   const raw = String(src || '').trim();
   if (!raw.startsWith('<svg')) return '';
@@ -107,9 +109,10 @@ function safeSvg(src) {
     const doc = new DOMParser().parseFromString(raw, 'image/svg+xml');
     const root = doc.documentElement;
     if (root && root.nodeName.toLowerCase() === 'svg' && !doc.querySelector('parsererror')) {
+      let removed = 0;
       const walk = (el) => {
         for (const child of Array.from(el.children)) {
-          if (!SVG_ALLOWED.has(child.nodeName.toLowerCase())) { child.remove(); continue; }
+          if (!SVG_ALLOWED.has(child.nodeName.toLowerCase())) { child.remove(); removed++; continue; }
           walk(child);
         }
         for (const a of Array.from(el.attributes)) {
@@ -118,6 +121,7 @@ function safeSvg(src) {
         }
       };
       walk(root);
+      svgRemovals.set(raw, removed);
       root.removeAttribute('width'); root.removeAttribute('height');
       root.setAttribute('role', 'img');
       out = new XMLSerializer().serializeToString(root);
@@ -141,9 +145,13 @@ function questionHtml(q, { selectable = false, checked = false, showAnswer = tru
     ? optionsHtml(q, { showAnswer })
     : (showAnswer ? `<div class="small"><strong>Cavab:</strong> ${esc(q.answer)}</div>` : '');
   const fig = q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : '';
-  const ver = q.verified === true ? '<span class="tag ai" title="İkinci AI müstəqil həll etdi və eyni cavabı tapdı">✓ yoxlanılıb</span>'
-    : q.verified === false ? `<span class="tag red" title="${esc(q.verify_note || '')}">⚠ yoxla${q.verify_note ? ': ' + esc(q.verify_note) : ''}</span>`
-    : q.verifying ? '<span class="tag">yoxlanılır…</span>' : '';
+  const notes = [q.verify_note, q.fit_note].filter(Boolean).join('; ');
+  const st = q.ai_status || (q.verified === true ? 'passed' : q.verified === false ? 'review' : '');
+  const ver = (st === 'passed' ? '<span class="tag ai" title="Düzgünlük və nümunəyə uyğunluq yoxlamasından keçib">✓ AI yoxlamasından keçib</span>'
+    : st === 'checking' ? '<span class="tag">yoxlanılır…</span>'
+    : st === 'review' ? `<span class="tag amber">⚠ Yoxlama tələb edir${notes ? ': ' + esc(notes) : ''}</span>`
+    : st === 'draft' ? `<span class="tag red">Qaralama · yoxlama tələb edir${notes ? ': ' + esc(notes) : ''}</span>` : '')
+    + (q.teacher_approved ? ' <span class="tag ai">✔ Müəllim təsdiqləyib</span>' : '');
   const meta = [
     q.source ? `<span class="tag ${q.source === 'ai' ? 'ai' : q.source === 'book' ? 'book' : ''}">${esc(SOURCE_LABEL[q.source] || q.source)}</span>` : '',
     q.topic ? `<span class="tag">${esc(q.topic)}</span>` : '',
@@ -434,7 +442,7 @@ async function classView(id) {
 async function bankView() {
   const { data, error } = await sb.from('questions').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) throw error;
-  let filter = { text: '', source: '', difficulty: '', exam: '' };
+  let filter = { text: '', source: '', difficulty: '', exam: '', status: '' };
   let visible = [];
   const selected = new Set();
 
@@ -448,6 +456,7 @@ async function bankView() {
         <label class="field">Mənbə<select id="fSource"><option value="">Hamısı</option><option value="ai">AI</option><option value="book">Kitabdan</option><option value="manual">Əl ilə</option></select></label>
         <label class="field">Çətinlik<select id="fDiff"><option value="">Hamısı</option>${DIFF.map((d) => `<option>${d}</option>`).join('')}</select></label>
         <label class="field">Format<select id="fExam"><option value="">Hamısı</option><option value="tryos">TR-YÖS</option><option value="general">Ümumi</option></select></label>
+        <label class="field">Status<select id="fStatus"><option value="">Hamısı</option><option value="approved">Müəllim təsdiqləyib</option><option value="passed">AI keçib, təsdiq gözləyir</option><option value="review">Yoxlama tələb edir / qaralama</option></select></label>
       </div>
       <div id="list"></div>
     </div>`;
@@ -456,12 +465,20 @@ async function bankView() {
     const t = filter.text.toLocaleLowerCase('az');
     const rows = data.filter((q) => (!filter.source || q.source === filter.source) && (!filter.difficulty || q.difficulty === filter.difficulty)
       && (!filter.exam || (q.exam || 'general') === filter.exam)
+      && (!filter.status || (filter.status === 'approved' ? q.teacher_approved : filter.status === 'passed' ? (!q.teacher_approved && (q.ai_status === 'passed' || (!q.ai_status && q.verified === true))) : (!q.teacher_approved && (q.ai_status === 'review' || q.ai_status === 'draft' || (!q.ai_status && q.verified === false)))))
       && (!t || (q.body + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az').includes(t)));
     visible = rows;
     $('#list').innerHTML = rows.length
-      ? rows.map((q) => questionHtml(q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
+      ? rows.map((q) => questionHtml(q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small" data-approve="${q.id}">${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button><button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
       : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/ai">AI ilə</a> və ya <a href="#/book">kitabdan</a> sual əlavə edin.'}</div>`;
     $$('#list .check').forEach((c) => c.onchange = () => { c.checked ? selected.add(c.dataset.id) : selected.delete(c.dataset.id); updateBtn(); });
+    $$('#list [data-approve]').forEach((b) => b.onclick = async () => {
+      const q = data.find((x) => x.id === b.dataset.approve);
+      const { error: err } = await sb.from('questions').update({ teacher_approved: !q.teacher_approved }).eq('id', q.id);
+      if (err) return fail(/column|schema cache/i.test(err.message || '') ? new Error('Baza yenilənməyib: supabase/004_status.sql faylını işə salın.') : err);
+      q.teacher_approved = !q.teacher_approved;
+      renderList();
+    });
     $$('#list [data-del]').forEach((b) => b.onclick = async () => {
       if (!confirm('Sual silinsin?')) return;
       const { error: err } = await sb.from('questions').delete().eq('id', b.dataset.del);
@@ -481,6 +498,7 @@ async function bankView() {
   $('#fDiff').onchange = (e) => { filter.difficulty = e.target.value; renderList(); };
   $('#makeTest').onclick = () => { pendingTestIds = [...selected]; go('#/tests'); };
   $('#fExam').onchange = (e) => { filter.exam = e.target.value; renderList(); };
+  $('#fStatus').onchange = (e) => { filter.status = e.target.value; renderList(); };
   $('#selAll').onclick = () => { visible.forEach((q) => selected.add(q.id)); updateBtn(); renderList(); };
   $('#makePdf').onclick = () => {
     // Bankdakı sıra ilə (ən yenisi yuxarıda) yox, seçilmə sırası ilə də ola bilər; burada görünən sıra saxlanılır
@@ -546,17 +564,23 @@ async function saveQuestions(list, source) {
     if (q.section) row.section = q.section;
     if (q.subtype) row.subtype = q.subtype;
     if (q.model) row.model = q.model;
-    if (typeof q.verified === 'boolean') { row.verified = q.verified; row.verify_note = q.verify_note || null; }
+    if (q.ai_status && q.ai_status !== 'checking') {
+      row.ai_status = q.ai_status === 'passed' ? 'passed' : q.ai_status === 'draft' ? 'draft' : 'review';
+      row.verified = row.ai_status === 'passed';
+      row.verify_note = q.verify_note || null;
+      row.fit_ok = typeof q.fit_ok === 'boolean' ? q.fit_ok : null;
+      row.fit_note = q.fit_note || null;
+    } else if (typeof q.verified === 'boolean') { row.verified = q.verified; row.verify_note = q.verify_note || null; }
     return row;
   });
   // Toplu yazılışda bütün sətirlər eyni sütunlara malik olmalıdır, çatışmayanlar standart dəyərlə doldurulur
-  const DEFAULTS = { exam: 'general', figure: null, option_figures: [], section: null, subtype: null, model: null, verified: null, verify_note: null };
+  const DEFAULTS = { exam: 'general', figure: null, option_figures: [], section: null, subtype: null, model: null, verified: null, verify_note: null, ai_status: null, fit_ok: null, fit_note: null };
   const keys = new Set(rows.flatMap((r) => Object.keys(r)));
   rows.forEach((r) => keys.forEach((k) => { if (!(k in r)) r[k] = k in DEFAULTS ? DEFAULTS[k] : null; }));
   const { error } = await sb.from('questions').insert(rows);
   if (error) {
     if (/column .* does not exist|schema cache/i.test(error.message || '')) {
-      throw new Error('Baza yenilənməyib: Supabase-də supabase/002_tryos.sql faylını işə salın (README-də yazılıb).');
+      throw new Error('Baza yenilənməyib: Supabase SQL Editor-də supabase/004_status.sql faylını işə salın.');
     }
     throw error;
   }
@@ -576,7 +600,7 @@ function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', acti
     hasSelection: () => !!st.sel,
     // box: [x, y, en, hündürlük] faizlə (AI-ın tapdığı sual yeri)
     dataUrlBox(box, maxSide = 1100) {
-      const pad = 2;
+      const pad = 3;
       const x = Math.max(0, box[0] - pad), y = Math.max(0, box[1] - pad);
       const w = Math.min(100 - x, box[2] + pad * 2), h = Math.min(100 - y, box[3] + pad * 2);
       const W = st.img.width, H = st.img.height;
@@ -759,30 +783,34 @@ async function aiView() {
 }
 
 // ---------------- 1. Nümunədən yarat ----------------
+const MAX_PER_SAMPLE = 5;   // hər nümunəyə ən çox neçə yeni sual
+const CHUNK = 2;            // bir sorğuda ən çox neçə sual (uzun SVG-lər kəsilməsin)
+const AUTO_RETRY = 1;       // yoxlamadan keçməyən sual üçün avtomatik yenidən yaratma cəhdi
+let qSeq = 0;
+
 function examplesTab() {
   $('#tabExamples').innerHTML = `
     <section class="card stack">
       <div class="step-h"><span class="step-n">1</span><div><h2>Nümunə sualları seçin</h2>
-        <p class="muted small">PDF və ya şəkil açın. Sualın üstündən barmaqla çərçivə çəkin, <b>barmağı qaldıran kimi əlavə olunur</b>. Ya da <b>Səhifədəki bütün suallar</b> basın. İstədiyiniz qədər seçin, səhifələri ‹ › ilə dəyişin.</p></div></div>
+        <p class="muted small">PDF və ya şəkil açın. Sualın üstündən barmaqla çərçivə çəkin, <b>barmağı qaldıran kimi əlavə olunur</b>. Ya da <b>Səhifədəki bütün suallar</b> basın. Çərçivəyə sualın şərti, bütün kadrları və bütün variantları daxil olsun.</p></div></div>
       <div id="exPicker" class="stack" style="gap:10px"></div>
     </section>
     <section class="card stack" id="samplesCard"></section>
     <section class="card stack">
       <div class="step-h"><span class="step-n">3</span><div><h2>Necə yaradılsın?</h2></div></div>
       <div class="pills" role="radiogroup" aria-label="Yaratma rejimi">
-        <button type="button" class="pill-opt" role="radio" data-mode="izomorf"><strong>İzomorf</strong><span>Eyni quruluş, yalnız rəqəmlər dəyişir</span></button>
-        <button type="button" class="pill-opt" role="radio" data-mode="benzer"><strong>Bənzər</strong><span>Eyni bacarıq, yeni təqdimat və rəqəmlər</span></button>
-        <button type="button" class="pill-opt" role="radio" data-mode="ferqli"><strong>Yeni quruluş</strong><span>Eyni bilik, başqa formada sual</span></button>
+        <button type="button" class="pill-opt" role="radio" data-mode="izomorf"><strong>İzomorf</strong><span>Eyni quruluş və həll; yalnız rəqəmlər, simvollar, başlanğıc vəziyyət dəyişir</span></button>
+        <button type="button" class="pill-opt" role="radio" data-mode="benzer"><strong>Bənzər</strong><span>Eyni sual ailəsi və təqdimat; yeni düzülüş və parametrlər</span></button>
+        <button type="button" class="pill-opt" role="radio" data-mode="ferqli"><strong>Fərqli quruluş</strong><span>Eyni əsas bacarıq, yeni quruluş</span></button>
       </div>
       <div class="form-grid">
-        <label class="field">Hər nümunəyə<select id="perSample"><option value="1">1 yeni sual</option><option value="2">2 yeni sual</option><option value="3">3 yeni sual</option></select></label>
+        <label class="field">Hər nümunəyə<select id="perSample">${Array.from({ length: MAX_PER_SAMPLE }, (_, i) => `<option value="${i + 1}">${i + 1} yeni sual</option>`).join('')}</select></label>
         <label class="field">Əlavə istək<span class="hint">istəyə bağlı</span><input type="text" id="exNotes" maxlength="800" placeholder="məs. variantlar tam ədəd olsun"></label>
       </div>
       <div class="run-row">${modelPicker()}<button class="btn primary" id="runEx"></button><span id="exProgress" class="muted small" role="status" aria-live="polite"></span></div>
     </section>
     <section id="exResults"></section>`;
 
-  // rejim və say
   const syncMode = () => $$('[data-mode]').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.mode === tyState.mode)));
   $$('[data-mode]').forEach((b) => b.onclick = () => { tyState.mode = b.dataset.mode; syncMode(); });
   syncMode();
@@ -794,8 +822,7 @@ function examplesTab() {
   createPicker($('#exPicker'), {
     hint: 'PDF açıldıqdan sonra səhifələr arasında ‹ › ilə keçin.',
     onCrop: (picker) => {
-      addSample({ image: picker.dataUrl(1100), exact: true });
-      // seçilən yer qısa müddət yaşıl yansın, sonra silinsin
+      addSample({ image: picker.dataUrl(1600), origin: 'kəsik' });
       const boxEl = $('#exPicker .crop-box.on');
       if (boxEl) boxEl.classList.add('added');
       setTimeout(() => picker.clearSelection(), 450);
@@ -807,11 +834,13 @@ function examplesTab() {
       $('[data-add-page]', row).onclick = (e) => busy(e.currentTarget, async () => {
         picker.clearSelection();
         const data = await callAI('extract', { image: picker.dataUrl(), split: true });
-        data.questions.forEach((q) => addSample({
-          image: q.box ? picker.dataUrlBox(q.box, 700) : null,
-          text: q.text, topic: q.topic, section: q.section, exact: false
-        }));
-        toast(data.questions.length + ' sual əlavə olundu');
+        let noBox = 0;
+        data.questions.forEach((q) => {
+          // Hər sual üçün orijinal səhifədən ayrıca, yüksək keyfiyyətli kəsik
+          if (!q.box) { noBox++; return; }
+          addSample({ image: picker.dataUrlBox(q.box, 1600), text: q.text, topic: q.topic, section: q.section, origin: 'səhifə' });
+        });
+        toast(`${data.questions.length - noBox} sual əlavə olundu` + (noBox ? ` · ${noBox} sualın yeri tapılmadı — onları əl ilə çərçivəyə alın` : ''), noBox > 0);
       }).catch(fail);
     }
   });
@@ -819,21 +848,44 @@ function examplesTab() {
   renderSamples();
   renderGroups();
   updateRunBtn();
-  $('#runEx').onclick = (e) => busy(e.currentTarget, runExamples).catch((err) => { progress('', 'exProgress'); fail(err); });
+  $('#runEx').onclick = (e) => busy(e.currentTarget, runExamples).catch((err) => { tyState.running = false; progress('', 'exProgress'); updateRunBtn(); fail(err); });
 }
 
-function addSample({ image, text = '', topic = '', section = 'matematik', exact }) {
-  const smp = { id: ++sampleSeq, image, text, topic, section, exact, status: text ? 'ready' : 'reading', error: '' };
+// Şəklin ölçüsünü öyrən (oxunaqlılıq yoxlaması üçün)
+function imageSize(src) {
+  return new Promise((ok) => {
+    const im = new Image();
+    im.onload = () => ok({ w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => ok({ w: 0, h: 0 });
+    im.src = src;
+  });
+}
+
+// Nümunə statusları: reading → ready | uncertain (müəllim təsdiqi lazımdır) | incomplete (yenidən kəsmək lazımdır) | error
+function addSample({ image, text = '', topic = '', section = '', origin = '' }) {
+  const smp = { id: ++sampleSeq, image, text, topic, section, origin, status: 'reading', error: '', analysis: null, warnings: [], confirmed: false };
   tyState.samples.push(smp);
-  if (!text) {
-    extractQueue(() => callAI('extract', { image })).then((d) => {
-      smp.text = d.text; smp.topic = d.topic; smp.status = 'ready';
-    }).catch((err) => { smp.status = 'error'; smp.error = err.message; })
-      .finally(() => { if ($('#samplesCard')) { renderSamples(); updateRunBtn(); } });
-  }
+  extractQueue(async () => {
+    const size = image ? await imageSize(image) : { w: 0, h: 0 };
+    const d = await callAI('tryos_analyze', { image, text, topic, section });
+    smp.text = d.text || text;
+    smp.analysis = d.analysis;
+    smp.topic = topic || d.analysis.topic;
+    smp.section = section || d.analysis.section;
+    const a = d.analysis;
+    smp.warnings = [];
+    if (image && Math.min(size.w, size.h) < 160) smp.warnings.push('kəsik çox kiçikdir — böyüdüb yenidən seçin');
+    if (a.conflict) smp.warnings.push('ziddiyyət: ' + a.conflict);
+    (a.uncertain || []).forEach((u) => smp.warnings.push('qeyri-müəyyən: ' + u));
+    if (topic && a.topic && topic.toLocaleLowerCase('tr') !== a.topic.toLocaleLowerCase('tr')) smp.warnings.push(`etiket "${topic}", şəkilə görə "${a.topic}"`);
+    smp.status = !a.complete ? 'incomplete' : smp.warnings.length ? 'uncertain' : 'ready';
+  }).catch((err) => { smp.status = 'error'; smp.error = err.message; })
+    .finally(() => { if ($('#samplesCard')) { renderSamples(); updateRunBtn(); } });
   renderSamples();
   updateRunBtn();
 }
+
+const usableSample = (s) => s.status === 'ready' || (s.status === 'uncertain' && s.confirmed);
 
 function renderSamples() {
   const cnt = $('#exPicker [data-count]');
@@ -842,26 +894,42 @@ function renderSamples() {
   if (!card) return;
   const list = tyState.samples;
   const reading = list.filter((s) => s.status === 'reading').length;
+  const label = { ready: ['ai', 'hazır'], reading: ['', 'analiz…'], error: ['red', 'oxunmadı'], incomplete: ['red', 'natamam kəsik'], uncertain: ['amber', 'qeyri-müəyyən'] };
   card.innerHTML = `<div class="step-h"><span class="step-n">2</span><div><h2>Seçilən nümunələr (${list.length})</h2>
-      <p class="muted small">${list.length ? (reading ? `${reading} sual oxunur…` : 'Mətnə klikləyib düzəldə bilərsiniz.') : 'Hələ nümunə yoxdur.'}</p></div>
+      <p class="muted small">${list.length ? (reading ? `${reading} nümunə analiz olunur…` : 'Analizə baxmaq üçün “Analiz”-i açın.') : 'Hələ nümunə yoxdur.'}</p></div>
       ${list.length ? '<button type="button" class="btn small danger" id="clearSamples" style="margin-left:auto">Hamısını sil</button>' : ''}</div>
-    ${list.length ? `<div class="sample-grid">${list.map((s, i) => `<div class="sample ${s.status}">
+    ${list.length ? `<div class="sample-grid">${list.map((s, i) => { const [cls, txt] = label[s.status] || ['', s.status]; const a = s.analysis; return `<div class="sample ${s.status}">
         <div class="sample-top"><b>${i + 1}</b>
-          <span class="tag ${s.status === 'ready' ? 'ai' : s.status === 'error' ? 'red' : ''}">${s.status === 'ready' ? 'hazır' : s.status === 'error' ? 'oxunmadı' : 'oxunur…'}</span>
+          <span class="tag ${cls}">${s.status === 'uncertain' && s.confirmed ? 'təsdiqləndi' : txt}</span>
           <button type="button" class="btn small" data-rm="${s.id}" aria-label="Nümunə ${i + 1}-i sil">✕</button></div>
-        ${s.image ? `<img src="${s.image}" alt="Nümunə ${i + 1}">` : ''}
-        ${s.status === 'ready' ? `<details><summary>Mətn</summary><textarea data-txt="${s.id}" rows="4">${esc(s.text)}</textarea></details>` : ''}
-        ${s.status === 'error' ? `<p class="small" style="color:var(--red)">${esc(s.error)}</p><button type="button" class="btn small" data-retry="${s.id}">Yenidən oxu</button>` : ''}
-      </div>`).join('')}</div>` : ''}`;
+        ${s.image ? `<img src="${s.image}" alt="Nümunə ${i + 1}">` : '<p class="small" style="color:var(--red)">Şəkil yoxdur</p>'}
+        ${a ? `<div class="small"><b>${esc(a.family || '—')}</b></div>` : ''}
+        ${s.status === 'incomplete' ? '<p class="small" style="color:var(--red)">Kəsik natamamdır: şərt, kadrlar və ya variantlar çatışmır. Bu nümunəni silin və sualı tam çərçivəyə alın.</p>' : ''}
+        ${s.warnings.length ? `<ul class="small warn-list">${s.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
+        ${s.status === 'uncertain' && !s.confirmed ? `<button type="button" class="btn small" data-confirm="${s.id}">Yoxladım, istifadə et</button>` : ''}
+        ${a ? `<details><summary>Analiz</summary><div class="small analysis">
+          <div><b>Bölmə / mövzu:</b> ${esc(a.section)} · ${esc(s.topic || a.topic)}</div>
+          <div><b>Vizual:</b> ${esc(a.visual)}</div><div><b>Qayda:</b> ${esc(a.rule)}</div>
+          <div><b>Tələb:</b> ${esc(a.student_task)}</div>
+          <div><b>Qorunmalı:</b> ${esc((a.preserve || []).join('; '))}</div>
+          <div><b>Dəyişə bilər:</b> ${esc((a.variable || []).join('; '))}</div></div></details>` : ''}
+        ${s.text && s.status !== 'reading' ? `<details><summary>Mətn</summary><textarea data-txt="${s.id}" rows="4">${esc(s.text)}</textarea></details>` : ''}
+        ${s.status === 'error' ? `<p class="small" style="color:var(--red)">${esc(s.error)}</p><button type="button" class="btn small" data-retry="${s.id}">Yenidən analiz et</button>` : ''}
+      </div>`; }).join('')}</div>` : ''}`;
   $$('[data-rm]', card).forEach((b) => b.onclick = () => {
     tyState.samples = tyState.samples.filter((s) => s.id !== +b.dataset.rm);
+    renderSamples(); updateRunBtn();
+  });
+  $$('[data-confirm]', card).forEach((b) => b.onclick = () => {
+    const s = tyState.samples.find((x) => x.id === +b.dataset.confirm);
+    if (s) s.confirmed = true;
     renderSamples(); updateRunBtn();
   });
   $$('[data-txt]', card).forEach((t) => t.oninput = () => { const s = tyState.samples.find((x) => x.id === +t.dataset.txt); if (s) s.text = t.value; });
   $$('[data-retry]', card).forEach((b) => b.onclick = () => {
     const s = tyState.samples.find((x) => x.id === +b.dataset.retry);
     tyState.samples = tyState.samples.filter((x) => x !== s);
-    addSample({ image: s.image, exact: s.exact });
+    addSample({ image: s.image, text: s.text, topic: s.topic, section: s.section, origin: s.origin });
   });
   const clr = $('#clearSamples', card);
   if (clr) clr.onclick = () => { if (confirm('Bütün nümunələr silinsin?')) { tyState.samples = []; renderSamples(); updateRunBtn(); } };
@@ -870,110 +938,297 @@ function renderSamples() {
 function updateRunBtn() {
   const b = $('#runEx');
   if (!b || tyState.running) return;
-  const ready = tyState.samples.filter((s) => s.status === 'ready').length;
+  const ready = tyState.samples.filter(usableSample).length;
   b.disabled = !ready;
   b.innerHTML = `${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} ${ready ? ready * tyState.per + ' sual yarat' : 'Sual yarat'}`;
 }
 
 const progress = (t, id = 'progress') => { const el = document.getElementById(id); if (el) el.textContent = t || ''; };
 
-async function verifyQuestions(qs, onChange) {
-  qs.forEach((q) => { q.verifying = true; });
-  onChange();
-  try {
-    const v = await callAI('verify', { questions: qs.map((q) => ({ body: q.body, figure: q.figure, options: q.options, option_figures: q.option_figures, answer: q.answer })) });
-    v.results.forEach((r, i) => { if (qs[i]) { qs[i].verified = r.ok; qs[i].verify_note = r.issue || (r.ok ? '' : `ikinci həll ${'ABCDE'[r.index] || '?'} variantını tapdı`); } });
-  } catch (err) { console.error(err); }
-  qs.forEach((q) => { delete q.verifying; });
-  onChange();
+// ---------- Yekun görüntünün çəkilməsi (yoxlayıcı istifadəçinin gördüyünü görsün) ----------
+function svgSize(svg) {
+  const m = /viewBox\s*=\s*["']\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(svg);
+  return m ? { w: +m[3] || 300, h: +m[4] || 200 } : { w: 300, h: 200 };
 }
 
+function svgToCanvas(svg, targetW) {
+  return new Promise((ok) => {
+    const safe = safeSvg(svg);
+    if (!safe) return ok(null);
+    const { w, h } = svgSize(safe);
+    const scale = targetW / w;
+    const sized = safe.replace(/^<svg/, `<svg width="${Math.round(w * scale)}" height="${Math.round(h * scale)}"`);
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * scale)); c.height = Math.max(1, Math.round(h * scale));
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      try { ctx.drawImage(im, 0, 0, c.width, c.height); ok(c); } catch (_) { ok(null); }
+    };
+    im.onerror = () => ok(null);
+    im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sized);
+  });
+}
+
+function inkRatio(c) {
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let ink = 0;
+  for (let i = 0; i < d.length; i += 16) if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) ink++;
+  return ink / (d.length / 16);
+}
+
+function thumb(c) {
+  const t = document.createElement('canvas'); t.width = 32; t.height = 32;
+  const x = t.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 32, 32); x.drawImage(c, 0, 0, 32, 32);
+  const d = x.getImageData(0, 0, 32, 32).data; const g = [];
+  for (let i = 0; i < d.length; i += 4) g.push((d[i] + d[i + 1] + d[i + 2]) / 3);
+  return g;
+}
+
+// Qaytarır: { image (PNG data URL və ya null), problems: [bloklayan], notes: [xəbərdarlıq] }
+async function renderQuestionImage(q) {
+  const problems = [], notes = [];
+  const figs = Array.isArray(q.option_figures) ? q.option_figures.filter(Boolean) : [];
+  if (!q.figure && !figs.length) return { image: null, problems, notes };
+  const main = q.figure ? await svgToCanvas(q.figure, 900) : null;
+  if (q.figure) {
+    if (!main) problems.push('əsas şəkil göstərilə bilmir');
+    else if (inkRatio(main) < 0.003) problems.push('əsas şəkil boş görünür');
+    if (svgRemovals.get(String(q.figure).trim())) notes.push('əsas şəkildən göstərilə bilməyən elementlər silindi');
+  }
+  const opts = await Promise.all(figs.map((f) => svgToCanvas(f, 200)));
+  if (figs.length) {
+    if (figs.length !== 5) problems.push(`variant şəkilləri natamamdır (${figs.length}/5)`);
+    opts.forEach((c, i) => {
+      if (!c) problems.push(`variant ${'ABCDE'[i]} göstərilə bilmir`);
+      else if (inkRatio(c) < 0.003) problems.push(`variant ${'ABCDE'[i]} boş görünür`);
+      if (svgRemovals.get(String(figs[i]).trim())) notes.push(`variant ${'ABCDE'[i]} şəklindən elementlər silindi`);
+    });
+    const th = opts.map((c) => (c ? thumb(c) : null));
+    for (let i = 0; i < th.length; i++) for (let j = i + 1; j < th.length; j++) {
+      if (!th[i] || !th[j]) continue;
+      let diff = 0; for (let k = 0; k < th[i].length; k++) diff += Math.abs(th[i][k] - th[j][k]);
+      if (diff / th[i].length < 2) problems.push(`variant ${'ABCDE'[i]} və ${'ABCDE'[j]} eyni görünür`);
+    }
+  }
+  // Kompozit: yuxarıda əsas şəkil, altında A–E variantları (şagirdin gördüyü kimi)
+  const W = 1000, pad = 20, optW = 200, labelH = 30;
+  const mainH = main ? main.height : 0;
+  const optH = opts.length ? Math.max(...opts.map((c) => (c ? c.height : 0))) + labelH : 0;
+  const out = document.createElement('canvas');
+  out.width = W; out.height = pad + mainH + (main && opts.length ? pad : 0) + optH + pad;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+  if (main) ctx.drawImage(main, (W - main.width) / 2, pad);
+  let y = pad + mainH + (main ? pad : 0);
+  ctx.fillStyle = '#111'; ctx.font = 'bold 22px Arial, sans-serif';
+  opts.forEach((c, i) => {
+    const x = i * optW;
+    ctx.fillText('ABCDE'[i] + ')', x + 6, y + 22);
+    if (c) ctx.drawImage(c, x, y + labelH);
+  });
+  let image = null;
+  try { image = out.toDataURL('image/png'); } catch (_) { problems.push('şəkil görüntüsü hazırlana bilmədi'); }
+  return { image, problems, notes };
+}
+
+// Sualı yoxla: yekun görüntü + iki ayrı AI yoxlaması. Statuslar: checking → passed | review
+async function checkQuestion(q, ctx = {}) {
+  q.ai_status = 'checking';
+  const r = await renderQuestionImage(q);
+  q.render_notes = [...(q.render_issues || []), ...r.notes];
+  if (r.problems.length) {
+    q.correct_ok = false; q.fit_ok = null;
+    q.verify_note = r.problems.join('; ');
+    q.fit_note = '';
+    q.ai_status = 'review';
+    return false;
+  }
+  try {
+    const payload = { body: q.body, options: q.options, answer: q.answer, solution: q.solution, figure: q.figure, option_figures: q.option_figures, render: r.image };
+    const v = await callAI('verify', { mode: ctx.mode, sample: ctx.sample || null, questions: [payload] });
+    const res = v.results[0];
+    const correct = res.correct || { ok: res.ok, issues: res.issue ? [res.issue] : [] };
+    q.correct_ok = correct.ok;
+    q.fit_ok = res.fit ? res.fit.ok : null;
+    q.verify_note = correct.ok ? '' : (correct.issues || []).join('; ');
+    q.fit_note = res.fit && !res.fit.ok ? res.fit.issues.join('; ') : '';
+    if (q.render_notes.length) q.fit_note = [q.fit_note, ...q.render_notes].filter(Boolean).join('; ');
+    q.ai_status = res.ok ? 'passed' : 'review';
+  } catch (err) {
+    q.correct_ok = null; q.fit_ok = null;
+    q.verify_note = 'yoxlama alınmadı: ' + err.message;
+    q.ai_status = 'review';
+  }
+  q.verified = q.ai_status === 'passed';
+  return q.ai_status === 'passed';
+}
+
+// Mövzudan yaratma üçün (nümunə yoxdur): yalnız düzgünlük
+async function verifyQuestions(qs, onChange) {
+  qs.forEach((q) => { q.ai_status = 'checking'; });
+  onChange();
+  await Promise.all(qs.map((q) => checkQuestion(q).then(() => { if (q.ai_status !== 'passed') q.ai_status = 'draft'; onChange(); })));
+}
+
+const sampleForApi = (s) => ({ text: s.text, image: s.image, topic: s.topic, section: s.section, analysis: s.analysis });
+
 async function runExamples() {
-  const samples = tyState.samples.filter((s) => s.status === 'ready');
+  const samples = tyState.samples.filter(usableSample);
   if (!samples.length) return;
-  if (tyState.samples.some((s) => s.status === 'reading') && !confirm('Bəzi nümunələr hələ oxunur. Hazır olanlarla davam edilsin?')) return;
+  const skipped = tyState.samples.length - samples.length;
+  if (skipped && !confirm(`${skipped} nümunə istifadə olunmayacaq (analiz bitməyib, natamam və ya təsdiqlənməyib). Davam edilsin?`)) return;
   tyState.running = true;
-  tyState.groups = samples.map((s) => ({ sample: s, questions: [], state: 'waiting' }));
+  updateRunBtn();
+  const N = tyState.per;
+  const mode = tyState.mode;
+  tyState.groups = samples.map((s) => ({ sample: s, expected: N, questions: [], state: 'waiting', errors: [] }));
   renderGroups();
-  const per = tyState.per;
-  // Hər nümunə ayrı sorğu: eyni anda bir neçəsi paralel işləyir, hər sual hazır olan kimi görünür
-  const size = 1;
-  const batches = [];
-  for (let i = 0; i < tyState.groups.length; i += size) batches.push(tyState.groups.slice(i, i + size));
-  let done = 0;
-  const total = tyState.groups.length;
-  progress(`Yaradılır: 0 / ${total} nümunə…`, 'exProgress');
+
   const q = makeQueue(4);
-  const verifs = [];
-  // Birinci sorğu tək gedir: qaydalar yaddaşa (keşə) yazılır, qalanlar onu ucuz oxuyur
   let warm = null;
-  const runBatch = (fn) => {
+  const runJob = (fn) => {
     if (!warm) { warm = q(fn); return warm; }
     return warm.catch(() => {}).then(() => q(fn));
   };
-  await Promise.all(batches.map((groups) => runBatch(async () => {
-    groups.forEach((g) => { g.state = 'working'; });
+  const avoidOf = (g) => g.questions.map((x) => x.body.replace(/\s+/g, ' ').slice(0, 180));
+
+  // Bir sorğu: g üçün count sual (≤ CHUNK)
+  const generate = async (g, count, feedback = '') => {
+    const data = await callAI('tryos_from_examples', {
+      samples: [sampleForApi(g.sample)], mode, perSample: count, notes: tyState.notes, avoid: avoidOf(g), feedback
+    });
+    (data.rejected || []).forEach((r) => g.errors.push('rədd edildi: ' + r.reason));
+    return data.questions.slice(0, count).map((x) => ({ ...x, _uid: ++qSeq, attempts: 0 }));
+  };
+
+  // Yoxla; keçməsə, məhdud sayda yenidən yarat; yenə keçməsə qaralama
+  const settle = async (g, item) => {
     renderGroups();
-    try {
-      const data = await callAI('tryos_from_examples', {
-        samples: groups.map((g) => ({ text: g.sample.text, image: g.sample.exact ? g.sample.image : null, topic: g.sample.topic, section: g.sample.section })),
-        mode: tyState.mode, perSample: per, notes: tyState.notes
-      });
-      data.questions.forEach((qq) => { const g = groups[qq.sample]; if (g) g.questions.push(qq); });
-      groups.forEach((g) => { g.state = g.questions.length ? 'done' : 'error'; });
-      const all = groups.flatMap((g) => g.questions);
-      if (all.length) verifs.push(verifyQuestions(all, renderGroups));
-    } catch (err) {
-      console.error(err);
-      groups.forEach((g) => { g.state = 'error'; g.error = err.message; });
+    let cur = item;
+    let ok = await checkQuestion(cur, { mode, sample: sampleForApi(g.sample) });
+    renderGroups();
+    while (!ok && cur.attempts < AUTO_RETRY) {
+      const fb = [cur.verify_note, cur.fit_note].filter(Boolean).join('; ');
+      let repl = null;
+      try { repl = (await generate(g, 1, fb))[0]; } catch (err) { g.errors.push(err.message); }
+      if (!repl) break;
+      repl.attempts = cur.attempts + 1;
+      const idx = g.questions.indexOf(cur);
+      if (idx >= 0) g.questions[idx] = repl; else g.questions.push(repl);
+      cur = repl;
+      renderGroups();
+      ok = await checkQuestion(cur, { mode, sample: sampleForApi(g.sample) });
+      renderGroups();
     }
-    done += groups.length;
+    if (!ok) cur.ai_status = 'draft';
+  };
+
+  const fill = async (g) => {
+    g.state = 'working';
+    renderGroups();
+    let need = g.expected - g.questions.length;
+    const chunks = [];
+    while (need > 0) { chunks.push(Math.min(CHUNK, need)); need -= CHUNK; }
+    const settles = [];
+    await Promise.all(chunks.map((count) => runJob(async () => {
+      try {
+        const got = await generate(g, count);
+        got.forEach((x) => { if (g.questions.length < g.expected) { g.questions.push(x); settles.push(settle(g, x)); } });
+        if (got.length < count) g.errors.push(`${count} sual istənildi, ${got.length} yararlı gəldi`);
+      } catch (err) {
+        g.errors.push(err.message);
+      }
+      renderGroups();
+    })));
+    await Promise.all(settles);
+  };
+
+  let done = 0;
+  const total = tyState.groups.length;
+  progress(`Yaradılır: 0 / ${total} nümunə…`, 'exProgress');
+  await Promise.all(tyState.groups.map(async (g) => {
+    await fill(g);
+    // bir dəfə avtomatik tamamlama (dublikatsız: avoid siyahısı ilə)
+    if (g.questions.length < g.expected) await fill(g);
+    g.state = g.questions.length >= g.expected ? 'done' : g.questions.length ? 'partial' : 'error';
+    done++;
     progress(`Yaradılır: ${done} / ${total} nümunə…`, 'exProgress');
     renderGroups();
-  })));
-  progress('Yoxlama tamamlanır…', 'exProgress');
-  await Promise.all(verifs);
+  }));
   progress('', 'exProgress');
   tyState.running = false;
   updateRunBtn();
   renderGroups();
+  const got = tyState.groups.reduce((t, g) => t + g.questions.length, 0);
+  const want = tyState.groups.reduce((t, g) => t + g.expected, 0);
+  if (got < want) toast(`${want} sualdan ${got}-i alındı. Çatışmayanları nümunə kartında tamamlaya bilərsiniz.`, true);
+
+  // Çatışmayanları sonradan tamamlamaq üçün
+  tyState.fillMissing = async (gi) => {
+    const g = tyState.groups[gi];
+    if (!g || tyState.running) return;
+    tyState.running = true; updateRunBtn();
+    g.errors = [];
+    await fill(g);
+    g.state = g.questions.length >= g.expected ? 'done' : g.questions.length ? 'partial' : 'error';
+    tyState.running = false; updateRunBtn(); renderGroups();
+  };
 }
+
+const STATUS_BADGE = {
+  passed: ['ai', '✓', 'AI yoxlamasından keçib'],
+  checking: ['', '…', 'yoxlanılır'],
+  review: ['amber', '⚠', 'yoxlama tələb edir'],
+  draft: ['red', 'qaralama', 'qaralama — yoxlama tələb edir']
+};
+const defaultChecked = (q) => q.ai_status === 'passed';
 
 function renderGroups() {
   const box = $('#exResults');
   if (!box) return;
   const groups = tyState.groups;
   if (!groups.length) { box.innerHTML = ''; return; }
+  tyState.sel = tyState.sel || {}; // yalnız müəllimin özünün dəyişdirdiyi seçimlər yadda saxlanılır
   const all = groups.flatMap((g) => g.questions);
-  const bad = all.filter((q) => q.verified === false).length;
-  const unchecked = new Set($$('#exResults .check').filter((c) => !c.checked).map((c) => c.dataset.id));
+  const cnt = (s) => all.filter((q) => q.ai_status === s).length;
+  const want = groups.reduce((t, g) => t + g.expected, 0);
   box.innerHTML = `<div class="card stack">
-    <div class="row between"><h2>Nəticə: ${all.length} yeni sual</h2>
+    <div class="row between"><h2>Nəticə: ${all.length} / ${want} sual</h2>
       <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
-    ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü (⚠). Onları yoxlayın və ya seçimdən çıxarın.</p>` : ''}
+    <p class="small">✓ AI yoxlamasından keçib: <b>${cnt('passed')}</b> · ⚠ yoxlanılır / tələb edir: <b>${cnt('checking') + cnt('review')}</b> · qaralama: <b>${cnt('draft')}</b>${all.length < want && !tyState.running ? ` · <span style="color:var(--red)">çatışmır: <b>${want - all.length}</b></span>` : ''}</p>
+    ${cnt('draft') ? '<p class="notice">Qaralamalar avtomatik seçilmir. Onları açıb yoxlayın; banka qaralama statusu ilə düşür və müəllim təsdiqi gözləyir.</p>' : ''}
     <p class="muted small">Karta toxunun: nümunə və yeni sual böyük pəncərədə açılacaq.</p>
     <div class="mini-grid">${groups.map((g, gi) => `<div class="mini">
-      <div class="mini-head"><b>${gi + 1}</b>
+      <div class="mini-head"><b>${gi + 1}</b><span class="tag">${g.questions.length} / ${g.expected}</span>
         ${g.state === 'waiting' ? '<span class="muted small">növbədə…</span>'
-          : g.state === 'working' ? '<span class="row muted small" style="gap:6px"><span class="spinner sm" aria-hidden="true"></span> yaradılır…</span>'
-          : g.state === 'error' ? `<span class="small" style="color:var(--red)">Alınmadı${g.error ? ': ' + esc(g.error) : ''}</span>` : ''}</div>
-      ${g.questions.map((q, qi) => { const key = gi + '-' + qi; q._key = key; return miniQ(q, key, !unchecked.has(key), g.sample); }).join('')}
+          : g.state === 'working' ? '<span class="row muted small" style="gap:6px"><span class="spinner sm" aria-hidden="true"></span> yaradılır…</span>' : ''}
+        ${(g.state === 'partial' || g.state === 'error') && !tyState.running ? `<button type="button" class="btn small" data-fill="${gi}">Çatışmayanları yarat</button>` : ''}</div>
+      ${g.errors.length && g.state !== 'working' ? `<details class="small"><summary style="color:var(--red)">Problemlər (${g.errors.length})</summary><ul>${g.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
+      ${g.questions.map((q) => { const key = String(q._uid); return miniQ(q, key, key in tyState.sel ? tyState.sel[key] : defaultChecked(q)); }).join('')}
     </div>`).join('')}</div>
   </div>`;
-  bindMini(box, (key) => { const g = groups[+key.split('-')[0]]; return { q: g.questions[+key.split('-')[1]], sample: g.sample }; });
+  bindMini(box, (key) => { for (const g of groups) { const q = g.questions.find((x) => String(x._uid) === key); if (q) return { q, sample: g.sample }; } return {}; });
+  $$('[data-fill]', box).forEach((b) => b.onclick = () => tyState.fillMissing && tyState.fillMissing(+b.dataset.fill));
+  $$('#exResults .check').forEach((c) => c.onchange = () => { tyState.sel[c.dataset.id] = c.checked; });
   const chosen = () => {
     const keys = new Set($$('#exResults .check').filter((c) => c.checked).map((c) => c.dataset.id));
-    return all.filter((q) => keys.has(q._key));
+    return all.filter((q) => keys.has(String(q._uid)));
   };
   $('#saveSel', box).onclick = (e) => {
     const list = chosen();
     if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    if (list.some((q) => q.ai_status === 'checking')) return toast('Bəzi suallar hələ yoxlanılır, bir az gözləyin', true);
     busy(e.currentTarget, async () => {
       await saveQuestions(list, 'ai');
-      // banka düşənlər siyahıdan çıxır (təkrar əlavə olunmasın)
       const saved = new Set(list);
-      tyState.groups.forEach((g) => { g.questions = g.questions.filter((q) => !saved.has(q)); });
-      tyState.groups = tyState.groups.filter((g) => g.questions.length || g.state !== 'done');
+      tyState.groups.forEach((g) => {
+        const before = g.questions.length;
+        g.questions = g.questions.filter((q) => !saved.has(q));
+        g.expected = Math.max(g.questions.length, g.expected - (before - g.questions.length));
+      });
+      tyState.groups = tyState.groups.filter((g) => g.questions.length || (g.state !== 'done' && g.state !== 'partial'));
       renderGroups();
       toast(list.length + ' sual banka əlavə olundu' + (tyState.groups.length ? '' : ' · siyahı boşaldı'));
     }).catch(fail);
@@ -989,7 +1244,8 @@ function renderGroups() {
 // Kiçik kart: qısa önizləmə + seçim qutusu; toxunanda pəncərə açılır
 function miniQ(q, key, checked) {
   const letter = 'ABCDE'[(q.options || []).indexOf(q.answer)] || '—';
-  const ver = q.verified === true ? '<span class="tag ai">✓</span>' : q.verified === false ? '<span class="tag red">⚠</span>' : q.verifying ? '<span class="tag">…</span>' : '';
+  const st = STATUS_BADGE[q.ai_status] || (q.verified === true ? STATUS_BADGE.passed : q.verified === false ? STATUS_BADGE.review : null);
+  const ver = st ? `<span class="tag ${st[0]}" title="${esc(st[2])}">${esc(st[1])}</span>` : '';
   return `<div class="mini-q">
     <input type="checkbox" class="check" data-id="${esc(key)}" ${checked ? 'checked' : ''} aria-label="Sualı seç">
     <button type="button" class="mini-open" data-open="${esc(key)}">
