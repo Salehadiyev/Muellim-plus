@@ -405,7 +405,8 @@ async function aiView() {
   view().innerHTML = `
     <div class="page-head"><div><h1>AI ilə sual yarat</h1><p class="muted">Suallar həlli ilə gəlir. Banka əlavə etməzdən əvvəl yoxlayın.</p></div></div>
     <form class="card stack" id="gen">
-      <label class="field">Mövzu<span class="hint">nə qədər dəqiq yazsanız, o qədər yaxşı</span><input type="text" name="topic" required maxlength="200" placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
+      <label class="field">Mövzu<span class="hint">nə qədər dəqiq yazsanız, o qədər yaxşı</span><input type="text" name="topic" maxlength="200" placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
+      <label class="field">Nümunə sual<span class="hint">istəyə bağlı · bir və ya bir neçə sual yapışdırın, AI onlara bənzər yeni suallar yaradacaq</span><textarea name="example" rows="4" maxlength="4000" placeholder="məs. Mağazada 3 dəftər və 2 qələm 11 manata satılır. Dəftər qələmdən 2 manat bahadır. Dəftər neçə manatdır?"></textarea></label>
       <div class="form-grid">
         <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
         <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === 'orta' ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
@@ -437,6 +438,7 @@ async function aiView() {
   $('#gen').onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
+    if (!String(f.topic || '').trim() && !String(f.example || '').trim()) return toast('Mövzu yazın və ya nümunə sual əlavə edin', true);
     busy($('button[type=submit]', e.target), async () => {
       const data = await callAI('generate', f);
       results = data.questions;

@@ -67,12 +67,21 @@ async function generate(b) {
   const qtype = pick(b.qtype, ['mcq', 'open'], 'mcq');
   const topic = String(b.topic || '').slice(0, 200).trim();
   const extra = String(b.notes || '').slice(0, 500).trim();
-  if (!topic) throw publicError('Mövzunu yazın');
+  const example = String(b.example || '').slice(0, 4000).trim();
+  if (!topic && !example) throw publicError('Mövzunu yazın və ya nümunə sual əlavə edin');
 
-  const prompt = `${grade}. sinif üçün "${topic}" mövzusunda ${count} ədəd riyaziyyat sualı yarat.
+  const exampleBlock = example ? `
+Müəllim aşağıdakı nümunə sual(lar)ı verib. Yeni suallar eyni bacarığı, eyni çətinliyi, eyni üslubu və formatı izləsin,
+amma hekayə, adlar və bütün rəqəmlər yeni olsun. Nümunədəki cümlələri köçürmə. Mövzu verilməyibsə, mövzunu nümunədən özün müəyyən et.
+Nümunə:
+"""
+${example}
+"""` : '';
+
+  const prompt = `${grade}. sinif üçün ${topic ? `"${topic}" mövzusunda ` : ''}${count} ədəd riyaziyyat sualı yarat.
 Çətinlik: ${difficulty}. Sual növü: ${qtype === 'mcq' ? 'çoxseçimli (4 variant)' : 'açıq sual'}.
-${extra ? 'Müəllimin əlavə istəyi: ' + extra : ''}
-Suallar bir-birini təkrarlamasın, müxtəlif bacarıqları yoxlasın.
+${extra ? 'Müəllimin əlavə istəyi: ' + extra : ''}${exampleBlock}
+Suallar bir-birini təkrarlamasın.
 Cavabı bu formada qaytar: {"questions": [ ${QUESTION_SHAPE} ]}`;
 
   const data = await askJSON([{ type: 'text', text: prompt }]);
