@@ -905,7 +905,13 @@ async function runExamples() {
   progress(`Yaradılır: 0 / ${total} nümunə…`, 'exProgress');
   const q = makeQueue(4);
   const verifs = [];
-  await Promise.all(batches.map((groups) => q(async () => {
+  // Birinci sorğu tək gedir: qaydalar yaddaşa (keşə) yazılır, qalanlar onu ucuz oxuyur
+  let warm = null;
+  const runBatch = (fn) => {
+    if (!warm) { warm = q(fn); return warm; }
+    return warm.catch(() => {}).then(() => q(fn));
+  };
+  await Promise.all(batches.map((groups) => runBatch(async () => {
     groups.forEach((g) => { g.state = 'working'; });
     renderGroups();
     try {
