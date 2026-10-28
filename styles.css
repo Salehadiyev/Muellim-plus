@@ -309,3 +309,5 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 
 .model-pick { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; min-width: 260px; }
 .model-pick select { min-height: 42px; font-size: 14px; }
+.run-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.run-row .model-pick { min-width: 240px; }

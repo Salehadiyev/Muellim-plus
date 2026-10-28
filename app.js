@@ -698,6 +698,7 @@ async function aiView() {
     if (t === 'examples') { if (!examplesBuilt) { examplesTab(); examplesBuilt = true; } }
     else if (t === 'topic') topicTab();
     else generalTab();
+    bindModelPicker(view());
   };
   $$('[data-tab]').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
   bindModelPicker(view());
@@ -724,7 +725,7 @@ function examplesTab() {
         <label class="field">Hər nümunəyə<select id="perSample"><option value="1">1 yeni sual</option><option value="2">2 yeni sual</option><option value="3">3 yeni sual</option></select></label>
         <label class="field">Əlavə istək<span class="hint">istəyə bağlı</span><input type="text" id="exNotes" maxlength="800" placeholder="məs. variantlar tam ədəd olsun"></label>
       </div>
-      <div class="row"><button class="btn primary" id="runEx"></button><span id="exProgress" class="muted small" role="status" aria-live="polite"></span></div>
+      <div class="run-row">${modelPicker()}<button class="btn primary" id="runEx"></button><span id="exProgress" class="muted small" role="status" aria-live="polite"></span></div>
     </section>
     <section id="exResults"></section>`;
 
@@ -974,7 +975,7 @@ function topicTab() {
         <label class="field">Sual sayı<select name="tyCount">${[3, 5, 10, 15, 20, 30, 40].map((n) => `<option ${n === 10 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       </div>
       <label class="field">Əlavə istək<span class="hint">istəyə bağlı</span><input type="text" name="notes" maxlength="800" placeholder="məs. qrafikli suallar çox olsun"></label>
-      <div class="row"><button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button>
+      <div class="run-row">${modelPicker()}<button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button>
         <span id="progress" class="muted small" role="status" aria-live="polite"></span></div>
     </form>
     <section id="results"></section>`;
