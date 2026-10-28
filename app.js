@@ -400,6 +400,125 @@ async function saveQuestions(list, source) {
   if (error) throw error;
 }
 
+// ================= Şəkil / PDF seçici (kəsmə ilə) =================
+// root içinə "Şəkil və ya PDF seç" düyməsi, PDF səhifə keçidi və barmaqla çərçivə çəkmə qurur.
+function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', actions } = {}) {
+  const st = { img: null, scale: 1, sel: null, pdf: null, page: 1 };
+  const uid = 'p' + Math.random().toString(36).slice(2, 8);
+  root.innerHTML = `<label class="btn primary" style="align-self:flex-start">${label}<input type="file" accept="image/*,application/pdf,.pdf" class="sr" id="${uid}-file"></label>
+    <div id="${uid}-area" class="muted small">${esc(hint)}</div>`;
+  const area = () => document.getElementById(uid + '-area');
+
+  const api = {
+    hasImage: () => !!st.img,
+    dataUrl() {
+      const s = st.sel;
+      const sx = s ? s.x / st.scale : 0, sy = s ? s.y / st.scale : 0;
+      const sw = s ? s.w / st.scale : st.img.width, sh = s ? s.h / st.scale : st.img.height;
+      const out = Math.min(1, 1600 / Math.max(sw, sh));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(sw * out)); c.height = Math.max(1, Math.round(sh * out));
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(st.img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.88);
+    },
+    clearSelection() { st.sel = null; const b = document.getElementById(uid + '-box'); if (b) b.className = 'crop-box'; }
+  };
+
+  document.getElementById(uid + '-file').onchange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      loadPdf(file).catch((err) => { console.error(err); toast('PDF açılmadı. Başqa fayl yoxlayın.', true); });
+      return;
+    }
+    st.pdf = null;
+    const img = new Image();
+    img.onload = () => { st.img = img; st.sel = null; draw(); };
+    img.onerror = () => toast('Şəkil açılmadı. JPG və ya PNG seçin.', true);
+    img.src = URL.createObjectURL(file);
+  };
+
+  async function loadPdf(file) {
+    area().innerHTML = '<div class="row"><span class="spinner sm" aria-hidden="true"></span> PDF açılır…</div>';
+    const pdfjs = await import(PDFJS_URL);
+    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    st.pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    st.page = 1;
+    await showPage();
+  }
+
+  async function showPage() {
+    const page = await st.pdf.getPage(st.page);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(3, 1600 / base.width) });
+    const c = document.createElement('canvas');
+    c.width = Math.floor(viewport.width); c.height = Math.floor(viewport.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, canvas: c, viewport }).promise;
+    st.img = c; st.sel = null;
+    draw();
+  }
+
+  function draw() {
+    const scale = Math.min(1, 1400 / Math.max(st.img.width, st.img.height));
+    st.scale = scale;
+    const nav = st.pdf ? `<div class="row">
+        <button type="button" class="btn small" data-nav="-1" aria-label="Əvvəlki səhifə" ${st.page <= 1 ? 'disabled' : ''}>‹</button>
+        <label class="row small" style="gap:6px">Səhifə <input type="number" data-page min="1" max="${st.pdf.numPages}" value="${st.page}" style="width:84px;min-height:36px;padding:4px 8px"> / ${st.pdf.numPages}</label>
+        <button type="button" class="btn small" data-nav="1" aria-label="Növbəti səhifə" ${st.page >= st.pdf.numPages ? 'disabled' : ''}>›</button>
+      </div>` : '';
+    area().innerHTML = nav + `<div class="crop-wrap"><canvas width="${Math.round(st.img.width * scale)}" height="${Math.round(st.img.height * scale)}"></canvas><div class="crop-box" id="${uid}-box"></div></div>
+      <div class="row" data-actions><button type="button" class="btn" data-clear>Çərçivəni sil</button></div>`;
+    const cv = $('canvas', area());
+    cv.getContext('2d').drawImage(st.img, 0, 0, cv.width, cv.height);
+    bindCrop(cv);
+    $('[data-clear]', area()).onclick = () => api.clearSelection();
+    if (st.pdf) {
+      const goPage = (n) => {
+        const p = Math.max(1, Math.min(st.pdf.numPages, n | 0));
+        if (p === st.page) return;
+        st.page = p;
+        showPage().catch(fail);
+      };
+      $$('[data-nav]', area()).forEach((b) => b.onclick = () => goPage(st.page + +b.dataset.nav));
+      $('[data-page]', area()).onchange = (e) => goPage(+e.target.value);
+    }
+    if (actions) actions($('[data-actions]', area()), api);
+  }
+
+  function bindCrop(cv) {
+    const box = document.getElementById(uid + '-box');
+    let start = null;
+    const pos = (ev) => {
+      const r = cv.getBoundingClientRect();
+      const k = cv.width / r.width;
+      return { x: Math.max(0, Math.min(cv.width, (ev.clientX - r.left) * k)), y: Math.max(0, Math.min(cv.height, (ev.clientY - r.top) * k)), k };
+    };
+    const show = (a, b) => {
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+      st.sel = { x, y, w, h };
+      Object.assign(box.style, { left: x / a.k + 'px', top: y / a.k + 'px', width: w / a.k + 'px', height: h / a.k + 'px' });
+      box.className = 'crop-box on';
+    };
+    cv.addEventListener('pointerdown', (ev) => { ev.preventDefault(); cv.setPointerCapture(ev.pointerId); start = pos(ev); });
+    cv.addEventListener('pointermove', (ev) => { if (start) show(start, pos(ev)); });
+    const end = (ev) => {
+      if (!start) return;
+      const p = pos(ev);
+      if (Math.abs(p.x - start.x) < 12 || Math.abs(p.y - start.y) < 12) api.clearSelection();
+      start = null;
+    };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+  }
+
+  return api;
+}
+
 // ================= AI ilə sual =================
 
 async function aiView() {
@@ -408,7 +527,19 @@ async function aiView() {
     <div class="page-head"><div><h1>AI ilə sual yarat</h1><p class="muted">Suallar həlli ilə gəlir. Banka əlavə etməzdən əvvəl yoxlayın.</p></div></div>
     <form class="card stack" id="gen">
       <label class="field">Mövzu<span class="hint">nə qədər dəqiq yazsanız, o qədər yaxşı</span><input type="text" name="topic" maxlength="200" placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
-      <label class="field">Nümunə sual<span class="hint">istəyə bağlı · bir və ya bir neçə sual yapışdırın, AI onlara bənzər yeni suallar yaradacaq</span><textarea name="example" rows="4" maxlength="4000" placeholder="məs. Mağazada 3 dəftər və 2 qələm 11 manata satılır. Dəftər qələmdən 2 manat bahadır. Dəftər neçə manatdır?"></textarea></label>
+      <fieldset class="stack" style="border:1px solid var(--line);border-radius:12px;padding:14px;margin:0;gap:12px">
+        <legend style="font-weight:700;padding:0 6px">Nümunə suallar <span class="muted small" style="font-weight:400">· istəyə bağlı</span></legend>
+        <div id="exPicker" class="stack" style="gap:10px"></div>
+        <label class="field">Nümunə mətni<span class="hint">şəkildən oxunan suallar bura düşür; özünüz də yaza və ya düzəldə bilərsiniz</span><textarea name="example" id="exText" rows="5" maxlength="6000" placeholder="məs. Mağazada 3 dəftər və 2 qələm 11 manata satılır. Dəftər qələmdən 2 manat bahadır. Dəftər neçə manatdır?"></textarea></label>
+        <div class="stack" style="gap:8px">
+          <strong style="font-size:14px">Necə yaradılsın?</strong>
+          <div class="pills" role="radiogroup" aria-label="Yaratma rejimi">
+            <button type="button" class="pill-opt" role="radio" aria-checked="false" data-mode="izomorf"><strong>İzomorf</strong><span>Eyni quruluş, yalnız rəqəmlər dəyişir</span></button>
+            <button type="button" class="pill-opt" role="radio" aria-checked="true" data-mode="benzer"><strong>Bənzər</strong><span>Eyni bacarıq, yeni kontekst və rəqəmlər</span></button>
+            <button type="button" class="pill-opt" role="radio" aria-checked="false" data-mode="ferqli"><strong>Fərqli quruluş</strong><span>Eyni bilik, başqa formada sual</span></button>
+          </div>
+        </div>
+      </fieldset>
       <div class="form-grid">
         <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
         <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === 'orta' ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
@@ -437,9 +568,33 @@ async function aiView() {
     };
   };
 
+  let mode = 'benzer';
+  $$('[data-mode]').forEach((b) => b.onclick = () => {
+    mode = b.dataset.mode;
+    $$('[data-mode]').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
+  });
+
+  createPicker($('#exPicker'), {
+    hint: 'Dərslikdən, testdən və ya ekran şəklindən nümunə götürün: sualın (və ya bir neçə sualın) üstündən çərçivə çəkin, sonra “Nümunəyə əlavə et” basın. Bir neçə dəfə əlavə edə bilərsiniz.',
+    actions: (row, picker) => {
+      row.insertAdjacentHTML('afterbegin', '<button type="button" class="btn primary" data-add-example>Nümunəyə əlavə et</button>');
+      $('[data-add-example]', row).onclick = (e) => busy(e.currentTarget, async () => {
+        const data = await callAI('extract', { image: picker.dataUrl(), all: true });
+        const ta = $('#exText');
+        ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + data.text.trim();
+        const form = $('#gen');
+        if (!form.topic.value.trim() && data.topic) form.topic.value = data.topic;
+        if (data.grade) form.grade.value = String(data.grade);
+        picker.clearSelection();
+        toast('Nümunə əlavə olundu');
+      }).catch(fail);
+    }
+  });
+
   $('#gen').onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
+    f.mode = mode;
     if (!String(f.topic || '').trim() && !String(f.example || '').trim()) return toast('Mövzu yazın və ya nümunə sual əlavə edin', true);
     busy($('button[type=submit]', e.target), async () => {
       const data = await callAI('generate', f);
@@ -453,7 +608,7 @@ async function aiView() {
 // ================= Kitabdan sual =================
 
 async function bookView() {
-  const state = { img: null, scale: 1, sel: null, extracted: null, level: 'orta', result: null, pdf: null, page: 1 };
+  const state = { extracted: null, level: 'orta', result: null };
   const LEVELS = [
     ['yungul', 'Yüngül', 'Adlar və rəqəmlər dəyişir'],
     ['orta', 'Orta', 'Yeni kontekst, eyni quruluş'],
@@ -466,123 +621,23 @@ async function bookView() {
     <div class="split">
       <section class="card stack">
         <h2>1. Səhifə</h2>
-        <label class="btn primary" style="align-self:flex-start">Şəkil və ya PDF seç<input type="file" accept="image/*,application/pdf,.pdf" id="file" class="sr"></label>
-        <div id="cropArea" class="muted small">Şəkil seçildikdən sonra sualın üstündən barmağınızı çəkərək çərçivə çəkin. Çərçivə çəkməsəniz, bütün şəkil oxunur.</div>
+        <div id="bookPicker" class="stack"></div>
       </section>
       <section class="stack" id="right">
         <div class="card stack" id="step2"><h2>2. Tanınmış mətn</h2><div class="empty">Əvvəlcə şəkil seçin və “Sualı oxu” düyməsini basın.</div></div>
       </section>
     </div>`;
 
-  $('#file').onchange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-      loadPdf(file).catch((err) => { console.error(err); toast('PDF açılmadı. Başqa fayl yoxlayın.', true); });
-      return;
+  createPicker($('#bookPicker'), {
+    hint: 'Şəkil seçildikdən sonra sualın üstündən barmağınızı çəkərək çərçivə çəkin. Çərçivə çəkməsəniz, bütün səhifə oxunur.',
+    actions: (row, picker) => {
+      row.insertAdjacentHTML('afterbegin', '<button class="btn primary" id="read">Sualı oxu</button>');
+      $('#read').onclick = (e) => busy(e.currentTarget, () => readQuestion(picker)).catch(fail);
     }
-    state.pdf = null;
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => { state.img = img; state.sel = null; drawCanvas(); };
-    img.onerror = () => toast('Şəkil açılmadı. JPG və ya PNG seçin.', true);
-    img.src = url;
-  };
+  });
 
-  async function loadPdf(file) {
-    $('#cropArea').innerHTML = '<div class="row"><span class="spinner sm" aria-hidden="true"></span> PDF açılır…</div>';
-    const pdfjs = await import(PDFJS_URL);
-    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-    state.pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-    state.page = 1;
-    await showPdfPage();
-  }
-
-  async function showPdfPage() {
-    const page = await state.pdf.getPage(state.page);
-    const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: Math.min(3, 1600 / base.width) });
-    const c = document.createElement('canvas');
-    c.width = Math.floor(viewport.width); c.height = Math.floor(viewport.height);
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-    await page.render({ canvasContext: ctx, canvas: c, viewport }).promise;
-    state.img = c;
-    state.sel = null;
-    drawCanvas();
-  }
-
-  function drawCanvas() {
-    const max = 1400;
-    const scale = Math.min(1, max / Math.max(state.img.width, state.img.height));
-    state.scale = scale;
-    const nav = state.pdf ? `<div class="row">
-        <button class="btn small" id="prevPage" aria-label="Əvvəlki səhifə" ${state.page <= 1 ? 'disabled' : ''}>‹</button>
-        <label class="row small" style="gap:6px">Səhifə <input type="number" id="pageNo" min="1" max="${state.pdf.numPages}" value="${state.page}" style="width:84px;min-height:36px;padding:4px 8px"> / ${state.pdf.numPages}</label>
-        <button class="btn small" id="nextPage" aria-label="Növbəti səhifə" ${state.page >= state.pdf.numPages ? 'disabled' : ''}>›</button>
-      </div>` : '';
-    $('#cropArea').innerHTML = nav + `<div class="crop-wrap" id="wrap"><canvas id="cv" width="${Math.round(state.img.width * scale)}" height="${Math.round(state.img.height * scale)}"></canvas><div class="crop-box" id="box"></div></div>
-      <div class="row"><button class="btn primary" id="read">Sualı oxu</button><button class="btn" id="clearSel">Çərçivəni sil</button></div>`;
-    const cv = $('#cv');
-    cv.getContext('2d').drawImage(state.img, 0, 0, cv.width, cv.height);
-    bindCrop(cv);
-    $('#clearSel').onclick = () => { state.sel = null; $('#box').className = 'crop-box'; };
-    $('#read').onclick = (e) => busy(e.currentTarget, readQuestion).catch(fail);
-    if (state.pdf) {
-      const goPage = (n) => {
-        const p = Math.max(1, Math.min(state.pdf.numPages, n | 0));
-        if (p === state.page) return;
-        state.page = p;
-        showPdfPage().catch(fail);
-      };
-      $('#prevPage').onclick = () => goPage(state.page - 1);
-      $('#nextPage').onclick = () => goPage(state.page + 1);
-      $('#pageNo').onchange = (e) => goPage(+e.target.value);
-    }
-  }
-
-  function bindCrop(cv) {
-    const box = $('#box');
-    let start = null;
-    const pos = (ev) => {
-      const r = cv.getBoundingClientRect();
-      const k = cv.width / r.width;
-      return { x: Math.max(0, Math.min(cv.width, (ev.clientX - r.left) * k)), y: Math.max(0, Math.min(cv.height, (ev.clientY - r.top) * k)), k };
-    };
-    const show = (a, b) => {
-      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
-      state.sel = { x, y, w, h };
-      const k = a.k;
-      Object.assign(box.style, { left: x / k + 'px', top: y / k + 'px', width: w / k + 'px', height: h / k + 'px' });
-      box.className = 'crop-box on';
-    };
-    cv.addEventListener('pointerdown', (ev) => { ev.preventDefault(); cv.setPointerCapture(ev.pointerId); start = pos(ev); });
-    cv.addEventListener('pointermove', (ev) => { if (start) show(start, pos(ev)); });
-    const end = (ev) => {
-      if (!start) return;
-      const p = pos(ev);
-      if (Math.abs(p.x - start.x) < 12 || Math.abs(p.y - start.y) < 12) { state.sel = null; box.className = 'crop-box'; }
-      start = null;
-    };
-    cv.addEventListener('pointerup', end);
-    cv.addEventListener('pointercancel', end);
-  }
-
-  function croppedDataUrl() {
-    const s = state.sel;
-    const sx = s ? s.x / state.scale : 0, sy = s ? s.y / state.scale : 0;
-    const sw = s ? s.w / state.scale : state.img.width, sh = s ? s.h / state.scale : state.img.height;
-    const out = Math.min(1, 1600 / Math.max(sw, sh));
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(sw * out)); c.height = Math.max(1, Math.round(sh * out));
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-    ctx.drawImage(state.img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.88);
-  }
-
-  async function readQuestion() {
-    const data = await callAI('extract', { image: croppedDataUrl() });
+  async function readQuestion(picker) {
+    const data = await callAI('extract', { image: picker.dataUrl() });
     state.extracted = data;
     state.result = null;
     renderStep2();

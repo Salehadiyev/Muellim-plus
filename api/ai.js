@@ -28,6 +28,16 @@ const QUESTION_SHAPE = `{
   "difficulty": "asan" | "orta" | "çətin"
 }`;
 
+const GEN_MODES = {
+  izomorf: `İZOMORF rejim: hər yeni sual nümunə ilə eyni quruluşda olsun: eyni ifadə forması, eyni əməliyyatlar ardıcıllığı, eyni həll addımları.
+Yalnız rəqəmlər dəyişsin (mətnli məsələdə ad və əşyalar da dəyişə bilər, cümlələri öz sözlərinlə yaz).
+Rəqəmləri elə seç ki, ara nəticələr və cavab səliqəli olsun (məs. köklər tam ədəd çıxsın).`,
+  benzer: `BƏNZƏR rejim: eyni bacarığı və təxminən eyni çətinliyi yoxlasın, quruluş nümunəyə yaxın qalsın,
+amma hekayə/kontekst, adlar və bütün rəqəmlər yeni olsun. Nümunədəki cümlələri köçürmə.`,
+  ferqli: `FƏRQLİ QURULUŞ rejimi: eyni riyazi bilik və təxminən eyni çətinlik yoxlanılsın,
+amma sualın forması və qurulması fərqli olsun (məs. tərs məsələ, başqa ifadə növü, müqayisə, tənlik qurma, həyati kontekst). Nümunəni təkrarlama.`
+};
+
 const LEVELS = {
   yungul: 'Yüngül dəyişiklik: eyni hekayə tipi qalsın, amma bütün adları, əşyaları və BÜTÜN rəqəmləri dəyiş. Cümlələri öz sözlərinlə yenidən yaz.',
   orta: 'Orta dəyişiklik: tamamilə başqa həyati kontekst seç (məsələn, mağaza yerinə bazar, idman, səyahət), rəqəmləri dəyiş, amma həll üsulu və çətinlik eyni qalsın.',
@@ -69,12 +79,14 @@ async function generate(b) {
   const qtype = pick(b.qtype, ['mcq', 'open'], 'mcq');
   const topic = String(b.topic || '').slice(0, 200).trim();
   const extra = String(b.notes || '').slice(0, 500).trim();
-  const example = String(b.example || '').slice(0, 4000).trim();
+  const example = String(b.example || '').slice(0, 6000).trim();
+  const mode = GEN_MODES[b.mode] ? b.mode : 'benzer';
   if (!topic && !example) throw publicError('Mövzunu yazın və ya nümunə sual əlavə edin');
 
   const exampleBlock = example ? `
-Müəllim aşağıdakı nümunə sual(lar)ı verib. Yeni suallar eyni bacarığı, eyni çətinliyi, eyni üslubu və formatı izləsin,
-amma hekayə, adlar və bütün rəqəmlər yeni olsun. Nümunədəki cümlələri köçürmə. Mövzu verilməyibsə, mövzunu nümunədən özün müəyyən et.
+Müəllim aşağıdakı nümunə sual(lar)ı verib. Mövzu verilməyibsə, mövzunu nümunədən özün müəyyən et.
+${GEN_MODES[mode]}
+Bir neçə nümunə varsa, yeni sualları nümunələr arasında bərabər payla.
 Nümunə:
 """
 ${example}
@@ -99,7 +111,7 @@ async function extract(b) {
   const mediaType = m[1] === 'image/jpg' ? 'image/jpeg' : m[1];
 
   const prompt = `Şəkildə dərslikdən kəsilmiş riyaziyyat tapşırığı var.
-1) Tapşırığın mətnini olduğu kimi oxu (nömrəsini yazma). Riyazi ifadələri LaTeX ilə $...$ arasında yaz. Şəkildə bir neçə tapşırıq varsa, ən tam görünəni götür.
+1) Tapşırığın mətnini olduğu kimi oxu (nömrəsini yazma). Riyazi ifadələri LaTeX ilə $...$ arasında yaz. ${b.all ? 'Şəkildə bir neçə tapşırıq varsa, HAMISINI oxu: hər birini variantları ilə birlikdə ayrı abzasda, boş sətirlə ayıraraq yaz.' : 'Şəkildə bir neçə tapşırıq varsa, ən tam görünəni götür.'}
 2) Mövzunu, təxmini sinfi və çətinliyi müəyyən et.
 3) Tapşırığı özün həll et və cavabı yaz.
 Bu formada qaytar: {"text": "...", "topic": "...", "grade": 7, "difficulty": "asan|orta|çətin", "answer": "..."}
@@ -111,7 +123,7 @@ Bu formada qaytar: {"text": "...", "topic": "...", "grade": 7, "difficulty": "as
   ]);
   if (!data.text) throw publicError(data.error ? 'Sual tapılmadı: ' + data.error : 'Şəkildə sual tapılmadı');
   return {
-    text: String(data.text).slice(0, 3000),
+    text: String(data.text).slice(0, 6000),
     topic: String(data.topic || '').slice(0, 200),
     grade: clampInt(data.grade, 1, 12, 7),
     difficulty: pick(data.difficulty, ['asan', 'orta', 'çətin'], 'orta'),
@@ -172,7 +184,7 @@ async function askJSON(content) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 6000,
+      max_tokens: 12000,
       system: SYSTEM,
       messages: [{ role: 'user', content }]
     })
