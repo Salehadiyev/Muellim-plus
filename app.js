@@ -56,6 +56,8 @@ async function copyText(text) {
   catch (_) { window.prompt('Linki kopyalayın:', text); }
 }
 
+const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+const PDFJS_WORKER_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
 const DIFF = ['asan', 'orta', 'çətin'];
 const GRADE_SUFFIX = { 1: 'ci', 2: 'ci', 3: 'cü', 4: 'cü', 5: 'ci', 6: 'cı', 7: 'ci', 8: 'ci', 9: 'cu', 10: 'cu', 11: 'ci', 12: 'ci' };
 const gradeLabel = (n) => `${n}-${GRADE_SUFFIX[n] || 'ci'} sinif`;
@@ -451,7 +453,7 @@ async function aiView() {
 // ================= Kitabdan sual =================
 
 async function bookView() {
-  const state = { img: null, scale: 1, sel: null, extracted: null, level: 'orta', result: null };
+  const state = { img: null, scale: 1, sel: null, extracted: null, level: 'orta', result: null, pdf: null, page: 1 };
   const LEVELS = [
     ['yungul', 'Yüngül', 'Adlar və rəqəmlər dəyişir'],
     ['orta', 'Orta', 'Yeni kontekst, eyni quruluş'],
@@ -459,12 +461,12 @@ async function bookView() {
   ];
 
   view().innerHTML = `
-    <div class="page-head"><div><h1>Kitabdan sual kəs</h1><p class="muted">Səhifənin şəklini çəkin, sualı barmaqla çərçivəyə alın, AI onu orijinal suala çevirsin.</p></div></div>
+    <div class="page-head"><div><h1>Kitabdan sual kəs</h1><p class="muted">Səhifənin şəklini çəkin və ya dərsliyin PDF-ini seçin, sualı barmaqla çərçivəyə alın, AI onu orijinal suala çevirsin.</p></div></div>
     <p class="notice info">Kitabın şəkli saxlanılmır. Banka yalnız AI-ın yaratdığı yeni sual yazılır.</p>
     <div class="split">
       <section class="card stack">
         <h2>1. Səhifə</h2>
-        <label class="btn primary" style="align-self:flex-start">Şəkil çək və ya seç<input type="file" accept="image/*" id="file" class="sr"></label>
+        <label class="btn primary" style="align-self:flex-start">Şəkil və ya PDF seç<input type="file" accept="image/*,application/pdf,.pdf" id="file" class="sr"></label>
         <div id="cropArea" class="muted small">Şəkil seçildikdən sonra sualın üstündən barmağınızı çəkərək çərçivə çəkin. Çərçivə çəkməsəniz, bütün şəkil oxunur.</div>
       </section>
       <section class="stack" id="right">
@@ -475,6 +477,11 @@ async function bookView() {
   $('#file').onchange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      loadPdf(file).catch((err) => { console.error(err); toast('PDF açılmadı. Başqa fayl yoxlayın.', true); });
+      return;
+    }
+    state.pdf = null;
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => { state.img = img; state.sel = null; drawCanvas(); };
@@ -482,17 +489,56 @@ async function bookView() {
     img.src = url;
   };
 
+  async function loadPdf(file) {
+    $('#cropArea').innerHTML = '<div class="row"><span class="spinner sm" aria-hidden="true"></span> PDF açılır…</div>';
+    const pdfjs = await import(PDFJS_URL);
+    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    state.pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    state.page = 1;
+    await showPdfPage();
+  }
+
+  async function showPdfPage() {
+    const page = await state.pdf.getPage(state.page);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(3, 1600 / base.width) });
+    const c = document.createElement('canvas');
+    c.width = Math.floor(viewport.width); c.height = Math.floor(viewport.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, canvas: c, viewport }).promise;
+    state.img = c;
+    state.sel = null;
+    drawCanvas();
+  }
+
   function drawCanvas() {
     const max = 1400;
     const scale = Math.min(1, max / Math.max(state.img.width, state.img.height));
     state.scale = scale;
-    $('#cropArea').innerHTML = `<div class="crop-wrap" id="wrap"><canvas id="cv" width="${Math.round(state.img.width * scale)}" height="${Math.round(state.img.height * scale)}"></canvas><div class="crop-box" id="box"></div></div>
+    const nav = state.pdf ? `<div class="row">
+        <button class="btn small" id="prevPage" aria-label="Əvvəlki səhifə" ${state.page <= 1 ? 'disabled' : ''}>‹</button>
+        <label class="row small" style="gap:6px">Səhifə <input type="number" id="pageNo" min="1" max="${state.pdf.numPages}" value="${state.page}" style="width:84px;min-height:36px;padding:4px 8px"> / ${state.pdf.numPages}</label>
+        <button class="btn small" id="nextPage" aria-label="Növbəti səhifə" ${state.page >= state.pdf.numPages ? 'disabled' : ''}>›</button>
+      </div>` : '';
+    $('#cropArea').innerHTML = nav + `<div class="crop-wrap" id="wrap"><canvas id="cv" width="${Math.round(state.img.width * scale)}" height="${Math.round(state.img.height * scale)}"></canvas><div class="crop-box" id="box"></div></div>
       <div class="row"><button class="btn primary" id="read">Sualı oxu</button><button class="btn" id="clearSel">Çərçivəni sil</button></div>`;
     const cv = $('#cv');
     cv.getContext('2d').drawImage(state.img, 0, 0, cv.width, cv.height);
     bindCrop(cv);
     $('#clearSel').onclick = () => { state.sel = null; $('#box').className = 'crop-box'; };
     $('#read').onclick = (e) => busy(e.currentTarget, readQuestion).catch(fail);
+    if (state.pdf) {
+      const goPage = (n) => {
+        const p = Math.max(1, Math.min(state.pdf.numPages, n | 0));
+        if (p === state.page) return;
+        state.page = p;
+        showPdfPage().catch(fail);
+      };
+      $('#prevPage').onclick = () => goPage(state.page - 1);
+      $('#nextPage').onclick = () => goPage(state.page + 1);
+      $('#pageNo').onchange = (e) => goPage(+e.target.value);
+    }
   }
 
   function bindCrop(cv) {
@@ -558,12 +604,45 @@ async function bookView() {
       </div>
       <label class="field">Sual növü<select id="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
       <button class="btn primary" id="convert">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Orijinala çevir</button>
-      <div id="result"></div>`;
+      <div id="result"></div>
+      <div class="stack" style="border-top:1px solid var(--line);padding-top:14px;gap:10px">
+        <h2>Və ya: bu nümunəyə bənzər suallar</h2>
+        <p class="muted small">Eyni bacarığı yoxlayan, amma tamamilə yeni bir neçə sual yaradılır.</p>
+        <div class="row">
+          <label class="row small" style="gap:6px">Say <select id="simCount" style="width:auto">${[3, 5, 8, 10].map((n) => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <button class="btn" id="similar">Bənzər suallar yarat</button>
+        </div>
+        <div id="simResults"></div>
+      </div>`;
     $$('[data-level]').forEach((b) => b.onclick = () => {
       state.level = b.dataset.level;
       $$('[data-level]').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
     });
     $('#convert').onclick = (e) => busy(e.currentTarget, convert).catch(fail);
+    $('#similar').onclick = (e) => busy(e.currentTarget, similar).catch(fail);
+  }
+
+  async function similar() {
+    const x = state.extracted;
+    const data = await callAI('generate', {
+      example: $('#ocr').value, topic: x.topic, grade: x.grade, difficulty: x.difficulty,
+      qtype: $('#qtype').value, count: $('#simCount').value
+    });
+    const list = data.questions;
+    $('#simResults').innerHTML = `<div class="card stack">
+      <div class="row between"><h3>${list.length} bənzər sual</h3><button class="btn dark" id="saveSim">Seçilənləri banka əlavə et</button></div>
+      <div>${list.map((q, i) => questionHtml({ ...q, id: i, source: 'book' }, { selectable: true, checked: true })).join('')}</div>
+    </div>`;
+    $('#saveSim').onclick = (e) => {
+      const btn = e.currentTarget;
+      const chosen = $$('#simResults .check').filter((c) => c.checked).map((c) => list[+c.dataset.id]);
+      if (!chosen.length) return toast('Heç bir sual seçilməyib', true);
+      busy(btn, () => saveQuestions(chosen, 'book')).then(() => {
+        toast(chosen.length + ' sual banka əlavə olundu');
+        btn.textContent = 'Əlavə olundu ✓';
+        btn.disabled = true;
+      }).catch(fail);
+    };
   }
 
   async function convert() {
