@@ -197,3 +197,10 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 #toast.error { background: var(--red); }
 .notice { background: var(--amber-soft); color: #5C3300; border-radius: 10px; padding: 12px 14px; font-size: 14px; }
 .notice.info { background: var(--accent-soft); color: var(--accent-dark); }
+
+/* ---------- Formullar ---------- */
+.katex { font-size: 1.12em; }
+.katex-display { margin: 10px 0; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.q-text .katex-display { margin: 14px 0; }
+.opts li .katex, .opt-choice .katex { font-size: 1.15em; }
+.opts li { display: flex; align-items: center; gap: 4px; min-height: 44px; }

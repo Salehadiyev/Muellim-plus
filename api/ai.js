@@ -10,9 +10,11 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 const SYSTEM = `Sən Azərbaycanda orta məktəb riyaziyyat müəllimlərinə kömək edən təcrübəli metodistsən.
 Qaydalar:
 - Bütün mətni Azərbaycan dilində (latın əlifbası) yaz. Ad, şəhər, əşya və pul vahidi (manat) yerli olsun.
-- Riyazi işarələri Unicode ilə yaz: ×, ÷, −, ², √, ≤, ≥, π. LaTeX işlətmə.
+- Bütün riyazi ifadələri LaTeX ilə dollar işarələri arasında yaz: $\\sqrt{49}$, $\\frac{2}{3}$, $x^2$, $\\sqrt[3]{8}$, $2 \\cdot 3$. Sualdakı əsas böyük ifadəni ayrıca sətirdə $$...$$ arasında ver.
+- Variantlar da LaTeX ilə olsun (məs. "$\\frac{1}{3}$", "$5$"). Sözlə olan variantı adi mətnlə yaz.
+- JSON daxilində hər tərs xətti ikiqat yaz: "\\\\frac", "\\\\sqrt".
 - Hər sualı əvvəlcə özün addım-addım həll et, cavabı yoxla, sonra sualı yaz. Rəqəmləri elə seç ki, cavab səliqəli alınsın.
-- Çoxseçimli sualda düz 4 variant olsun, yalnız biri doğru olsun; yanlış variantlar şagirdlərin tipik səhvlərindən gəlsin.
+- Çoxseçimli sualda DİM formatında düz 5 variant (A–E) olsun, yalnız biri doğru olsun; yanlış variantlar şagirdlərin tipik səhvlərindən gəlsin.
 - Yalnız tələb olunan JSON-u qaytar, başqa heç nə yazma.`;
 
 const QUESTION_SHAPE = `{
@@ -20,8 +22,8 @@ const QUESTION_SHAPE = `{
   "solution": "qısa, addım-addım həll",
   "answer": "düzgün cavab (qısa)",
   "qtype": "mcq" və ya "open",
-  "options": ["A", "B", "C", "D"],     // yalnız mcq üçün, açıq sualda []
-  "correct_index": 0,                  // yalnız mcq üçün, doğru variantın indeksi (0-3)
+  "options": ["A", "B", "C", "D", "E"], // yalnız mcq üçün, açıq sualda []
+  "correct_index": 0,                  // yalnız mcq üçün, doğru variantın indeksi (0-4)
   "topic": "mövzu",
   "difficulty": "asan" | "orta" | "çətin"
 }`;
@@ -79,7 +81,7 @@ ${example}
 """` : '';
 
   const prompt = `${grade}. sinif üçün ${topic ? `"${topic}" mövzusunda ` : ''}${count} ədəd riyaziyyat sualı yarat.
-Çətinlik: ${difficulty}. Sual növü: ${qtype === 'mcq' ? 'çoxseçimli (4 variant)' : 'açıq sual'}.
+Çətinlik: ${difficulty}. Sual növü: ${qtype === 'mcq' ? 'çoxseçimli (5 variant, A–E)' : 'açıq sual'}.
 ${extra ? 'Müəllimin əlavə istəyi: ' + extra : ''}${exampleBlock}
 Suallar bir-birini təkrarlamasın.
 Cavabı bu formada qaytar: {"questions": [ ${QUESTION_SHAPE} ]}`;
@@ -97,7 +99,7 @@ async function extract(b) {
   const mediaType = m[1] === 'image/jpg' ? 'image/jpeg' : m[1];
 
   const prompt = `Şəkildə dərslikdən kəsilmiş riyaziyyat tapşırığı var.
-1) Tapşırığın mətnini olduğu kimi oxu (nömrəsini yazma). Şəkildə bir neçə tapşırıq varsa, ən tam görünəni götür.
+1) Tapşırığın mətnini olduğu kimi oxu (nömrəsini yazma). Riyazi ifadələri LaTeX ilə $...$ arasında yaz. Şəkildə bir neçə tapşırıq varsa, ən tam görünəni götür.
 2) Mövzunu, təxmini sinfi və çətinliyi müəyyən et.
 3) Tapşırığı özün həll et və cavabı yaz.
 Bu formada qaytar: {"text": "...", "topic": "...", "grade": 7, "difficulty": "asan|orta|çətin", "answer": "..."}
@@ -129,7 +131,7 @@ async function transform(b) {
   const prompt = `Aşağıdakı dərslik tapşırığına əsaslanaraq YENİ, ORİJİNAL sual yarat.
 ${LEVELS[level]}
 Vacib: orijinal mətndən heç bir cümləni və ya ifadə ardıcıllığını köçürmə. Yeni sual eyni riyazi bacarığı və təxminən eyni çətinliyi yoxlamalıdır. Cavabı yenidən hesabla və yoxla.
-Sual növü: ${qtype === 'mcq' ? 'çoxseçimli (4 variant)' : 'açıq sual'}. Sinif: ${grade}.
+Sual növü: ${qtype === 'mcq' ? 'çoxseçimli (5 variant, A–E)' : 'açıq sual'}. Sinif: ${grade}.
 
 Orijinal tapşırıq:
 """
@@ -187,14 +189,32 @@ async function askJSON(content) {
 }
 
 function parseJSON(text) {
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(cleaned); } catch (_) { /* aşağıda yenidən cəhd */ }
+  let cleaned = text.replace(/```json|```/g, '').trim();
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(cleaned.slice(start, end + 1)); } catch (_) { /* düşür */ }
+  if (start >= 0 && end > start) cleaned = cleaned.slice(start, end + 1);
+  // LaTeX-in tək tərs xətlərini (\sqrt, \underline) etibarlı JSON-a çevir
+  const repaired = cleaned.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m, g) => (g ? m : '\\\\'));
+  for (const candidate of [cleaned, repaired]) {
+    try { return fixLatex(JSON.parse(candidate)); } catch (_) { /* növbəti */ }
   }
   throw publicError('AI cavabı oxunmadı, yenidən yoxlayın', 502);
+}
+
+// JSON "\f", "\t", "\b", "\r", "\n" kimi oxuduğu LaTeX əmrlərini bərpa et (\frac, \times, \beta, \right, \neq)
+function fixLatex(v) {
+  if (typeof v === 'string') {
+    return v
+      .replace(/\f/g, '\\f').replace(/\t/g, '\\t').replace(/\x08/g, '\\b').replace(/\r/g, '\\r')
+      .replace(/\n(?=(eq|leq|geq|eg|ot|abla|e\b|i\b|u\b|mid|parallel|subseteq|ewline))/g, '\\n');
+  }
+  if (Array.isArray(v)) return v.map(fixLatex);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k of Object.keys(v)) o[k] = fixLatex(v[k]);
+    return o;
+  }
+  return v;
 }
 
 function normalizeQuestion(q, defaults) {

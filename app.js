@@ -354,7 +354,7 @@ async function bankView() {
 
 function manualForm(form) {
   form.innerHTML = `<h2>Əl ilə sual</h2>
-    <label class="field">Sual<textarea name="body" rows="3" required></textarea></label>
+    <label class="field">Sual<span class="hint no-math">Formul üçün dollar işarəsi: $\\sqrt{49}$, $\\frac{2}{3}$, $x^2$</span><textarea name="body" rows="3" required></textarea></label>
     <div class="form-grid">
       <label class="field">Növ<select name="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
       <label class="field">Mövzu<input type="text" name="topic"></label>
@@ -363,7 +363,7 @@ function manualForm(form) {
     </div>
     <fieldset id="mcqFields" style="border:0;padding:0;margin:0" class="stack">
       <legend class="small muted" style="margin-bottom:8px">Variantlar · doğru olanı işarələyin</legend>
-      ${[0, 1, 2, 3].map((i) => `<div class="row" style="flex-wrap:nowrap"><input type="radio" name="correct" value="${i}" ${i === 0 ? 'checked' : ''} aria-label="${'ABCD'[i]} doğrudur" style="width:22px;height:22px;accent-color:var(--accent)"><input type="text" name="opt${i}" placeholder="${'ABCD'[i]} variantı" aria-label="${'ABCD'[i]} variantı"></div>`).join('')}
+      ${[0, 1, 2, 3, 4].map((i) => `<div class="row" style="flex-wrap:nowrap"><input type="radio" name="correct" value="${i}" ${i === 0 ? 'checked' : ''} aria-label="${'ABCDE'[i]} doğrudur" style="width:22px;height:22px;accent-color:var(--accent)"><input type="text" name="opt${i}" placeholder="${'ABCDE'[i]} variantı" aria-label="${'ABCDE'[i]} variantı"></div>`).join('')}
     </fieldset>
     <label class="field" id="openAnswer" hidden>Cavab<input type="text" name="answer"></label>
     <label class="field">Həll<span class="hint">istəyə bağlı</span><textarea name="solution" rows="2"></textarea></label>
@@ -374,7 +374,7 @@ function manualForm(form) {
     e.preventDefault();
     const f = new FormData(form);
     const qtype = f.get('qtype');
-    const options = qtype === 'mcq' ? [0, 1, 2, 3].map((i) => f.get('opt' + i).trim()) : [];
+    const options = qtype === 'mcq' ? [0, 1, 2, 3, 4].map((i) => f.get('opt' + i).trim()) : [];
     const answer = qtype === 'mcq' ? options[+f.get('correct')] : f.get('answer').trim();
     if (qtype === 'mcq' && options.filter(Boolean).length < 2) return toast('Ən azı 2 variant yazın', true);
     if (!answer) return toast('Doğru cavabı göstərin', true);
@@ -844,4 +844,35 @@ function studentDone(test, r) {
   </div></div>`;
 }
 
+// ================= Riyazi formullar (KaTeX) =================
+// Ekrandakı $...$ və $$...$$ ifadələrini kitabdakı kimi formula çevirir.
+function startMath() {
+  let scheduled = false;
+  const render = () => {
+    scheduled = false;
+    if (!window.renderMathInElement) { setTimeout(render, 200); return; }
+    observer.disconnect();
+    try {
+      window.renderMathInElement($app, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '\\[', right: '\\]', display: true }
+        ],
+        throwOnError: false,
+        ignoredClasses: ['no-math'],
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'input', 'select']
+      });
+    } catch (err) { console.error(err); }
+    observer.observe($app, { childList: true, subtree: true, characterData: true });
+  };
+  const observer = new MutationObserver(() => {
+    if (!scheduled) { scheduled = true; requestAnimationFrame(render); }
+  });
+  observer.observe($app, { childList: true, subtree: true, characterData: true });
+  render();
+}
+
+startMath();
 boot();
