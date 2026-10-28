@@ -283,3 +283,26 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 .pair-src img { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .pair-new .q { padding-top: 0; }
 @media (max-width: 700px) { .pair, .pair-head { grid-template-columns: 1fr; } .pair-head span:last-child { display: none; } }
+
+/* ---------- Seçici paneli və kiçik kartlar ---------- */
+.picker-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; background: #fff; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.crop-wrap canvas { max-height: 78vh; width: auto; }
+.crop-box.added { border-color: var(--green); background: rgba(29, 122, 78, 0.18); border-style: solid; }
+.mini-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.mini { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: #fff; }
+.mini-head { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.mini-q { display: flex; gap: 8px; align-items: flex-start; }
+.mini-q .check { width: 22px; height: 22px; margin-top: 4px; flex: none; accent-color: var(--accent); }
+.mini-open { flex: 1; min-width: 0; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: #F8FAFC; padding: 8px 10px; font: inherit; color: var(--ink); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+.mini-open:hover { border-color: var(--accent); }
+.mini-text { font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.mini-text .katex-display { margin: 0; display: inline; }
+.mini-text .katex-display > .katex { display: inline; }
+.mini-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.mini-meta .tag { font-size: 11px; padding: 2px 8px; }
+.q-dialog { border: 0; border-radius: 16px; padding: 0; width: min(960px, calc(100vw - 24px)); max-height: calc(100vh - 40px); box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.q-dialog::backdrop { background: rgba(20, 32, 48, 0.5); }
+.q-dialog-in { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.dlg-pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 18px; align-items: start; }
+.dlg-src img { width: 100%; border: 1px solid var(--line); border-radius: 8px; margin-top: 4px; }
+@media (max-width: 700px) { .dlg-pair { grid-template-columns: 1fr; } }

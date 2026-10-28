@@ -486,7 +486,7 @@ async function saveQuestions(list, source) {
 
 // ================= Şəkil / PDF seçici (kəsmə ilə) =================
 // root içinə "Şəkil və ya PDF seç" düyməsi, PDF səhifə keçidi və barmaqla çərçivə çəkmə qurur.
-function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', actions } = {}) {
+function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', actions, onCrop } = {}) {
   const st = { img: null, scale: 1, sel: null, pdf: null, page: 1 };
   const uid = 'p' + Math.random().toString(36).slice(2, 8);
   root.innerHTML = `<label class="btn primary" style="align-self:flex-start">${label}<input type="file" accept="image/*,application/pdf,.pdf" class="sr" id="${uid}-file"></label>
@@ -569,17 +569,18 @@ function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', acti
   function draw() {
     const scale = Math.min(1, 1400 / Math.max(st.img.width, st.img.height));
     st.scale = scale;
-    const nav = st.pdf ? `<div class="row">
+    const nav = st.pdf ? `<div class="row" style="flex-wrap:nowrap">
         <button type="button" class="btn small" data-nav="-1" aria-label="Əvvəlki səhifə" ${st.page <= 1 ? 'disabled' : ''}>‹</button>
         <label class="row small" style="gap:6px">Səhifə <input type="number" data-page min="1" max="${st.pdf.numPages}" value="${st.page}" style="width:84px;min-height:36px;padding:4px 8px"> / ${st.pdf.numPages}</label>
         <button type="button" class="btn small" data-nav="1" aria-label="Növbəti səhifə" ${st.page >= st.pdf.numPages ? 'disabled' : ''}>›</button>
       </div>` : '';
-    area().innerHTML = nav + `<div class="crop-wrap"><canvas width="${Math.round(st.img.width * scale)}" height="${Math.round(st.img.height * scale)}"></canvas><div class="crop-box" id="${uid}-box"></div></div>
-      <div class="row" data-actions><button type="button" class="btn" data-clear>Çərçivəni sil</button></div>`;
+    area().innerHTML = `<div class="picker-bar">${nav}<div class="row" data-actions>${onCrop ? '' : '<button type="button" class="btn" data-clear>Çərçivəni sil</button>'}</div></div>
+      <div class="crop-wrap"><canvas width="${Math.round(st.img.width * scale)}" height="${Math.round(st.img.height * scale)}"></canvas><div class="crop-box" id="${uid}-box"></div></div>`;
     const cv = $('canvas', area());
     cv.getContext('2d').drawImage(st.img, 0, 0, cv.width, cv.height);
     bindCrop(cv);
-    $('[data-clear]', area()).onclick = () => api.clearSelection();
+    const clr = $('[data-clear]', area());
+    if (clr) clr.onclick = () => api.clearSelection();
     if (st.pdf) {
       const goPage = (n) => {
         const p = Math.max(1, Math.min(st.pdf.numPages, n | 0));
@@ -613,6 +614,7 @@ function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', acti
       if (!start) return;
       const p = pos(ev);
       if (Math.abs(p.x - start.x) < 12 || Math.abs(p.y - start.y) < 12) api.clearSelection();
+      else if (onCrop) onCrop(api);
       start = null;
     };
     cv.addEventListener('pointerup', end);
@@ -681,7 +683,7 @@ function examplesTab() {
   $('#tabExamples').innerHTML = `
     <section class="card stack">
       <div class="step-h"><span class="step-n">1</span><div><h2>Nümunə sualları seçin</h2>
-        <p class="muted small">PDF və ya şəkil açın. Bir sualın üstündən barmaqla çərçivə çəkib <b>Seçiləni əlavə et</b>, ya da <b>Səhifədəki bütün suallar</b> basın. İstədiyiniz qədər sual əlavə edə bilərsiniz, səhifələri dəyişərək davam edin.</p></div></div>
+        <p class="muted small">PDF və ya şəkil açın. Sualın üstündən barmaqla çərçivə çəkin, <b>barmağı qaldıran kimi əlavə olunur</b>. Ya da <b>Səhifədəki bütün suallar</b> basın. İstədiyiniz qədər seçin, səhifələri ‹ › ilə dəyişin.</p></div></div>
       <div id="exPicker" class="stack" style="gap:10px"></div>
     </section>
     <section class="card stack" id="samplesCard"></section>
@@ -711,14 +713,17 @@ function examplesTab() {
 
   createPicker($('#exPicker'), {
     hint: 'PDF açıldıqdan sonra səhifələr arasında ‹ › ilə keçin.',
+    onCrop: (picker) => {
+      addSample({ image: picker.dataUrl(1100), exact: true });
+      // seçilən yer qısa müddət yaşıl yansın, sonra silinsin
+      const boxEl = $('#exPicker .crop-box.on');
+      if (boxEl) boxEl.classList.add('added');
+      setTimeout(() => picker.clearSelection(), 450);
+      toast('Nümunə ' + tyState.samples.length + ' əlavə olundu');
+    },
     actions: (row, picker) => {
-      row.insertAdjacentHTML('afterbegin', `<button type="button" class="btn primary" data-add-one>Seçiləni əlavə et</button>
-        <button type="button" class="btn" data-add-page>Səhifədəki bütün suallar</button>`);
-      $('[data-add-one]', row).onclick = () => {
-        if (!picker.hasSelection()) return toast('Əvvəlcə sualın üstündən barmaqla çərçivə çəkin', true);
-        addSample({ image: picker.dataUrl(1100), exact: true });
-        picker.clearSelection();
-      };
+      row.insertAdjacentHTML('afterbegin', `<button type="button" class="btn" data-add-page>Səhifədəki bütün suallar</button>
+        <span class="tag" data-count>${tyState.samples.length} seçilib</span>`);
       $('[data-add-page]', row).onclick = (e) => busy(e.currentTarget, async () => {
         picker.clearSelection();
         const data = await callAI('extract', { image: picker.dataUrl(), split: true });
@@ -751,6 +756,8 @@ function addSample({ image, text = '', topic = '', section = 'matematik', exact 
 }
 
 function renderSamples() {
+  const cnt = $('#exPicker [data-count]');
+  if (cnt) cnt.textContent = tyState.samples.length + ' seçilib';
   const card = $('#samplesCard');
   if (!card) return;
   const list = tyState.samples;
@@ -857,33 +864,75 @@ function renderGroups() {
     <div class="row between"><h2>Nəticə: ${all.length} yeni sual</h2>
       <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
     ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü (⚠). Onları yoxlayın və ya seçimdən çıxarın.</p>` : ''}
-    <div class="pair-head"><span>Nümunə</span><span>Yeni sual</span></div>
-    ${groups.map((g, gi) => `<div class="pair">
-      <div class="pair-src">${g.sample.image ? `<img src="${g.sample.image}" alt="Nümunə ${gi + 1}">` : `<div class="small pre">${esc(g.sample.text.slice(0, 400))}</div>`}<span class="muted small">Nümunə ${gi + 1}</span></div>
-      <div class="pair-new">${g.state === 'waiting' ? '<div class="muted small">növbədə…</div>'
-        : g.state === 'working' ? '<div class="row muted small"><span class="spinner sm" aria-hidden="true"></span> yaradılır…</div>'
-        : g.state === 'error' ? `<div class="small" style="color:var(--red)">Alınmadı${g.error ? ': ' + esc(g.error) : ''}</div>`
-        : g.questions.map((q, qi) => { const key = gi + '-' + qi; q._key = key; return questionHtml({ ...q, id: key, source: 'ai' }, { selectable: true, checked: !unchecked.has(key) }); }).join('')}</div>
-    </div>`).join('')}
+    <p class="muted small">Karta toxunun: nümunə və yeni sual böyük pəncərədə açılacaq.</p>
+    <div class="mini-grid">${groups.map((g, gi) => `<div class="mini">
+      <div class="mini-head"><b>${gi + 1}</b>
+        ${g.state === 'waiting' ? '<span class="muted small">növbədə…</span>'
+          : g.state === 'working' ? '<span class="row muted small" style="gap:6px"><span class="spinner sm" aria-hidden="true"></span> yaradılır…</span>'
+          : g.state === 'error' ? `<span class="small" style="color:var(--red)">Alınmadı${g.error ? ': ' + esc(g.error) : ''}</span>` : ''}</div>
+      ${g.questions.map((q, qi) => { const key = gi + '-' + qi; q._key = key; return miniQ(q, key, !unchecked.has(key), g.sample); }).join('')}
+    </div>`).join('')}</div>
   </div>`;
+  bindMini(box, (key) => { const g = groups[+key.split('-')[0]]; return { q: g.questions[+key.split('-')[1]], sample: g.sample }; });
   const chosen = () => {
     const keys = new Set($$('#exResults .check').filter((c) => c.checked).map((c) => c.dataset.id));
     return all.filter((q) => keys.has(q._key));
   };
-  $('#saveSel').onclick = (e) => {
+  $('#saveSel', box).onclick = (e) => {
     const list = chosen();
     if (!list.length) return toast('Heç bir sual seçilməyib', true);
     busy(e.currentTarget, async () => {
       await saveQuestions(list, 'ai');
-      toast(list.length + ' sual banka əlavə olundu');
+      // banka düşənlər siyahıdan çıxır (təkrar əlavə olunmasın)
+      const saved = new Set(list);
+      tyState.groups.forEach((g) => { g.questions = g.questions.filter((q) => !saved.has(q)); });
+      tyState.groups = tyState.groups.filter((g) => g.questions.length || g.state !== 'done');
+      renderGroups();
+      toast(list.length + ' sual banka əlavə olundu' + (tyState.groups.length ? '' : ' · siyahı boşaldı'));
     }).catch(fail);
   };
-  $('#pdfSel').onclick = () => {
+  $('#pdfSel', box).onclick = () => {
     const list = chosen();
     if (!list.length) return toast('Heç bir sual seçilməyib', true);
     pendingPrint = { questions: list, title: '', back: '#/ai' };
     go('#/print');
   };
+}
+
+// Kiçik kart: qısa önizləmə + seçim qutusu; toxunanda pəncərə açılır
+function miniQ(q, key, checked) {
+  const letter = 'ABCDE'[(q.options || []).indexOf(q.answer)] || '—';
+  const ver = q.verified === true ? '<span class="tag ai">✓</span>' : q.verified === false ? '<span class="tag red">⚠</span>' : q.verifying ? '<span class="tag">…</span>' : '';
+  return `<div class="mini-q">
+    <input type="checkbox" class="check" data-id="${esc(key)}" ${checked ? 'checked' : ''} aria-label="Sualı seç">
+    <button type="button" class="mini-open" data-open="${esc(key)}">
+      <span class="mini-text">${esc(q.body)}</span>
+      <span class="mini-meta">${q.figure || hasOptionFigures(q) ? '<span class="tag">şəkil</span>' : ''}<span class="tag">${esc(q.difficulty || '')}</span><span class="tag ai">Cavab: ${letter}</span>${ver}</span>
+    </button>
+  </div>`;
+}
+
+function bindMini(root, getItem) {
+  $$('[data-open]', root).forEach((b) => b.onclick = () => {
+    const { q, sample } = getItem(b.dataset.open);
+    if (!q) return;
+    let dlg = document.getElementById('qDialog');
+    if (!dlg) {
+      dlg = document.createElement('dialog');
+      dlg.id = 'qDialog';
+      dlg.className = 'q-dialog';
+      $app.appendChild(dlg);
+      dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+    }
+    dlg.innerHTML = `<div class="q-dialog-in">
+      <div class="row between"><h2>Sual</h2><button type="button" class="btn small" data-close aria-label="Bağla">✕ Bağla</button></div>
+      <div class="${sample ? 'dlg-pair' : ''}">
+        ${sample ? `<div class="dlg-src"><div class="muted small">Nümunə</div>${sample.image ? `<img src="${sample.image}" alt="Nümunə">` : `<div class="small pre">${esc(sample.text)}</div>`}</div>` : ''}
+        <div>${sample ? '<div class="muted small">Yeni sual</div>' : ''}${questionHtml({ ...q, source: 'ai' })}</div>
+      </div></div>`;
+    $('[data-close]', dlg).onclick = () => dlg.close();
+    dlg.showModal();
+  });
 }
 
 // ---------------- 2. Mövzudan yarat ----------------
@@ -958,15 +1007,24 @@ function simpleResults(results, doneLabel) {
     <div class="row between"><h2>${doneLabel || results.length + ' sual hazırdır'}</h2>
       <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
     ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü (⚠).</p>` : ''}
-    <div>${results.map((q, i) => questionHtml({ ...q, id: i, source: 'ai' }, { selectable: true, checked: !unchecked.has(String(i)) })).join('')}</div>
+    <div class="mini-grid">${results.map((q, i) => `<div class="mini">${miniQ(q, String(i), !unchecked.has(String(i)))}</div>`).join('')}</div>
   </div>`;
+  bindMini(box, (key) => ({ q: results[+key] }));
   const chosen = () => $$('#results .check').filter((c) => c.checked).map((c) => results[+c.dataset.id]);
-  $('#saveSel').onclick = (e) => {
+  $('#saveSel', box).onclick = (e) => {
     const list = chosen();
     if (!list.length) return toast('Heç bir sual seçilməyib', true);
-    busy(e.currentTarget, async () => { await saveQuestions(list, 'ai'); toast(list.length + ' sual banka əlavə olundu'); }).catch(fail);
+    busy(e.currentTarget, async () => {
+      await saveQuestions(list, 'ai');
+      const saved = new Set(list);
+      const rest = results.filter((q) => !saved.has(q));
+      results.length = 0;
+      results.push(...rest);
+      simpleResults(results);
+      toast(list.length + ' sual banka əlavə olundu');
+    }).catch(fail);
   };
-  $('#pdfSel').onclick = () => {
+  $('#pdfSel', box).onclick = () => {
     const list = chosen();
     if (!list.length) return toast('Heç bir sual seçilməyib', true);
     pendingPrint = { questions: list, title: '', back: '#/ai' };
