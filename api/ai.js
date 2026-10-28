@@ -491,8 +491,11 @@ function aiError(name, status, data) {
 // Müvəqqəti xətalarda (həddən artıq yüklənmə) bir dəfə yenidən cəhd
 async function fetchRetry(url, opts) {
   let r = await fetch(url, opts);
-  if ([500, 502, 503, 529].includes(r.status)) {
-    await new Promise((z) => setTimeout(z, 2500));
+  for (let i = 0; i < 2 && [429, 500, 502, 503, 529].includes(r.status); i++) {
+    // limitə dəyəndə provayderin dediyi qədər (ən çox 20 saniyə) gözlə və yenidən cəhd et
+    const ra = parseFloat(r.headers?.get?.('retry-after') || '');
+    const wait = Number.isFinite(ra) ? Math.min(20, Math.max(1, ra)) * 1000 : (r.status === 429 ? 8000 : 2500);
+    await new Promise((z) => setTimeout(z, wait));
     r = await fetch(url, opts);
   }
   return r;

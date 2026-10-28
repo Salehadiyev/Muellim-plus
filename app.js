@@ -896,13 +896,14 @@ async function runExamples() {
   tyState.groups = samples.map((s) => ({ sample: s, questions: [], state: 'waiting' }));
   renderGroups();
   const per = tyState.per;
-  const size = per === 1 ? 3 : per === 2 ? 2 : 1;
+  // Hər nümunə ayrı sorğu: eyni anda bir neçəsi paralel işləyir, hər sual hazır olan kimi görünür
+  const size = 1;
   const batches = [];
   for (let i = 0; i < tyState.groups.length; i += size) batches.push(tyState.groups.slice(i, i + size));
   let done = 0;
   const total = tyState.groups.length;
   progress(`Yaradılır: 0 / ${total} nümunə…`, 'exProgress');
-  const q = makeQueue(3);
+  const q = makeQueue(4);
   const verifs = [];
   await Promise.all(batches.map((groups) => q(async () => {
     groups.forEach((g) => { g.state = 'working'; });
