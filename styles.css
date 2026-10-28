@@ -259,7 +259,9 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
   .print-toolbar, .print-hint, #toast { display: none !important; }
   .print-root { background: #fff; padding: 0; min-height: 0; }
   .sheets { padding: 0; overflow: visible; }
-  .sheet { margin: 0; box-shadow: none; }
+  /* Safari öz kənar boşluqlarını əlavə edir: vərəqi bir az kiçildib boş səhifələrin qarşısını alırıq */
+  .sheet { margin: 0; box-shadow: none; zoom: 0.8; }
+  .sheet-foot { display: none; }
   .pq.overflow { outline: none; }
 }
 
@@ -311,3 +313,5 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 .model-pick select { min-height: 42px; font-size: 14px; }
 .run-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .run-row .model-pick { min-width: 240px; }
+
+body.capturing .sheet { box-shadow: none; }

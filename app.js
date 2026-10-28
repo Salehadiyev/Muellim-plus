@@ -1384,6 +1384,17 @@ function studentDone(test, r) {
   </div></div>`;
 }
 
+function loadScript(src) {
+  return new Promise((ok, ko) => {
+    if (document.querySelector(`script[src="${src}"]`)?.dataset.loaded) return ok();
+    const el = document.createElement('script');
+    el.src = src; el.async = true;
+    el.onload = () => { el.dataset.loaded = '1'; ok(); };
+    el.onerror = () => ko(new Error('Kitabxana yüklənmədi, interneti yoxlayın'));
+    document.head.appendChild(el);
+  });
+}
+
 // ================= PDF (çap) görünüşü =================
 // A4, iki sütun, səhifədə 4 və ya 6 sual; sonda cavab açarı. "Həllər" rejimi ayrıca sənəd verir.
 function printView() {
@@ -1442,10 +1453,11 @@ function printView() {
           <button type="button" class="pill-opt" style="min-height:40px;padding:6px 12px" role="radio" aria-checked="${opts.mode === 'questions'}" data-pm="questions"><strong>Suallar + açar</strong></button>
           <button type="button" class="pill-opt" style="min-height:40px;padding:6px 12px" role="radio" aria-checked="${opts.mode === 'solutions'}" data-pm="solutions"><strong>${L.sol}</strong></button>
         </div>
-        <button class="btn primary" id="pPrint">PDF kimi saxla / Çap et</button>
+        <button class="btn primary" id="pDownload">PDF faylı yüklə</button>
+        <button class="btn" id="pPrint">Çap et</button>
         <span class="muted small">${questions.length} sual</span>
       </div>
-      <p class="print-hint muted small">iPad-də: “PDF kimi saxla” → Paylaş → <b>Fayllara saxla</b>. Kompüterdə: Çap pəncərəsində “PDF olaraq saxla” seçin.</p>
+      <p class="print-hint muted small"><b>PDF faylı yüklə</b> təmiz A4 fayl hazırlayır (ünvan və tarix yazılmır). iPad-də fayl açılanda Paylaş → <b>Fayllara saxla</b>.</p>
       <div class="sheets">${sheets}</div>
     </div>`;
 
@@ -1453,9 +1465,44 @@ function printView() {
     $('#pPer').onchange = (e) => { opts.perPage = +e.target.value; try { localStorage.setItem('mp_per_page', String(opts.perPage)); } catch (_) { /* boş */ } render(); };
     $$('[data-pm]').forEach((b) => b.onclick = () => { opts.mode = b.dataset.pm; render(); });
     $('#pPrint').onclick = () => { fitAll(); setTimeout(() => window.print(), 50); };
+    $('#pDownload').onclick = (e) => busy(e.currentTarget, downloadPdf).catch(fail);
     setTimeout(fitAll, 300);
     setTimeout(fitAll, 1200);
   };
+
+  // Hər A4 vərəqi şəkil kimi çəkilir və PDF faylına yığılır (brauzerin çap başlıqları olmadan)
+  async function downloadPdf() {
+    fitAll();
+    await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+    await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js');
+    if (document.fonts?.ready) await document.fonts.ready;
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+    const sheets = $$('.sheet');
+    document.body.classList.add('capturing');
+    try {
+      let first = true;
+      for (const sheet of sheets) {
+        const canvas = await window.html2canvas(sheet, { scale: 2.5, backgroundColor: '#ffffff', logging: false });
+        const pageH = Math.round(canvas.width * 297 / 210);
+        for (let y = 0; y < canvas.height - 4; y += pageH) {
+          const part = document.createElement('canvas');
+          part.width = canvas.width; part.height = Math.min(pageH, canvas.height - y);
+          const ctx = part.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height);
+          ctx.drawImage(canvas, 0, y, canvas.width, part.height, 0, 0, canvas.width, part.height);
+          if (!first) pdf.addPage();
+          first = false;
+          pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, part.height * 210 / canvas.width);
+        }
+      }
+    } finally {
+      document.body.classList.remove('capturing');
+    }
+    const name = (opts.title || (turkish ? 'tr-yos' : 'suallar')).replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 60) || 'suallar';
+    pdf.save(`${name}${opts.mode === 'solutions' ? '-cozumler' : ''}.pdf`);
+    toast('PDF hazırdır');
+  }
 
   // Sual xanaya sığmırsa, şrifti və şəkli tədricən kiçildir
   function fitAll() {
