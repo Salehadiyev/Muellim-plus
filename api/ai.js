@@ -67,6 +67,7 @@ export default async function handler(req, res) {
     if (action === 'tryos_plan') return res.status(200).json(await tryosPlan(body));
     if (action === 'tryos_generate') return res.status(200).json(await tryosGenerate(body));
     if (action === 'verify') return res.status(200).json(await verify(body));
+    if (action === 'tryos_from_examples') return res.status(200).json(await tryosFromExamples(body));
 
     return res.status(400).json({ error: 'Naməlum əməliyyat' });
   } catch (err) {
@@ -110,13 +111,75 @@ Cavabı bu formada qaytar: {"questions": [ ${QUESTION_SHAPE} ]}`;
   return { questions };
 }
 
+function imageBlock(dataUrl) {
+  const m = /^data:(image\/(png|jpeg|jpg|webp|gif));base64,(.+)$/.exec(String(dataUrl || ''));
+  if (!m) return null;
+  return { type: 'image', source: { type: 'base64', media_type: m[1] === 'image/jpg' ? 'image/jpeg' : m[1], data: m[3] } };
+}
+
+// Səhifədəki bütün sualları ayrı-ayrı oxuyur (TR-YÖS nümunələri üçün)
+async function extractSplit(b) {
+  const img = imageBlock(b.image);
+  if (!img) throw publicError('Şəkil oxunmadı');
+  const prompt = `Şəkildə imtahan/test səhifəsi var. Oradakı HƏR riyaziyyat və ya məntiq sualını ayrıca götür.
+Hər sual üçün:
+- "text": sualın tam mətni və variantları (A)… E)), olduğu kimi; riyazi ifadələr LaTeX ilə $...$ arasında; sualın nömrəsini yazma.
+- Sualda şəkil, qrafik, cədvəl, ədəd oxu və ya sxem varsa, "text"-in sonunda "[Şekil: ...]" kimi onu dəqiq təsvir et (ədədlər, nöqtələr, oxlar, bölgələr).
+- "topic": mövzu (türkcə, məs. "Köklü sayılar"), "section": "matematik" və ya "sayisal".
+- "box": sualın şəkildəki yeri, faizlə [x, y, en, hündürlük] (0-100).
+Yarımçıq görünən sualı götürmə. Oxunmayan hissəni təxmin etmə.
+Bu formada qaytar: {"questions": [{"text": "...", "topic": "...", "section": "matematik", "box": [0, 0, 50, 25]}]}`;
+  const data = await askJSON([img, { type: 'text', text: prompt }], { maxTokens: 12000 });
+  const questions = (Array.isArray(data.questions) ? data.questions : []).map((q) => ({
+    text: String(q.text || '').trim().slice(0, 4000),
+    topic: String(q.topic || '').slice(0, 120),
+    section: pick(q.section, ['matematik', 'sayisal'], 'matematik'),
+    box: Array.isArray(q.box) && q.box.length === 4 && q.box.every((n) => Number.isFinite(+n)) ? q.box.map((n) => Math.max(0, Math.min(100, +n))) : null
+  })).filter((q) => q.text);
+  if (!questions.length) throw publicError('Səhifədə sual tapılmadı');
+  return { questions: questions.slice(0, 20) };
+}
+
+// Hər nümunə üçün yeni sual(lar): izomorf / bənzər / fərqli quruluş
+async function tryosFromExamples(b) {
+  const samples = (Array.isArray(b.samples) ? b.samples : []).slice(0, 3);
+  if (!samples.length) throw publicError('Nümunə yoxdur');
+  const per = clampInt(b.perSample, 1, 3, 1);
+  const mode = GEN_MODES[b.mode] ? b.mode : 'benzer';
+  const notes = String(b.notes || '').slice(0, 800).trim();
+  const content = [];
+  samples.forEach((smp, i) => {
+    content.push({ type: 'text', text: `### Nümunə ${i}\n${String(smp.text || '').slice(0, 4000)}` });
+    const img = imageBlock(smp.image);
+    if (img) content.push(img);
+  });
+  content.push({ type: 'text', text: `Yuxarıdakı ${samples.length} nümunənin HƏR BİRİ üçün düz ${per} yeni sual yaz (cəmi ${samples.length * per}).
+${GEN_MODES[mode]}
+Əvvəl hər nümunənin hansı bacarığı yoxladığını və əsas həll ideyasını müəyyən et. Nümunənin bölməsini (matematik/sayisal) və mövzusunu saxla.
+Nümunədə şəkil/qrafik/cədvəl/sxem varsa, yeni sual üçün də uyğun SVG çək.
+${per > 1 ? 'Eyni nümunədən yaranan suallar bir-birinin ədəd dəyişdirilmiş surəti olmasın.' : ''}
+${notes ? 'Müəllimin əlavə istəyi: ' + notes : ''}
+Hər sualda "sample" sahəsinə nümunənin nömrəsini (0-dan) yaz.
+Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE.replace('{', '{\n  "sample": 0,')} ]}` });
+  const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 20000 });
+  const list = Array.isArray(data.questions) ? data.questions : [];
+  const questions = list.map((q) => {
+    const sample = clampInt(q.sample, 0, samples.length - 1, 0);
+    const n = normalizeTryos(q, { topic: samples[sample].topic || '', section: samples[sample].section || 'matematik', subtype: '', difficulty: 'orta' });
+    return n ? { ...n, sample } : null;
+  }).filter(Boolean);
+  if (!questions.length) throw publicError('AI sual qaytarmadı, yenidən yoxlayın', 502);
+  return { questions };
+}
+
 async function extract(b) {
+  if (b.split) return extractSplit(b);
   const m = /^data:(image\/(png|jpeg|jpg|webp|gif));base64,(.+)$/.exec(String(b.image || ''));
   if (!m) throw publicError('Şəkil oxunmadı');
   const mediaType = m[1] === 'image/jpg' ? 'image/jpeg' : m[1];
 
   const prompt = `Şəkildə dərslikdən kəsilmiş riyaziyyat tapşırığı var.
-1) Tapşırığın mətnini olduğu kimi oxu (nömrəsini yazma). Riyazi ifadələri LaTeX ilə $...$ arasında yaz. ${b.all ? 'Şəkildə bir neçə tapşırıq varsa, HAMISINI oxu: hər birini variantları ilə birlikdə ayrı abzasda, boş sətirlə ayıraraq yaz.' : 'Şəkildə bir neçə tapşırıq varsa, ən tam görünəni götür.'}
+1) Tapşırığın mətnini olduğu kimi oxu (nömrəsini yazma). Şəkil, qrafik, cədvəl, ədəd oxu və ya sxem varsa, mətnin sonunda "[Şekil: ...]" kimi dəqiq təsvir et. Riyazi ifadələri LaTeX ilə $...$ arasında yaz. ${b.all ? 'Şəkildə bir neçə tapşırıq varsa, HAMISINI oxu: hər birini variantları ilə birlikdə ayrı abzasda, boş sətirlə ayıraraq yaz.' : 'Şəkildə bir neçə tapşırıq varsa, ən tam görünəni götür.'}
 2) Mövzunu, təxmini sinfi və çətinliyi müəyyən et.
 3) Tapşırığı özün həll et və cavabı yaz.
 Bu formada qaytar: {"text": "...", "topic": "...", "grade": 7, "difficulty": "asan|orta|çətin", "answer": "..."}

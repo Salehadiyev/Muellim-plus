@@ -262,3 +262,24 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
   .sheet { margin: 0; box-shadow: none; }
   .pq.overflow { outline: none; }
 }
+
+/* ---------- TR-YÖS səhifəsi ---------- */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; background: #E3E8EF; padding: 4px; border-radius: 12px; align-self: flex-start; }
+.tabs button { min-height: 40px; padding: 0 16px; border: 0; border-radius: 9px; background: transparent; font: inherit; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer; }
+.tabs button[aria-selected=true] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(20,32,48,.12); }
+.step-h { display: flex; gap: 12px; align-items: flex-start; }
+.step-n { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.sample-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.sample { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: #fff; }
+.sample.error { border-color: var(--red); }
+.sample-top { display: flex; align-items: center; gap: 6px; }
+.sample-top .btn { margin-left: auto; min-height: 30px; padding: 0 8px; }
+.sample img { width: 100%; max-height: 120px; object-fit: contain; background: #fafafa; border-radius: 6px; }
+.sample details summary { font-size: 12px; color: var(--accent); cursor: pointer; }
+.sample textarea { font-size: 12px; min-height: 80px; }
+.pair-head { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); align-items: start; }
+.pair-src { display: flex; flex-direction: column; gap: 4px; }
+.pair-src img { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.pair-new .q { padding-top: 0; }
+@media (max-width: 700px) { .pair, .pair-head { grid-template-columns: 1fr; } .pair-head span:last-child { display: none; } }

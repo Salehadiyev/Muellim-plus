@@ -190,7 +190,7 @@ function route() {
 
 function shell(active) {
   const items = [
-    ['', 'Panel'], ['classes', 'Siniflər'], ['bank', 'Sual bankı'], ['ai', 'AI ilə sual'],
+    ['', 'Panel'], ['classes', 'Siniflər'], ['bank', 'Sual bankı'], ['ai', 'TR-YÖS / AI'],
     ['book', 'Kitabdan sual'], ['tests', 'Testlər']
   ];
   const email = session?.user?.email || '';
@@ -495,10 +495,29 @@ function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', acti
 
   const api = {
     hasImage: () => !!st.img,
-    dataUrl() {
+    hasSelection: () => !!st.sel,
+    // box: [x, y, en, hündürlük] faizlə (AI-ın tapdığı sual yeri)
+    dataUrlBox(box, maxSide = 1100) {
+      const pad = 2;
+      const x = Math.max(0, box[0] - pad), y = Math.max(0, box[1] - pad);
+      const w = Math.min(100 - x, box[2] + pad * 2), h = Math.min(100 - y, box[3] + pad * 2);
+      const W = st.img.width, H = st.img.height;
+      return api.cropUrl(x / 100 * W, y / 100 * H, w / 100 * W, h / 100 * H, maxSide);
+    },
+    cropUrl(sx, sy, sw, sh, maxSide = 1600) {
+      const out = Math.min(1, maxSide / Math.max(sw, sh));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(sw * out)); c.height = Math.max(1, Math.round(sh * out));
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(st.img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.86);
+    },
+    dataUrl(maxSide = 1600) {
       const s = st.sel;
       const sx = s ? s.x / st.scale : 0, sy = s ? s.y / st.scale : 0;
       const sw = s ? s.w / st.scale : st.img.width, sh = s ? s.h / st.scale : st.img.height;
+      if (maxSide !== 1600) return api.cropUrl(sx, sy, sw, sh, maxSide);
       const out = Math.min(1, 1600 / Math.max(sw, sh));
       const c = document.createElement('canvas');
       c.width = Math.max(1, Math.round(sw * out)); c.height = Math.max(1, Math.round(sh * out));
@@ -615,197 +634,372 @@ const TRYOS_TOPICS = {
     'Kâğıt katlama ve kesme', 'Denklem eşleştirme']
 };
 
-async function aiView() {
-  let results = [];
-  let format = 'tryos';
-  view().innerHTML = `
-    <div class="page-head"><div><h1>AI ilə sual yarat</h1><p class="muted">Suallar həlli ilə gəlir. Banka əlavə etməzdən əvvəl yoxlayın.</p></div></div>
-    <form class="card stack" id="gen">
-      <div class="pills" role="radiogroup" aria-label="Format">
-        <button type="button" class="pill-opt" role="radio" aria-checked="true" data-format="tryos"><strong>TR-YÖS</strong><span>Türkcə, 5 variant, tip planı, şəkillər, ikinci yoxlama</span></button>
-        <button type="button" class="pill-opt" role="radio" aria-checked="false" data-format="general"><strong>Ümumi (məktəb)</strong><span>Azərbaycan dilində, sinif üzrə</span></button>
-      </div>
+// Nümunələr və nəticələr səhifədən çıxanda da yaddaşda qalsın (bu sessiya ərzində)
+const tyState = { tab: 'examples', samples: [], groups: [], mode: 'benzer', per: 1, notes: '', running: false };
+let sampleSeq = 0;
 
-      <div id="tryosFields" class="stack">
-        <div class="form-grid">
-          <label class="field">Bölmə<select name="section" id="tySection">
-            <option value="matematik">Temel Matematik</option>
-            <option value="sayisal">Sayısal Yetenek (mantık)</option>
-            <option value="deneme">Deneme (karışık)</option></select></label>
-          <label class="field">Mövzu<select name="tyTopic" id="tyTopic"></select></label>
-          <label class="field">Çətinlik<select name="tyDifficulty">
-            <option value="qarisiq">Qarışıq (asan → orta-çətin)</option><option value="asan">Asan</option><option value="orta">Orta</option><option value="cetin">Orta-çətin</option></select></label>
-          <label class="field">Sual sayı<select name="tyCount">${[3, 5, 10, 15, 20, 30, 40].map((n) => `<option ${n === 10 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-        </div>
-      </div>
-
-      <div id="generalFields" class="stack" hidden>
-        <label class="field">Mövzu<span class="hint">nə qədər dəqiq yazsanız, o qədər yaxşı</span><input type="text" name="topic" maxlength="200" placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
-        <div class="form-grid">
-          <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
-          <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === 'orta' ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
-          <label class="field">Sual sayı<select name="count">${[3, 5, 8, 10].map((n) => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-          <label class="field">Növ<select name="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
-        </div>
-      </div>
-
-      <fieldset class="stack" style="border:1px solid var(--line);border-radius:12px;padding:14px;margin:0;gap:12px">
-        <legend style="font-weight:700;padding:0 6px">Nümunə suallar <span class="muted small" style="font-weight:400">· istəyə bağlı</span></legend>
-        <div id="exPicker" class="stack" style="gap:10px"></div>
-        <label class="field">Nümunə mətni<span class="hint">şəkildən oxunan suallar bura düşür; özünüz də yaza və ya düzəldə bilərsiniz</span><textarea name="example" id="exText" rows="5" maxlength="6000"></textarea></label>
-        <div class="stack" style="gap:8px">
-          <strong style="font-size:14px">Nümunədən necə yaradılsın?</strong>
-          <div class="pills" role="radiogroup" aria-label="Yaratma rejimi">
-            <button type="button" class="pill-opt" role="radio" aria-checked="false" data-mode="izomorf"><strong>İzomorf</strong><span>Eyni quruluş, yalnız rəqəmlər dəyişir</span></button>
-            <button type="button" class="pill-opt" role="radio" aria-checked="true" data-mode="benzer"><strong>Bənzər</strong><span>Eyni bacarıq, yeni təqdimat və rəqəmlər</span></button>
-            <button type="button" class="pill-opt" role="radio" aria-checked="false" data-mode="ferqli"><strong>Fərqli quruluş</strong><span>Eyni bilik, başqa formada sual</span></button>
-          </div>
-        </div>
-      </fieldset>
-
-      <label class="field">Əlavə istək<span class="hint">istəyə bağlı, məs. "qrafikli suallar çox olsun"</span><input type="text" name="notes" maxlength="800"></label>
-      <div class="row"><button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button>
-        <span id="progress" class="muted small" role="status" aria-live="polite"></span></div>
-    </form>
-    <section id="results"></section>`;
-
-  // ---- format / bölmə ----
-  const fillTopics = () => {
-    const sec = $('#tySection').value;
-    const list = sec === 'deneme' ? [] : TRYOS_TOPICS[sec];
-    $('#tyTopic').innerHTML = `<option value="">${sec === 'deneme' ? 'Bütün mövzular (karışık)' : 'Bölmənin bütün mövzuları (qarışıq)'}</option>`
-      + list.map((t) => `<option>${esc(t)}</option>`).join('');
-    $('#tyTopic').disabled = sec === 'deneme';
+// Kiçik iş növbəsi: eyni anda ən çox n AI sorğusu
+function makeQueue(n) {
+  let active = 0;
+  const waiting = [];
+  const next = () => {
+    if (active >= n || !waiting.length) return;
+    active++;
+    const { fn, ok, ko } = waiting.shift();
+    fn().then(ok, ko).finally(() => { active--; next(); });
   };
-  fillTopics();
-  $('#tySection').onchange = fillTopics;
-  $$('[data-format]').forEach((b) => b.onclick = () => {
-    format = b.dataset.format;
-    $$('[data-format]').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
-    $('#tryosFields').hidden = format !== 'tryos';
-    $('#generalFields').hidden = format === 'tryos';
-  });
+  return (fn) => new Promise((ok, ko) => { waiting.push({ fn, ok, ko }); next(); });
+}
+const extractQueue = makeQueue(3);
 
-  let mode = 'benzer';
-  $$('[data-mode]').forEach((b) => b.onclick = () => {
-    mode = b.dataset.mode;
-    $$('[data-mode]').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
-  });
+async function aiView() {
+  view().innerHTML = `
+    <div class="page-head"><div><h1>TR-YÖS sual yaradıcı</h1><p class="muted">Nümunə sualları seçin, hər birinin yanında yeni sual yaradılsın.</p></div></div>
+    <div class="tabs" role="tablist" aria-label="Rejim">
+      <button type="button" role="tab" data-tab="examples">Nümunədən yarat</button>
+      <button type="button" role="tab" data-tab="topic">Mövzudan yarat</button>
+      <button type="button" role="tab" data-tab="general">Məktəb (ümumi)</button>
+    </div>
+    <div id="tabExamples" class="stack"></div>
+    <div id="tabBody" class="stack" hidden></div>`;
+  let examplesBuilt = false;
+  const setTab = (t) => {
+    tyState.tab = t;
+    $$('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === t)));
+    $('#tabExamples').hidden = t !== 'examples';
+    $('#tabBody').hidden = t === 'examples';
+    if (t === 'examples') { if (!examplesBuilt) { examplesTab(); examplesBuilt = true; } }
+    else if (t === 'topic') topicTab();
+    else generalTab();
+  };
+  $$('[data-tab]').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
+  setTab(tyState.tab);
+}
+
+// ---------------- 1. Nümunədən yarat ----------------
+function examplesTab() {
+  $('#tabExamples').innerHTML = `
+    <section class="card stack">
+      <div class="step-h"><span class="step-n">1</span><div><h2>Nümunə sualları seçin</h2>
+        <p class="muted small">PDF və ya şəkil açın. Bir sualın üstündən barmaqla çərçivə çəkib <b>Seçiləni əlavə et</b>, ya da <b>Səhifədəki bütün suallar</b> basın. İstədiyiniz qədər sual əlavə edə bilərsiniz, səhifələri dəyişərək davam edin.</p></div></div>
+      <div id="exPicker" class="stack" style="gap:10px"></div>
+    </section>
+    <section class="card stack" id="samplesCard"></section>
+    <section class="card stack">
+      <div class="step-h"><span class="step-n">3</span><div><h2>Necə yaradılsın?</h2></div></div>
+      <div class="pills" role="radiogroup" aria-label="Yaratma rejimi">
+        <button type="button" class="pill-opt" role="radio" data-mode="izomorf"><strong>İzomorf</strong><span>Eyni quruluş, yalnız rəqəmlər dəyişir</span></button>
+        <button type="button" class="pill-opt" role="radio" data-mode="benzer"><strong>Bənzər</strong><span>Eyni bacarıq, yeni təqdimat və rəqəmlər</span></button>
+        <button type="button" class="pill-opt" role="radio" data-mode="ferqli"><strong>Yeni quruluş</strong><span>Eyni bilik, başqa formada sual</span></button>
+      </div>
+      <div class="form-grid">
+        <label class="field">Hər nümunəyə<select id="perSample"><option value="1">1 yeni sual</option><option value="2">2 yeni sual</option><option value="3">3 yeni sual</option></select></label>
+        <label class="field">Əlavə istək<span class="hint">istəyə bağlı</span><input type="text" id="exNotes" maxlength="800" placeholder="məs. variantlar tam ədəd olsun"></label>
+      </div>
+      <div class="row"><button class="btn primary" id="runEx"></button><span id="exProgress" class="muted small" role="status" aria-live="polite"></span></div>
+    </section>
+    <section id="exResults"></section>`;
+
+  // rejim və say
+  const syncMode = () => $$('[data-mode]').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.mode === tyState.mode)));
+  $$('[data-mode]').forEach((b) => b.onclick = () => { tyState.mode = b.dataset.mode; syncMode(); });
+  syncMode();
+  $('#perSample').value = String(tyState.per);
+  $('#perSample').onchange = (e) => { tyState.per = +e.target.value; updateRunBtn(); };
+  $('#exNotes').value = tyState.notes;
+  $('#exNotes').oninput = (e) => { tyState.notes = e.target.value; };
 
   createPicker($('#exPicker'), {
-    hint: 'Dərslikdən, testdən və ya ekran şəklindən nümunə götürün: sualın (və ya bir neçə sualın) üstündən çərçivə çəkin, sonra “Nümunəyə əlavə et” basın. Bir neçə dəfə əlavə edə bilərsiniz.',
+    hint: 'PDF açıldıqdan sonra səhifələr arasında ‹ › ilə keçin.',
     actions: (row, picker) => {
-      row.insertAdjacentHTML('afterbegin', '<button type="button" class="btn primary" data-add-example>Nümunəyə əlavə et</button>');
-      $('[data-add-example]', row).onclick = (e) => busy(e.currentTarget, async () => {
-        const data = await callAI('extract', { image: picker.dataUrl(), all: true });
-        const ta = $('#exText');
-        ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + data.text.trim();
-        const form = $('#gen');
-        if (format === 'general') {
-          if (!form.topic.value.trim() && data.topic) form.topic.value = data.topic;
-          if (data.grade) form.grade.value = String(data.grade);
-        }
+      row.insertAdjacentHTML('afterbegin', `<button type="button" class="btn primary" data-add-one>Seçiləni əlavə et</button>
+        <button type="button" class="btn" data-add-page>Səhifədəki bütün suallar</button>`);
+      $('[data-add-one]', row).onclick = () => {
+        if (!picker.hasSelection()) return toast('Əvvəlcə sualın üstündən barmaqla çərçivə çəkin', true);
+        addSample({ image: picker.dataUrl(1100), exact: true });
         picker.clearSelection();
-        toast('Nümunə əlavə olundu');
+      };
+      $('[data-add-page]', row).onclick = (e) => busy(e.currentTarget, async () => {
+        picker.clearSelection();
+        const data = await callAI('extract', { image: picker.dataUrl(), split: true });
+        data.questions.forEach((q) => addSample({
+          image: q.box ? picker.dataUrlBox(q.box, 700) : null,
+          text: q.text, topic: q.topic, section: q.section, exact: false
+        }));
+        toast(data.questions.length + ' sual əlavə olundu');
       }).catch(fail);
     }
   });
 
-  // ---- nəticələr ----
-  const progress = (t) => { $('#progress').textContent = t || ''; };
-  const renderResults = (doneLabel) => {
-    if (!results.length) { $('#results').innerHTML = ''; return; }
-    const checked = new Set($$('#results .check').filter((c) => !c.checked).map((c) => c.dataset.id));
-    const bad = results.filter((q) => q.verified === false).length;
-    $('#results').innerHTML = `<div class="card stack">
-      <div class="row between"><h2>${doneLabel || results.length + ' sual hazırdır'}</h2>
-        <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
-      ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü. Onları diqqətlə yoxlayın və ya seçimdən çıxarın.</p>` : ''}
-      <div>${results.map((q, i) => questionHtml({ ...q, id: i, source: 'ai' }, { selectable: true, checked: !checked.has(String(i)) })).join('')}</div>
-    </div>`;
-    const chosen = () => $$('#results .check').filter((c) => c.checked).map((c) => results[+c.dataset.id]);
-    $('#saveSel').onclick = (e) => {
-      const list = chosen();
-      if (!list.length) return toast('Heç bir sual seçilməyib', true);
-      busy(e.currentTarget, async () => {
-        await saveQuestions(list, 'ai');
-        toast(list.length + ' sual banka əlavə olundu');
-        results = []; renderResults();
-      }).catch(fail);
-    };
-    $('#pdfSel').onclick = () => {
-      const list = chosen();
-      if (!list.length) return toast('Heç bir sual seçilməyib', true);
-      pendingPrint = { questions: list, title: '', back: '#/ai' };
-      go('#/print');
-    };
+  renderSamples();
+  renderGroups();
+  updateRunBtn();
+  $('#runEx').onclick = (e) => busy(e.currentTarget, runExamples).catch((err) => { progress('', 'exProgress'); fail(err); });
+}
+
+function addSample({ image, text = '', topic = '', section = 'matematik', exact }) {
+  const smp = { id: ++sampleSeq, image, text, topic, section, exact, status: text ? 'ready' : 'reading', error: '' };
+  tyState.samples.push(smp);
+  if (!text) {
+    extractQueue(() => callAI('extract', { image })).then((d) => {
+      smp.text = d.text; smp.topic = d.topic; smp.status = 'ready';
+    }).catch((err) => { smp.status = 'error'; smp.error = err.message; })
+      .finally(() => { if ($('#samplesCard')) { renderSamples(); updateRunBtn(); } });
+  }
+  renderSamples();
+  updateRunBtn();
+}
+
+function renderSamples() {
+  const card = $('#samplesCard');
+  if (!card) return;
+  const list = tyState.samples;
+  const reading = list.filter((s) => s.status === 'reading').length;
+  card.innerHTML = `<div class="step-h"><span class="step-n">2</span><div><h2>Seçilən nümunələr (${list.length})</h2>
+      <p class="muted small">${list.length ? (reading ? `${reading} sual oxunur…` : 'Mətnə klikləyib düzəldə bilərsiniz.') : 'Hələ nümunə yoxdur.'}</p></div>
+      ${list.length ? '<button type="button" class="btn small danger" id="clearSamples" style="margin-left:auto">Hamısını sil</button>' : ''}</div>
+    ${list.length ? `<div class="sample-grid">${list.map((s, i) => `<div class="sample ${s.status}">
+        <div class="sample-top"><b>${i + 1}</b>
+          <span class="tag ${s.status === 'ready' ? 'ai' : s.status === 'error' ? 'red' : ''}">${s.status === 'ready' ? 'hazır' : s.status === 'error' ? 'oxunmadı' : 'oxunur…'}</span>
+          <button type="button" class="btn small" data-rm="${s.id}" aria-label="Nümunə ${i + 1}-i sil">✕</button></div>
+        ${s.image ? `<img src="${s.image}" alt="Nümunə ${i + 1}">` : ''}
+        ${s.status === 'ready' ? `<details><summary>Mətn</summary><textarea data-txt="${s.id}" rows="4">${esc(s.text)}</textarea></details>` : ''}
+        ${s.status === 'error' ? `<p class="small" style="color:var(--red)">${esc(s.error)}</p><button type="button" class="btn small" data-retry="${s.id}">Yenidən oxu</button>` : ''}
+      </div>`).join('')}</div>` : ''}`;
+  $$('[data-rm]', card).forEach((b) => b.onclick = () => {
+    tyState.samples = tyState.samples.filter((s) => s.id !== +b.dataset.rm);
+    renderSamples(); updateRunBtn();
+  });
+  $$('[data-txt]', card).forEach((t) => t.oninput = () => { const s = tyState.samples.find((x) => x.id === +t.dataset.txt); if (s) s.text = t.value; });
+  $$('[data-retry]', card).forEach((b) => b.onclick = () => {
+    const s = tyState.samples.find((x) => x.id === +b.dataset.retry);
+    tyState.samples = tyState.samples.filter((x) => x !== s);
+    addSample({ image: s.image, exact: s.exact });
+  });
+  const clr = $('#clearSamples', card);
+  if (clr) clr.onclick = () => { if (confirm('Bütün nümunələr silinsin?')) { tyState.samples = []; renderSamples(); updateRunBtn(); } };
+}
+
+function updateRunBtn() {
+  const b = $('#runEx');
+  if (!b || tyState.running) return;
+  const ready = tyState.samples.filter((s) => s.status === 'ready').length;
+  b.disabled = !ready;
+  b.innerHTML = `${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} ${ready ? ready * tyState.per + ' sual yarat' : 'Sual yarat'}`;
+}
+
+const progress = (t, id = 'progress') => { const el = document.getElementById(id); if (el) el.textContent = t || ''; };
+
+async function verifyQuestions(qs, onChange) {
+  qs.forEach((q) => { q.verifying = true; });
+  onChange();
+  try {
+    const v = await callAI('verify', { questions: qs.map((q) => ({ body: q.body, figure: q.figure, options: q.options, option_figures: q.option_figures, answer: q.answer })) });
+    v.results.forEach((r, i) => { if (qs[i]) { qs[i].verified = r.ok; qs[i].verify_note = r.issue || (r.ok ? '' : `ikinci həll ${'ABCDE'[r.index] || '?'} variantını tapdı`); } });
+  } catch (err) { console.error(err); }
+  qs.forEach((q) => { delete q.verifying; });
+  onChange();
+}
+
+async function runExamples() {
+  const samples = tyState.samples.filter((s) => s.status === 'ready');
+  if (!samples.length) return;
+  if (tyState.samples.some((s) => s.status === 'reading') && !confirm('Bəzi nümunələr hələ oxunur. Hazır olanlarla davam edilsin?')) return;
+  tyState.running = true;
+  tyState.groups = samples.map((s) => ({ sample: s, questions: [], state: 'waiting' }));
+  renderGroups();
+  const per = tyState.per;
+  const size = per === 1 ? 3 : per === 2 ? 2 : 1;
+  const batches = [];
+  for (let i = 0; i < tyState.groups.length; i += size) batches.push(tyState.groups.slice(i, i + size));
+  let done = 0;
+  const total = tyState.groups.length;
+  progress(`Yaradılır: 0 / ${total} nümunə…`, 'exProgress');
+  const q = makeQueue(3);
+  const verifs = [];
+  await Promise.all(batches.map((groups) => q(async () => {
+    groups.forEach((g) => { g.state = 'working'; });
+    renderGroups();
+    try {
+      const data = await callAI('tryos_from_examples', {
+        samples: groups.map((g) => ({ text: g.sample.text, image: g.sample.exact ? g.sample.image : null, topic: g.sample.topic, section: g.sample.section })),
+        mode: tyState.mode, perSample: per, notes: tyState.notes
+      });
+      data.questions.forEach((qq) => { const g = groups[qq.sample]; if (g) g.questions.push(qq); });
+      groups.forEach((g) => { g.state = g.questions.length ? 'done' : 'error'; });
+      const all = groups.flatMap((g) => g.questions);
+      if (all.length) verifs.push(verifyQuestions(all, renderGroups));
+    } catch (err) {
+      console.error(err);
+      groups.forEach((g) => { g.state = 'error'; g.error = err.message; });
+    }
+    done += groups.length;
+    progress(`Yaradılır: ${done} / ${total} nümunə…`, 'exProgress');
+    renderGroups();
+  })));
+  progress('Yoxlama tamamlanır…', 'exProgress');
+  await Promise.all(verifs);
+  progress('', 'exProgress');
+  tyState.running = false;
+  updateRunBtn();
+  renderGroups();
+}
+
+function renderGroups() {
+  const box = $('#exResults');
+  if (!box) return;
+  const groups = tyState.groups;
+  if (!groups.length) { box.innerHTML = ''; return; }
+  const all = groups.flatMap((g) => g.questions);
+  const bad = all.filter((q) => q.verified === false).length;
+  const unchecked = new Set($$('#exResults .check').filter((c) => !c.checked).map((c) => c.dataset.id));
+  box.innerHTML = `<div class="card stack">
+    <div class="row between"><h2>Nəticə: ${all.length} yeni sual</h2>
+      <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
+    ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü (⚠). Onları yoxlayın və ya seçimdən çıxarın.</p>` : ''}
+    <div class="pair-head"><span>Nümunə</span><span>Yeni sual</span></div>
+    ${groups.map((g, gi) => `<div class="pair">
+      <div class="pair-src">${g.sample.image ? `<img src="${g.sample.image}" alt="Nümunə ${gi + 1}">` : `<div class="small pre">${esc(g.sample.text.slice(0, 400))}</div>`}<span class="muted small">Nümunə ${gi + 1}</span></div>
+      <div class="pair-new">${g.state === 'waiting' ? '<div class="muted small">növbədə…</div>'
+        : g.state === 'working' ? '<div class="row muted small"><span class="spinner sm" aria-hidden="true"></span> yaradılır…</div>'
+        : g.state === 'error' ? `<div class="small" style="color:var(--red)">Alınmadı${g.error ? ': ' + esc(g.error) : ''}</div>`
+        : g.questions.map((q, qi) => { const key = gi + '-' + qi; q._key = key; return questionHtml({ ...q, id: key, source: 'ai' }, { selectable: true, checked: !unchecked.has(key) }); }).join('')}</div>
+    </div>`).join('')}
+  </div>`;
+  const chosen = () => {
+    const keys = new Set($$('#exResults .check').filter((c) => c.checked).map((c) => c.dataset.id));
+    return all.filter((q) => keys.has(q._key));
   };
+  $('#saveSel').onclick = (e) => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    busy(e.currentTarget, async () => {
+      await saveQuestions(list, 'ai');
+      toast(list.length + ' sual banka əlavə olundu');
+    }).catch(fail);
+  };
+  $('#pdfSel').onclick = () => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    pendingPrint = { questions: list, title: '', back: '#/ai' };
+    go('#/print');
+  };
+}
 
-  async function runGeneral(f) {
-    const data = await callAI('generate', f);
-    results = data.questions;
-    renderResults();
-    $('#results').scrollIntoView({ behavior: 'smooth' });
-  }
+// ---------------- 2. Mövzudan yarat ----------------
+function topicTab() {
+  $('#tabBody').innerHTML = `
+    <form class="card stack" id="gen">
+      <div class="form-grid">
+        <label class="field">Bölmə<select name="section" id="tySection">
+          <option value="matematik">Temel Matematik</option><option value="sayisal">Sayısal Yetenek (mantık)</option><option value="deneme">Deneme (karışık)</option></select></label>
+        <label class="field">Mövzu<select name="tyTopic" id="tyTopic"></select></label>
+        <label class="field">Çətinlik<select name="tyDifficulty">
+          <option value="qarisiq">Qarışıq (asan → orta-çətin)</option><option value="asan">Asan</option><option value="orta">Orta</option><option value="cetin">Orta-çətin</option></select></label>
+        <label class="field">Sual sayı<select name="tyCount">${[3, 5, 10, 15, 20, 30, 40].map((n) => `<option ${n === 10 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      </div>
+      <label class="field">Əlavə istək<span class="hint">istəyə bağlı</span><input type="text" name="notes" maxlength="800" placeholder="məs. qrafikli suallar çox olsun"></label>
+      <div class="row"><button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button>
+        <span id="progress" class="muted small" role="status" aria-live="polite"></span></div>
+    </form>
+    <section id="results"></section>`;
+  const fillTopics = () => {
+    const sec = $('#tySection').value;
+    const list = sec === 'deneme' ? [] : TRYOS_TOPICS[sec];
+    $('#tyTopic').innerHTML = `<option value="">${sec === 'deneme' ? 'Bütün mövzular (karışık)' : 'Bölmənin bütün mövzuları'}</option>` + list.map((t) => `<option>${esc(t)}</option>`).join('');
+    $('#tyTopic').disabled = sec === 'deneme';
+  };
+  fillTopics();
+  $('#tySection').onchange = fillTopics;
 
-  async function runTryos(f) {
-    const base = {
-      section: f.section, topic: f.tyTopic || '', difficulty: f.tyDifficulty,
-      notes: f.notes, example: f.example, mode
-    };
-    const count = +f.tyCount || 10;
-    progress('Tip planı hazırlanır…');
-    const { plan, notes } = await callAI('tryos_plan', { ...base, count });
-    if (notes) toast(notes);
-    results = [];
-    const batches = [];
-    for (let i = 0; i < plan.length; i += 3) batches.push(plan.slice(i, i + 3));
-    let done = 0;
-    const verifyBatch = async (qs) => {
-      qs.forEach((q) => { q.verifying = true; });
-      renderResults();
-      try {
-        const v = await callAI('verify', { questions: qs.map((q) => ({ body: q.body, figure: q.figure, options: q.options, option_figures: q.option_figures, answer: q.answer })) });
-        v.results.forEach((r, i) => { if (qs[i]) { qs[i].verified = r.ok; qs[i].verify_note = r.issue || (r.ok ? '' : `ikinci həll ${'ABCDE'[r.index] || '?'} variantını tapdı`); } });
-      } catch (err) { console.error(err); }
-      qs.forEach((q) => { delete q.verifying; });
-      renderResults();
-    };
-    const verifications = [];
-    const worker = async (queue) => {
-      while (queue.length) {
-        const items = queue.shift();
-        const avoid = results.map((q) => q.body.replace(/\s+/g, ' ').slice(0, 140));
-        try {
-          const data = await callAI('tryos_generate', { ...base, items, avoid });
-          results.push(...data.questions);
-          verifications.push(verifyBatch(data.questions));
-        } catch (err) {
-          console.error(err);
-          toast('Bir partiya alınmadı: ' + err.message, true);
-        }
-        done += items.length;
-        progress(`Suallar yaradılır: ${Math.min(done, plan.length)} / ${plan.length}…`);
-        renderResults(`${results.length} sual hazırdır, davam edir…`);
-      }
-    };
-    progress(`Suallar yaradılır: 0 / ${plan.length}…`);
-    const queue = [...batches];
-    await Promise.all([worker(queue), worker(queue), worker(queue)]);
-    progress('Yoxlama tamamlanır…');
-    await Promise.all(verifications);
-    progress('');
-    renderResults();
-    if (!results.length) throw new Error('Sual yaradılmadı, yenidən yoxlayın');
-  }
-
+  let results = [];
+  const render = (label) => simpleResults(results, label);
   $('#gen').onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    f.mode = mode;
-    if (format === 'general' && !String(f.topic || '').trim() && !String(f.example || '').trim()) return toast('Mövzu yazın və ya nümunə sual əlavə edin', true);
-    busy($('button[type=submit]', e.target), () => (format === 'tryos' ? runTryos(f) : runGeneral(f)))
-      .catch((err) => { progress(''); fail(err); });
+    busy($('button[type=submit]', e.target), async () => {
+      const base = { section: f.section, topic: f.tyTopic || '', difficulty: f.tyDifficulty, notes: f.notes };
+      progress('Tip planı hazırlanır…');
+      const { plan, notes } = await callAI('tryos_plan', { ...base, count: +f.tyCount || 10 });
+      if (notes) toast(notes);
+      results = [];
+      const batches = [];
+      for (let i = 0; i < plan.length; i += 3) batches.push(plan.slice(i, i + 3));
+      let done = 0;
+      const verifs = [];
+      const q = makeQueue(3);
+      await Promise.all(batches.map((items) => q(async () => {
+        try {
+          const avoid = results.map((x) => x.body.replace(/\s+/g, ' ').slice(0, 140));
+          const data = await callAI('tryos_generate', { ...base, items, avoid });
+          results.push(...data.questions);
+          verifs.push(verifyQuestions(data.questions, () => render()));
+        } catch (err) { console.error(err); toast('Bir partiya alınmadı: ' + err.message, true); }
+        done += items.length;
+        progress(`Suallar yaradılır: ${Math.min(done, plan.length)} / ${plan.length}…`);
+        render(`${results.length} sual hazırdır, davam edir…`);
+      })));
+      progress('Yoxlama tamamlanır…');
+      await Promise.all(verifs);
+      progress('');
+      render();
+      if (!results.length) throw new Error('Sual yaradılmadı, yenidən yoxlayın');
+    }).catch((err) => { progress(''); fail(err); });
+  };
+}
+
+function simpleResults(results, doneLabel) {
+  const box = $('#results');
+  if (!box) return;
+  if (!results.length) { box.innerHTML = ''; return; }
+  const unchecked = new Set($$('#results .check').filter((c) => !c.checked).map((c) => c.dataset.id));
+  const bad = results.filter((q) => q.verified === false).length;
+  box.innerHTML = `<div class="card stack">
+    <div class="row between"><h2>${doneLabel || results.length + ' sual hazırdır'}</h2>
+      <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
+    ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü (⚠).</p>` : ''}
+    <div>${results.map((q, i) => questionHtml({ ...q, id: i, source: 'ai' }, { selectable: true, checked: !unchecked.has(String(i)) })).join('')}</div>
+  </div>`;
+  const chosen = () => $$('#results .check').filter((c) => c.checked).map((c) => results[+c.dataset.id]);
+  $('#saveSel').onclick = (e) => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    busy(e.currentTarget, async () => { await saveQuestions(list, 'ai'); toast(list.length + ' sual banka əlavə olundu'); }).catch(fail);
+  };
+  $('#pdfSel').onclick = () => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    pendingPrint = { questions: list, title: '', back: '#/ai' };
+    go('#/print');
+  };
+}
+
+// ---------------- 3. Məktəb (ümumi) ----------------
+function generalTab() {
+  $('#tabBody').innerHTML = `
+    <form class="card stack" id="gen">
+      <p class="muted small">Azərbaycan dilində, məktəb sinifləri üçün suallar.</p>
+      <label class="field">Mövzu<input type="text" name="topic" maxlength="200" required placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
+      <div class="form-grid">
+        <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
+        <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === 'orta' ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+        <label class="field">Sual sayı<select name="count">${[3, 5, 8, 10].map((n) => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="field">Növ<select name="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
+      </div>
+      <label class="field">Nümunə sual<span class="hint">istəyə bağlı · yapışdırın, AI ona bənzər suallar yaradacaq</span><textarea name="example" rows="3" maxlength="6000"></textarea></label>
+      <label class="field">Əlavə istək<span class="hint">istəyə bağlı</span><input type="text" name="notes" maxlength="500"></label>
+      <div><button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button></div>
+    </form>
+    <section id="results"></section>`;
+  $('#gen').onsubmit = (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    f.mode = 'benzer';
+    busy($('button[type=submit]', e.target), async () => {
+      const data = await callAI('generate', f);
+      simpleResults(data.questions);
+      $('#results').scrollIntoView({ behavior: 'smooth' });
+    }).catch(fail);
   };
 }
 

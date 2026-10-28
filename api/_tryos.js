@@ -26,8 +26,12 @@ DİL VƏ FORMAT
 - Hər sualda A–E olmaqla düz 5 variant və yalnız bir düzgün cavab.
 - Cavablar səliqəli: tam ədəd, rasional ədəd və ya sadə köklü ifadə. Lazımsız böyük ədəd, uzun kəsr və ağır hesablama olmasın.
 
-ÜSLUB
-- Uzun mətnli məsələlər əvəzinə sayısal ifadə, bərabərlik, cədvəl, sxem və qrafikə üstünlük ver.
+ÜSLUB: SAYISAL ŞƏRT (ÇOX VACİB)
+- Sözlü məsələ YAZMA. Şərt riyazi formada verilsin: ifadə, bərabərlik, bərabərsizlik, cədvəl, ədəd oxu, sxem, qrafik və ya Venn.
+- Mətn minimum olsun: ən çoxu bir qısa şərt cümləsi (məs. "$x$ ve $y$ pozitif tam sayılardır.") və bir qısa soru cümləsi (məs. "Buna göre, $x+y$ kaçtır?").
+- Hekayə, gündəlik həyat konteksti (alış-veriş, yaş, işçi, hovuz və s.), adlar və uzun izahlar OLMASIN.
+- Şəkil/ədəd oxu varsa, nə göstərdiyini uzun cümlə ilə izah etmə; şəkildəki işarələr özü aydın olsun.
+- İdeal görünüş ÖSYM kimi: yuxarıda formul ($$...$$), altında "ifadesinin değeri kaçtır?" kimi tək sətir.
 - Çətinlik uzun hesablamadan yox, düzgün əlaqəni görməkdən yaransın.
 - Şərt qısa, aydın və yetərli olsun; qısalıq naminə vacib şərti çıxarma.
 
