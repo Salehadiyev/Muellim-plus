@@ -5,7 +5,7 @@
 //   SUPABASE_ANON_KEY   — Supabase "anon public" açarı
 //   ANTHROPIC_MODEL     — (istəyə bağlı) model adı
 
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 
 const SYSTEM = `Sən Azərbaycanda orta məktəb riyaziyyat müəllimlərinə kömək edən təcrübəli metodistsən.
 Qaydalar:

@@ -47,6 +47,6 @@ Riyaziyyat müəllimləri üçün platforma: siniflər, şagirdlər, AI ilə sua
 Supabase → **Authentication → URL Configuration** → **Site URL** yerinə Vercel linkini yaz.
 
 ## Qeydlər
-- Model `ANTHROPIC_MODEL` dəyişəni ilə dəyişdirilə bilər (standart: `claude-sonnet-5-5`).
+- Model `ANTHROPIC_MODEL` dəyişəni ilə dəyişdirilə bilər (standart: `claude-opus-5-5`; daha ucuz variant: `claude-sonnet-5-5`).
 - AI istifadəsi hər sorğuya görə ödənişlidir; Anthropic Console-da xərc limiti qoymaq tövsiyə olunur.
 - Şagirdlər test linkini açanda cavablar onlara görünmür, bal serverdə hesablanır.
