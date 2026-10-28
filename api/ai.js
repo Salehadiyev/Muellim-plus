@@ -15,7 +15,7 @@ const HELPER_MODEL = process.env.HELPER_MODEL || 'claude-sonnet-5-5';
 export const MODELS = {
   'opus': { provider: 'anthropic', id: process.env.ANTHROPIC_MODEL || 'claude-opus-5-5', label: 'Claude Opus 5.5' },
   'sonnet': { provider: 'anthropic', id: process.env.SONNET_MODEL || 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
-  'gemini-flash': { provider: 'google', id: process.env.GEMINI_MODEL || 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+  'gemini-flash': { provider: 'google', id: process.env.GEMINI_MODEL || 'gemini-flash-latest', label: 'Gemini 3.8 Flash' },
   'gpt-sol': { provider: 'openai', id: process.env.OPENAI_MODEL || 'gpt-6.1-sol', label: 'GPT-6.1 Sol' }
 };
 const PROVIDER_KEY = { anthropic: 'ANTHROPIC_API_KEY', google: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY' };
