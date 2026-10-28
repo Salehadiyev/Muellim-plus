@@ -5,6 +5,7 @@
 //   SUPABASE_ANON_KEY   — Supabase "anon public" açarı
 //   ANTHROPIC_MODEL     — (istəyə bağlı) model adı
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS } from './_tryos.js';
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
@@ -13,10 +14,10 @@ const HELPER_MODEL = process.env.HELPER_MODEL || 'claude-sonnet-5-5';
 
 // Müəllimin seçə biləcəyi modellər. Açarı olmayan provayder brauzerdə boz görünür.
 export const MODELS = {
-  'opus': { provider: 'anthropic', id: process.env.ANTHROPIC_MODEL || 'claude-opus-5-5', label: 'Claude Opus 5.5' },
-  'sonnet': { provider: 'anthropic', id: process.env.SONNET_MODEL || 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
-  'gemini-flash': { provider: 'google', id: process.env.GEMINI_MODEL || 'gemini-flash-latest', label: 'Gemini 3.8 Flash' },
-  'gpt-sol': { provider: 'openai', id: process.env.OPENAI_MODEL || 'gpt-6.1-sol', label: 'GPT-6.1 Sol' }
+  'opus': { key: 'opus', provider: 'anthropic', id: process.env.ANTHROPIC_MODEL || 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+  'sonnet': { key: 'sonnet', provider: 'anthropic', id: process.env.SONNET_MODEL || 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+  'gemini-flash': { key: 'gemini-flash', provider: 'google', id: process.env.GEMINI_MODEL || 'gemini-flash-latest', label: 'Gemini 3.8 Flash' },
+  'gpt-sol': { key: 'gpt-sol', provider: 'openai', id: process.env.OPENAI_MODEL || 'gpt-6.1-sol', label: 'GPT-6.1 Sol' }
 };
 const PROVIDER_KEY = { anthropic: 'ANTHROPIC_API_KEY', google: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY' };
 
@@ -86,15 +87,26 @@ export default async function handler(req, res) {
       return out;
     };
 
-    if (action === 'generate') return res.status(200).json(tag(await generate(body)));
-    if (action === 'extract') return res.status(200).json(await extract(body));
-    if (action === 'transform') return res.status(200).json(tag(await transform(body)));
-    if (action === 'tryos_plan') return res.status(200).json(await tryosPlan(body));
-    if (action === 'tryos_generate') return res.status(200).json(tag(await tryosGenerate(body)));
-    if (action === 'verify') return res.status(200).json(await verify(body));
-    if (action === 'tryos_from_examples') return res.status(200).json(tag(await tryosFromExamples(body)));
-
-    return res.status(400).json({ error: 'Naməlum əməliyyat' });
+    const actions = {
+      generate: async () => tag(await generate(body)),
+      extract: () => extract(body),
+      transform: async () => tag(await transform(body)),
+      tryos_plan: () => tryosPlan(body),
+      tryos_generate: async () => tag(await tryosGenerate(body)),
+      verify: () => verify(body),
+      tryos_from_examples: async () => tag(await tryosFromExamples(body))
+    };
+    if (!actions[action]) return res.status(400).json({ error: 'Naməlum əməliyyat' });
+    const store = { calls: [] };
+    try {
+      const out = await usageStore.run(store, actions[action]);
+      const made = (out.questions ? out.questions.length : 0) + (out.question ? 1 : 0);
+      await saveUsage(req, action, store.calls, made, body._model.key);
+      return res.status(200).json(out);
+    } catch (err) {
+      await saveUsage(req, action, store.calls, 0, body._model.key); // uğursuz sorğunun da xərci yazılsın
+      throw err;
+    }
   } catch (err) {
     console.error(err);
     return res.status(err.status || 500).json({ error: err.publicMessage || 'AI xətası. Bir az sonra yenidən yoxlayın.' });
@@ -400,7 +412,62 @@ async function verifyTeacher(req) {
   return user && user.id ? user : null;
 }
 
-const HELPER = { provider: 'anthropic', id: HELPER_MODEL, label: 'Claude Sonnet' };
+const HELPER = { key: 'sonnet', provider: 'anthropic', id: HELPER_MODEL, label: 'Claude Sonnet', helper: true };
+
+// ---------- Xərc uçotu ----------
+// Hər sorğunun token istifadəsi bu "yaddaşa" yığılır və sonda bazaya yazılır
+const usageStore = new AsyncLocalStorage();
+
+// Qiymətlər: 1 milyon token üçün USD (oktyabr 2026). Dəyişsə, yalnız burada yeniləmək kifayətdir.
+function priceOf(key) {
+  if (key === 'opus') return { in: 4, out: 20 };
+  if (key === 'sonnet') return { in: 2, out: 10 };
+  if (key === 'gpt-sol') return { in: 2, out: 10, cached: 0.10 };
+  if (key === 'gemini-flash') return new Date() >= new Date('2027-01-01') ? { in: 1.5, out: 7.5 } : { in: 0.75, out: 3.75 };
+  return { in: 0, out: 0 };
+}
+
+function recordUsage(model, u) {
+  const store = usageStore.getStore();
+  if (!store || !u) return;
+  const p = priceOf(model.key);
+  let input = 0, output = 0, cost = 0;
+  if (model.provider === 'anthropic') {
+    const cw = u.cache_creation_input_tokens || 0, cr = u.cache_read_input_tokens || 0;
+    input = (u.input_tokens || 0) + cw + cr;
+    output = u.output_tokens || 0;
+    cost = ((u.input_tokens || 0) * p.in + cw * p.in * 1.25 + cr * p.in * 0.1 + output * p.out) / 1e6;
+  } else if (model.provider === 'google') {
+    input = u.promptTokenCount || 0;
+    output = (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0);
+    cost = (input * p.in + output * p.out) / 1e6;
+  } else if (model.provider === 'openai') {
+    const cached = u.input_tokens_details?.cached_tokens || 0;
+    input = u.input_tokens || 0;
+    output = u.output_tokens || 0;
+    cost = ((input - cached) * p.in + cached * (p.cached ?? p.in) + output * p.out) / 1e6;
+  }
+  store.calls.push({ model: model.key, role: model.helper ? 'helper' : 'main', input_tokens: input, output_tokens: output, cost_usd: Math.round(cost * 1e6) / 1e6 });
+}
+
+async function saveUsage(req, action, calls, questions, forModel) {
+  if (!calls.length) return;
+  const url = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  let mainMarked = false;
+  const rows = calls.map((c) => {
+    const row = { action, ...c, for_model: forModel, questions: 0 };
+    if (!mainMarked && c.role === 'main' && questions) { row.questions = questions; mainMarked = true; }
+    return row;
+  });
+  try {
+    const r = await fetch(url + '/rest/v1/ai_usage', {
+      method: 'POST',
+      headers: { apikey: process.env.SUPABASE_ANON_KEY, authorization: req.headers['authorization'], 'content-type': 'application/json', prefer: 'return=minimal' },
+      body: JSON.stringify(rows)
+    });
+    if (!r.ok) console.error('usage save', r.status, (await r.text()).slice(0, 300));
+  } catch (err) { console.error('usage save', err); }
+}
 
 // content: Anthropic formatında bloklar ({type:'text'} və {type:'image'}); digər provayderlər üçün çevrilir
 async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HELPER } = {}) {
@@ -449,7 +516,7 @@ async function callAnthropic(model, system, content, maxTokens) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw aiError('Claude', r.status, data);
-  if (data.usage) console.log('usage', model.id, JSON.stringify(data.usage));
+  recordUsage(model, data.usage);
   return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
 }
 
@@ -468,7 +535,7 @@ async function callGemini(model, system, content, maxTokens) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw aiError('Gemini', r.status, data);
-  if (data.usageMetadata) console.log('usage', model.id, JSON.stringify(data.usageMetadata));
+  recordUsage(model, data.usageMetadata);
   const cand = (data.candidates || [])[0];
   const text = (cand?.content?.parts || []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');
   if (!text) throw publicError('Gemini boş cavab qaytardı' + (cand?.finishReason ? ' (' + cand.finishReason + ')' : ''), 502);
@@ -496,7 +563,7 @@ async function callOpenAI(model, system, content, maxTokens) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw aiError('OpenAI', r.status, data);
-  if (data.usage) console.log('usage', model.id, JSON.stringify(data.usage));
+  recordUsage(model, data.usage);
   if (typeof data.output_text === 'string' && data.output_text) return data.output_text;
   const text = (data.output || []).flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text).join('');
   if (!text) throw publicError('OpenAI boş cavab qaytardı', 502);

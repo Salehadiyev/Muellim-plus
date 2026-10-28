@@ -271,6 +271,52 @@ function loginView() {
 
 // ================= Panel =================
 
+// AI sayğacı: hər model üzrə yaradılan, banka düşən, boşa gedən sual və xərc
+async function renderUsage(period = 'month') {
+  const box = $('#usageCard');
+  if (!box) return;
+  let q = sb.from('ai_usage').select('model, for_model, role, cost_usd, questions, created_at').order('created_at', { ascending: false }).limit(20000);
+  let qq = sb.from('questions').select('model, created_at').not('model', 'is', null).limit(20000);
+  if (period === 'month') {
+    const from = new Date(); from.setDate(1); from.setHours(0, 0, 0, 0);
+    q = q.gte('created_at', from.toISOString());
+    qq = qq.gte('created_at', from.toISOString());
+  }
+  const [{ data: usage, error }, { data: saved }] = await Promise.all([q, qq]);
+  if (error) {
+    box.innerHTML = `<h2>AI sayğacı</h2><p class="notice">Sayğac üçün bazanı yeniləmək lazımdır: Supabase SQL Editor-də <b>supabase/003_usage.sql</b> faylını işə salın.</p>`;
+    return;
+  }
+  const label = (k) => (aiModels.find((m) => m.key === k) || {}).label || k;
+  const rows = {};
+  const get = (k) => (rows[k] = rows[k] || { made: 0, saved: 0, mainCost: 0, helperCost: 0 });
+  (usage || []).forEach((u) => {
+    const k = u.role === 'helper' ? (u.for_model || u.model) : u.model;
+    const r = get(k);
+    if (u.role === 'helper') r.helperCost += +u.cost_usd; else r.mainCost += +u.cost_usd;
+    r.made += u.questions || 0;
+  });
+  (saved || []).forEach((x) => { get(x.model).saved++; });
+  const keys = Object.keys(rows).sort((a, b) => (rows[b].mainCost + rows[b].helperCost) - (rows[a].mainCost + rows[a].helperCost));
+  const money = (v) => '$' + v.toFixed(v < 1 ? 3 : 2);
+  const tot = keys.reduce((t, k) => ({ made: t.made + rows[k].made, saved: t.saved + rows[k].saved, cost: t.cost + rows[k].mainCost + rows[k].helperCost }), { made: 0, saved: 0, cost: 0 });
+  box.innerHTML = `<div class="row between"><h2>AI sayğacı</h2>
+      <div class="tabs" role="tablist" aria-label="Dövr">
+        <button type="button" role="tab" data-period="month" aria-selected="${period === 'month'}">Bu ay</button>
+        <button type="button" role="tab" data-period="all" aria-selected="${period === 'all'}">Hamısı</button></div></div>
+    ${keys.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Model</th><th>Yaradılıb</th><th>Banka</th><th>Boşa</th><th>Xərc</th><th>1 sual</th></tr></thead>
+      <tbody>${keys.map((k) => { const r = rows[k]; const cost = r.mainCost + r.helperCost; const waste = Math.max(0, r.made - r.saved);
+        return `<tr><td><strong>${esc(label(k))}</strong></td><td>${r.made}</td><td>${r.saved}</td><td>${waste}</td>
+          <td title="Yaratma: ${money(r.mainCost)} · Oxuma və yoxlama: ${money(r.helperCost)}"><strong>${money(cost)}</strong></td>
+          <td class="muted">${r.made ? money(cost / r.made) : '—'}</td></tr>`; }).join('')}
+      <tr><td><strong>Cəmi</strong></td><td><strong>${tot.made}</strong></td><td><strong>${tot.saved}</strong></td><td><strong>${Math.max(0, tot.made - tot.saved)}</strong></td><td><strong>${money(tot.cost)}</strong></td><td class="muted">${tot.made ? money(tot.cost / tot.made) : '—'}</td></tr>
+      </tbody></table></div>
+      <p class="muted small">Xərc təxminidir: tokenlərə və rəsmi qiymətlərə görə hesablanır. Oxuma və ikinci yoxlama xərci seçdiyiniz modelin üstünə yazılır. Dəqiq məbləği provayderin öz panelində görə bilərsiniz.</p>`
+    : '<div class="empty">Hələ qeyd yoxdur. Sayğac bundan sonra yaradılan suallardan başlayır.</div>'}`;
+  $$('[data-period]', box).forEach((b) => b.onclick = () => renderUsage(b.dataset.period));
+}
+
 async function dashboard() {
   const name = session.user.user_metadata?.full_name || '';
   const [c, s, q, sub, recent] = await Promise.all([
@@ -289,6 +335,7 @@ async function dashboard() {
     <section class="grid" aria-label="Göstəricilər">
       ${stat('Siniflər', c.count)}${stat('Şagirdlər', s.count)}${stat('Sual bankı', q.count)}${stat('Test nəticələri', sub.count)}
     </section>
+    <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
     <section class="stack"><h2>Sürətli başla</h2><div class="grid">
       <a class="card action-card" href="#/ai"><span class="icon-box">${icons.spark}</span><h3>AI ilə sual yarat</h3><p class="muted small">Mövzu, sinif və çətinliyi seç, suallar həlli ilə hazır olsun.</p></a>
       <a class="card action-card accent" href="#/book"><span class="icon-box" style="background:var(--accent)">${icons.cut.replace('aria-hidden', 'style="stroke:#fff" aria-hidden')}</span><h3>Kitabdan sual kəs</h3><p class="muted small">Səhifənin şəklini çək, sualı seç, AI onu orijinal suala çevirsin.</p></a>
@@ -300,6 +347,7 @@ async function dashboard() {
         ${recent.data.map((r) => `<tr><td>${esc(r.student_name)}</td><td>${esc(r.tests?.title)}</td><td><strong>${r.score}/${r.total}</strong></td><td class="muted">${fmtDate(r.created_at)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">Hələ nəticə yoxdur. Test yaradıb linki şagirdlərə göndərin.</div>'}
     </section>`;
+  renderUsage().catch(fail);
 }
 
 // ================= Siniflər =================
@@ -497,6 +545,7 @@ async function saveQuestions(list, source) {
     if (hasOptionFigures(q)) row.option_figures = q.option_figures;
     if (q.section) row.section = q.section;
     if (q.subtype) row.subtype = q.subtype;
+    if (q.model) row.model = q.model;
     if (typeof q.verified === 'boolean') { row.verified = q.verified; row.verify_note = q.verify_note || null; }
     return row;
   });

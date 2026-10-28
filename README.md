@@ -48,6 +48,7 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 
 ## Yeniləmələr (bazaya)
 - **002_tryos.sql** — TR-YÖS, şəkillər və yoxlama üçün yeni sütunlar. Supabase → SQL Editor → faylın hamısını yapışdır → Run.
+- **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
 
 ## TR-YÖS rejimi
 - AI ilə sual → **TR-YÖS**: türkcə, 5 variant, əvvəlcə tip planı, sonra 3-lük partiyalarla suallar (40-a qədər).
