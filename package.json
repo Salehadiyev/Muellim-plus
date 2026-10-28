@@ -1,0 +1,10 @@
+{
+  "name": "muellim-plus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Müəllim+ — riyaziyyat müəllimləri üçün platforma (ilk versiya)",
+  "engines": {
+    "node": ">=18"
+  }
+}
