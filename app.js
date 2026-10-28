@@ -4,6 +4,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const $app = document.getElementById('app');
 let sb = null;
 let session = null;
+let aiModels = []; // /api/config-dan: hansı modellər qoşulub
 let pendingTestIds = []; // sual bankından testə keçəndə seçilən suallar
 let pendingPrint = null;  // PDF üçün seçilən suallar { questions, title, back }
 
@@ -41,11 +42,33 @@ function fmtDate(iso) {
   } catch (_) { return iso; }
 }
 
+function currentModel() {
+  let m = '';
+  try { m = localStorage.getItem('mp_model') || ''; } catch (_) { /* yaddaş yoxdur */ }
+  const ok = aiModels.find((x) => x.key === m && x.ready);
+  return ok ? m : (aiModels.find((x) => x.ready)?.key || 'opus');
+}
+
+function modelPicker() {
+  const cur = currentModel();
+  return `<label class="model-pick">Model
+    <select data-model>${(aiModels.length ? aiModels : [{ key: 'opus', label: 'Claude Opus 5.5', note: '', ready: true }]).map((m) =>
+      `<option value="${m.key}" ${m.key === cur ? 'selected' : ''} ${m.ready ? '' : 'disabled'}>${esc(m.label)} · ${esc(m.ready ? m.note : 'açar qoşulmayıb')}</option>`).join('')}</select></label>`;
+}
+
+function bindModelPicker(root = document) {
+  $$('[data-model]', root).forEach((sel) => sel.onchange = () => {
+    try { localStorage.setItem('mp_model', sel.value); } catch (_) { /* boş */ }
+    $$('[data-model]').forEach((o) => { o.value = sel.value; });
+    toast('Model: ' + sel.options[sel.selectedIndex].text.split(' · ')[0]);
+  });
+}
+
 async function callAI(action, payload) {
   const r = await fetch('/api/ai', {
     method: 'POST',
     headers: { 'content-type': 'application/json', Authorization: 'Bearer ' + (session?.access_token || '') },
-    body: JSON.stringify({ action, ...payload })
+    body: JSON.stringify({ action, model: currentModel(), ...payload })
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || 'AI xətası');
@@ -127,6 +150,7 @@ function questionHtml(q, { selectable = false, checked = false, showAnswer = tru
     q.grade ? `<span class="tag">${esc(gradeLabel(q.grade))}</span>` : '',
     q.difficulty ? `<span class="tag amber">${esc(q.difficulty)}</span>` : '',
     q.exam === 'tryos' ? '<span class="tag book">TR-YÖS</span>' : '',
+    q.model ? `<span class="tag">${esc((aiModels.find((m) => m.key === q.model) || {}).label || q.model)}</span>` : '',
     q.subtype ? `<span class="tag">${esc(q.subtype)}</span>` : '',
     q.qtype === 'open' ? '<span class="tag">açıq sual</span>' : '',
     ver
@@ -152,6 +176,7 @@ async function boot() {
     const cfg = await r.json();
     if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) throw new Error('config');
     sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    aiModels = Array.isArray(cfg.models) ? cfg.models : [];
   } catch (_) {
     $app.innerHTML = `<div class="center-screen"><div class="card auth-card stack">
       <h1>Quraşdırma bitməyib</h1>
@@ -656,7 +681,7 @@ const extractQueue = makeQueue(3);
 
 async function aiView() {
   view().innerHTML = `
-    <div class="page-head"><div><h1>TR-YÖS sual yaradıcı</h1><p class="muted">Nümunə sualları seçin, hər birinin yanında yeni sual yaradılsın.</p></div></div>
+    <div class="page-head"><div><h1>TR-YÖS sual yaradıcı</h1><p class="muted">Nümunə sualları seçin, hər birinin yanında yeni sual yaradılsın.</p></div>${modelPicker()}</div>
     <div class="tabs" role="tablist" aria-label="Rejim">
       <button type="button" role="tab" data-tab="examples">Nümunədən yarat</button>
       <button type="button" role="tab" data-tab="topic">Mövzudan yarat</button>
@@ -675,6 +700,7 @@ async function aiView() {
     else generalTab();
   };
   $$('[data-tab]').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
+  bindModelPicker(view());
   setTab(tyState.tab);
 }
 

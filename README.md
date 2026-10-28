@@ -59,6 +59,19 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - Sual bankı → sualları seç → **PDF**; və ya AI nəticələrindən, test səhifəsindən.
 - A4, iki sütun, səhifədə 4 və ya 6 sual, sonda cavab açarı; ayrıca "Həllər" sənədi.
 
+## AI modelləri
+TR-YÖS səhifəsinin yuxarısında model seçilir. Açarı olmayan model boz görünür.
+
+| Model | Vercel dəyişəni |
+|---|---|
+| Claude Opus 5.5 / Sonnet 5.5 | `ANTHROPIC_API_KEY` |
+| GPT-6.1 Sol | `OPENAI_API_KEY` |
+| Gemini 3.8 Flash | `GEMINI_API_KEY` |
+
+Şəkil oxuma və ikinci yoxlama həmişə Claude Sonnet ilə edilir (`HELPER_MODEL`).
+Model adları dəyişsə: `ANTHROPIC_MODEL`, `SONNET_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`.
+Yeni dəyişən əlavə edəndən sonra Vercel-də **Redeploy** lazımdır.
+
 ## Qeydlər
 - Model `ANTHROPIC_MODEL` dəyişəni ilə dəyişdirilə bilər (standart: `claude-opus-5-5`; daha ucuz variant: `claude-sonnet-5-5`).
 - AI istifadəsi hər sorğuya görə ödənişlidir; Anthropic Console-da xərc limiti qoymaq tövsiyə olunur.

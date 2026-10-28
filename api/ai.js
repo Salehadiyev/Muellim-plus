@@ -8,6 +8,23 @@
 import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS } from './_tryos.js';
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
+// Köməkçi işlər (şəkil oxuma, ikinci yoxlama) üçün daha ucuz model
+const HELPER_MODEL = process.env.HELPER_MODEL || 'claude-sonnet-5-5';
+
+// Müəllimin seçə biləcəyi modellər. Açarı olmayan provayder brauzerdə boz görünür.
+export const MODELS = {
+  'opus': { provider: 'anthropic', id: process.env.ANTHROPIC_MODEL || 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+  'sonnet': { provider: 'anthropic', id: process.env.SONNET_MODEL || 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
+  'gemini-flash': { provider: 'google', id: process.env.GEMINI_MODEL || 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+  'gpt-sol': { provider: 'openai', id: process.env.OPENAI_MODEL || 'gpt-6.1-sol', label: 'GPT-6.1 Sol' }
+};
+const PROVIDER_KEY = { anthropic: 'ANTHROPIC_API_KEY', google: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY' };
+
+function resolveModel(key) {
+  const m = MODELS[key] || MODELS.opus;
+  if (!process.env[PROVIDER_KEY[m.provider]]) throw publicError(`${m.label} üçün API açarı qurulmayıb (Vercel → ${PROVIDER_KEY[m.provider]})`);
+  return m;
+}
 
 const SYSTEM = `Sən Azərbaycanda orta məktəb riyaziyyat müəllimlərinə kömək edən təcrübəli metodistsən.
 Qaydalar:
@@ -60,14 +77,22 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const action = body.action;
+    body._model = resolveModel(body.model);
+    const tag = (out) => {
+      // hansı modelin yaratdığı ekranda görünsün
+      const key = MODELS[body.model] ? body.model : 'opus';
+      (out.questions || []).forEach((q) => { q.model = key; });
+      if (out.question) out.question.model = key;
+      return out;
+    };
 
-    if (action === 'generate') return res.status(200).json(await generate(body));
+    if (action === 'generate') return res.status(200).json(tag(await generate(body)));
     if (action === 'extract') return res.status(200).json(await extract(body));
-    if (action === 'transform') return res.status(200).json(await transform(body));
+    if (action === 'transform') return res.status(200).json(tag(await transform(body)));
     if (action === 'tryos_plan') return res.status(200).json(await tryosPlan(body));
-    if (action === 'tryos_generate') return res.status(200).json(await tryosGenerate(body));
+    if (action === 'tryos_generate') return res.status(200).json(tag(await tryosGenerate(body)));
     if (action === 'verify') return res.status(200).json(await verify(body));
-    if (action === 'tryos_from_examples') return res.status(200).json(await tryosFromExamples(body));
+    if (action === 'tryos_from_examples') return res.status(200).json(tag(await tryosFromExamples(body)));
 
     return res.status(400).json({ error: 'Naməlum əməliyyat' });
   } catch (err) {
@@ -104,7 +129,7 @@ ${extra ? 'Müəllimin əlavə istəyi: ' + extra : ''}${exampleBlock}
 Suallar bir-birini təkrarlamasın.
 Cavabı bu formada qaytar: {"questions": [ ${QUESTION_SHAPE} ]}`;
 
-  const data = await askJSON([{ type: 'text', text: prompt }]);
+  const data = await askJSON([{ type: 'text', text: prompt }], { model: b._model });
   const list = Array.isArray(data.questions) ? data.questions : [];
   const questions = list.map(q => normalizeQuestion(q, { grade, difficulty, qtype, topic })).filter(Boolean);
   if (!questions.length) throw publicError('AI sual qaytarmadı, yenidən yoxlayın');
@@ -161,7 +186,7 @@ ${per > 1 ? 'Eyni nümunədən yaranan suallar bir-birinin ədəd dəyişdirilmi
 ${notes ? 'Müəllimin əlavə istəyi: ' + notes : ''}
 Hər sualda "sample" sahəsinə nümunənin nömrəsini (0-dan) yaz.
 Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE.replace('{', '{\n  "sample": 0,')} ]}` });
-  const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 20000 });
+  const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 20000, model: b._model });
   const list = Array.isArray(data.questions) ? data.questions : [];
   const questions = list.map((q) => {
     const sample = clampInt(q.sample, 0, samples.length - 1, 0);
@@ -220,7 +245,7 @@ ${text}
 
 Bu formada qaytar: {"question": ${QUESTION_SHAPE}, "changes": ["nə dəyişdi, 3-4 qısa bənd"]}`;
 
-  const data = await askJSON([{ type: 'text', text: prompt }]);
+  const data = await askJSON([{ type: 'text', text: prompt }], { model: b._model });
   const question = normalizeQuestion(data.question, { grade, difficulty, qtype, topic });
   if (!question) throw publicError('AI sual qaytarmadı, yenidən yoxlayın');
   const changes = Array.isArray(data.changes) ? data.changes.slice(0, 6).map(c => String(c).slice(0, 160)) : [];
@@ -261,7 +286,7 @@ Hələ sualları yazma, yalnız plan.
 Bu formada qaytar:
 {"plan": [{"subtype": "qısa tip adı (türkcə)", "idea": "sualın əsas ideyası, 1 cümlə", "topic": "mövzu (türkcə)", "section": "matematik|sayisal", "difficulty": "asan|orta|çətin", "visual": "yok|grafik|venn|tablo|şema|şekil"}],
  "notes": "mövzu dar olduğu üçün fərqli tip çatışmırsa, bunu Azərbaycan dilində qısa yaz; əks halda boş"}`;
-  const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 6000 });
+  const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 8000, model: b._model });
   const plan = (Array.isArray(data.plan) ? data.plan : []).slice(0, count).map((p) => ({
     subtype: String(p.subtype || '').slice(0, 120),
     idea: String(p.idea || '').slice(0, 400),
@@ -288,7 +313,7 @@ ${avoid ? '\nBu paketdə artıq yazılmış suallar (bunları və onların ədə
 
 Hər sualı yazmazdan əvvəl özün tam həll et və yoxla. Vizual "yok" deyilsə, "figure" sahəsinə SVG çək.
 Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE} ]}`;
-  const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 16000 });
+  const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 16000, model: b._model });
   const list = Array.isArray(data.questions) ? data.questions : [];
   const questions = list.map((q, i) => normalizeTryos(q, items[i] || items[0])).filter(Boolean);
   if (!questions.length) throw publicError('AI sual qaytarmadı, yenidən yoxlayın', 502);
@@ -375,7 +400,27 @@ async function verifyTeacher(req) {
   return user && user.id ? user : null;
 }
 
-async function askJSON(content, { system = SYSTEM, maxTokens = 12000 } = {}) {
+const HELPER = { provider: 'anthropic', id: HELPER_MODEL, label: 'Claude Sonnet' };
+
+// content: Anthropic formatında bloklar ({type:'text'} və {type:'image'}); digər provayderlər üçün çevrilir
+async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HELPER } = {}) {
+  let text;
+  if (model.provider === 'google') text = await callGemini(model, system, content, maxTokens);
+  else if (model.provider === 'openai') text = await callOpenAI(model, system, content, maxTokens);
+  else text = await callAnthropic(model, system, content, maxTokens);
+  return parseJSON(text);
+}
+
+function aiError(name, status, data) {
+  console.error(name + ' error', status, JSON.stringify(data).slice(0, 2000));
+  if (status === 401 || status === 403) return publicError(`${name}: API açarı yanlışdır və ya icazə yoxdur`, 502);
+  if (status === 429) return publicError(`${name}: çox sorğu və ya balans bitib, bir az sonra yoxlayın`, 429);
+  if (status === 404) return publicError(`${name}: model tapılmadı`, 502);
+  if (status === 400 && /credit|balance|billing/i.test(JSON.stringify(data))) return publicError(`${name}: balans bitib`, 402);
+  return publicError(`${name} cavab vermədi`, 502);
+}
+
+async function callAnthropic(model, system, content, maxTokens) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -384,21 +429,66 @@ async function askJSON(content, { system = SYSTEM, maxTokens = 12000 } = {}) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: model.id,
       max_tokens: maxTokens,
-      system,
+      // uzun qaydalar keşdə saxlanılır: təkrar sorğularda çox ucuz oxunur
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content }]
     })
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    console.error('Anthropic error', r.status, data);
-    if (r.status === 401) throw publicError('API açarı yanlışdır', 502);
-    if (r.status === 429) throw publicError('Çox sorğu göndərildi, bir dəqiqə gözləyin', 429);
-    throw publicError('AI xidməti cavab vermədi', 502);
-  }
-  const text = (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
-  return parseJSON(text);
+  if (!r.ok) throw aiError('Claude', r.status, data);
+  if (data.usage) console.log('usage', model.id, JSON.stringify(data.usage));
+  return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+}
+
+async function callGemini(model, system, content, maxTokens) {
+  const parts = content.map((c) => c.type === 'image'
+    ? { inline_data: { mime_type: c.source.media_type, data: c.source.data } }
+    : { text: c.text });
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.id)}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts }],
+      generationConfig: { maxOutputTokens: Math.max(maxTokens, 16000), responseMimeType: 'application/json' }
+    })
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw aiError('Gemini', r.status, data);
+  if (data.usageMetadata) console.log('usage', model.id, JSON.stringify(data.usageMetadata));
+  const cand = (data.candidates || [])[0];
+  const text = (cand?.content?.parts || []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');
+  if (!text) throw publicError('Gemini boş cavab qaytardı' + (cand?.finishReason ? ' (' + cand.finishReason + ')' : ''), 502);
+  return text;
+}
+
+async function callOpenAI(model, system, content, maxTokens) {
+  const input = [{
+    role: 'user',
+    content: content.map((c) => c.type === 'image'
+      ? { type: 'input_image', image_url: `data:${c.source.media_type};base64,${c.source.data}` }
+      : { type: 'input_text', text: c.text })
+  }];
+  const r = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.OPENAI_API_KEY },
+    body: JSON.stringify({
+      model: model.id,
+      instructions: system + '\nCavabı JSON formatında qaytar.',
+      input,
+      max_output_tokens: Math.max(maxTokens, 16000),
+      text: { format: { type: 'json_object' } }
+    })
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw aiError('OpenAI', r.status, data);
+  if (data.usage) console.log('usage', model.id, JSON.stringify(data.usage));
+  if (typeof data.output_text === 'string' && data.output_text) return data.output_text;
+  const text = (data.output || []).flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text).join('');
+  if (!text) throw publicError('OpenAI boş cavab qaytardı', 502);
+  return text;
 }
 
 function parseJSON(text) {

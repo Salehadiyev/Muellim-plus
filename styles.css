@@ -306,3 +306,6 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 .dlg-pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 18px; align-items: start; }
 .dlg-src img { width: 100%; border: 1px solid var(--line); border-radius: 8px; margin-top: 4px; }
 @media (max-width: 700px) { .dlg-pair { grid-template-columns: 1fr; } }
+
+.model-pick { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; min-width: 260px; }
+.model-pick select { min-height: 42px; font-size: 14px; }
