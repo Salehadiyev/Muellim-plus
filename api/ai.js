@@ -417,11 +417,22 @@ function aiError(name, status, data) {
   if (status === 429) return publicError(`${name}: çox sorğu və ya balans bitib, bir az sonra yoxlayın`, 429);
   if (status === 404) return publicError(`${name}: model tapılmadı`, 502);
   if (status === 400 && /credit|balance|billing/i.test(JSON.stringify(data))) return publicError(`${name}: balans bitib`, 402);
-  return publicError(`${name} cavab vermədi`, 502);
+  const msg = String(data?.error?.message || data?.error?.status || data?.message || '').replace(/\s+/g, ' ').slice(0, 220);
+  return publicError(`${name} cavab vermədi (${status}${msg ? ': ' + msg : ''})`, 502);
+}
+
+// Müvəqqəti xətalarda (həddən artıq yüklənmə) bir dəfə yenidən cəhd
+async function fetchRetry(url, opts) {
+  let r = await fetch(url, opts);
+  if ([500, 502, 503, 529].includes(r.status)) {
+    await new Promise((z) => setTimeout(z, 2500));
+    r = await fetch(url, opts);
+  }
+  return r;
 }
 
 async function callAnthropic(model, system, content, maxTokens) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+  const r = await fetchRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -444,9 +455,9 @@ async function callAnthropic(model, system, content, maxTokens) {
 
 async function callGemini(model, system, content, maxTokens) {
   const parts = content.map((c) => c.type === 'image'
-    ? { inline_data: { mime_type: c.source.media_type, data: c.source.data } }
+    ? { inlineData: { mimeType: c.source.media_type, data: c.source.data } }
     : { text: c.text });
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.id)}:generateContent`, {
+  const r = await fetchRetry(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.id)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
     body: JSON.stringify({
@@ -471,7 +482,7 @@ async function callOpenAI(model, system, content, maxTokens) {
       ? { type: 'input_image', image_url: `data:${c.source.media_type};base64,${c.source.data}` }
       : { type: 'input_text', text: c.text })
   }];
-  const r = await fetch('https://api.openai.com/v1/responses', {
+  const r = await fetchRetry('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.OPENAI_API_KEY },
     body: JSON.stringify({
