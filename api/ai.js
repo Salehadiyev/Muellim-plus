@@ -481,6 +481,7 @@ async function callOpenAI(model, system, content, maxTokens) {
     content: content.map((c) => c.type === 'image'
       ? { type: 'input_image', image_url: `data:${c.source.media_type};base64,${c.source.data}` }
       : { type: 'input_text', text: c.text })
+      .concat([{ type: 'input_text', text: 'Return the answer as a single valid JSON object (json).' }])
   }];
   const r = await fetchRetry('https://api.openai.com/v1/responses', {
     method: 'POST',
