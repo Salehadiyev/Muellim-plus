@@ -5,6 +5,7 @@ const $app = document.getElementById('app');
 let sb = null;
 let session = null;
 let pendingTestIds = []; // sual bankından testə keçəndə seçilən suallar
+let pendingPrint = null;  // PDF üçün seçilən suallar { questions, title, back }
 
 // ================= Köməkçilər =================
 
@@ -70,22 +71,72 @@ const icons = {
   users: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 010 7M18 14.8c2 .7 3.2 2.5 3.6 5.2"/></svg>'
 };
 
+// AI-ın çəkdiyi SVG-ni təhlükəsiz hala gətirir (skript, xarici link, hadisə atributları silinir)
+const SVG_ALLOWED = new Set(['svg', 'g', 'path', 'line', 'polyline', 'polygon', 'rect', 'circle', 'ellipse', 'text', 'tspan',
+  'defs', 'marker', 'title', 'desc', 'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern', 'use', 'symbol']);
+const svgCache = new Map();
+function safeSvg(src) {
+  const raw = String(src || '').trim();
+  if (!raw.startsWith('<svg')) return '';
+  if (svgCache.has(raw)) return svgCache.get(raw);
+  let out = '';
+  try {
+    const doc = new DOMParser().parseFromString(raw, 'image/svg+xml');
+    const root = doc.documentElement;
+    if (root && root.nodeName.toLowerCase() === 'svg' && !doc.querySelector('parsererror')) {
+      const walk = (el) => {
+        for (const child of Array.from(el.children)) {
+          if (!SVG_ALLOWED.has(child.nodeName.toLowerCase())) { child.remove(); continue; }
+          walk(child);
+        }
+        for (const a of Array.from(el.attributes)) {
+          const n = a.name.toLowerCase();
+          if (n.startsWith('on') || ((n === 'href' || n === 'xlink:href') && !a.value.trim().startsWith('#'))) el.removeAttribute(a.name);
+        }
+      };
+      walk(root);
+      root.removeAttribute('width'); root.removeAttribute('height');
+      root.setAttribute('role', 'img');
+      out = new XMLSerializer().serializeToString(root);
+    }
+  } catch (_) { out = ''; }
+  svgCache.set(raw, out);
+  return out;
+}
+
+const hasOptionFigures = (q) => Array.isArray(q.option_figures) && q.option_figures.filter(Boolean).length === (q.options || []).length && q.options.length > 0;
+
+function optionsHtml(q, { showAnswer = true } = {}) {
+  if (!(q.qtype === 'mcq' && Array.isArray(q.options) && q.options.length)) return '';
+  const figs = hasOptionFigures(q);
+  return `<ul class="opts${figs ? ' fig-opts' : ''}">${q.options.map((o, i) => `<li class="${showAnswer && o === q.answer ? 'correct' : ''}">
+    <span class="opt-l">${'ABCDEF'[i]})</span>${figs ? `<span class="opt-fig">${safeSvg(q.option_figures[i])}</span>` : `<span>${esc(o)}</span>`}</li>`).join('')}</ul>`;
+}
+
 function questionHtml(q, { selectable = false, checked = false, showAnswer = true, actions = '' } = {}) {
   const opts = q.qtype === 'mcq' && Array.isArray(q.options) && q.options.length
-    ? `<ul class="opts">${q.options.map((o, i) => `<li class="${showAnswer && o === q.answer ? 'correct' : ''}">${'ABCDEF'[i]}) ${esc(o)}</li>`).join('')}</ul>`
+    ? optionsHtml(q, { showAnswer })
     : (showAnswer ? `<div class="small"><strong>Cavab:</strong> ${esc(q.answer)}</div>` : '');
+  const fig = q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : '';
+  const ver = q.verified === true ? '<span class="tag ai" title="İkinci AI müstəqil həll etdi və eyni cavabı tapdı">✓ yoxlanılıb</span>'
+    : q.verified === false ? `<span class="tag red" title="${esc(q.verify_note || '')}">⚠ yoxla${q.verify_note ? ': ' + esc(q.verify_note) : ''}</span>`
+    : q.verifying ? '<span class="tag">yoxlanılır…</span>' : '';
   const meta = [
     q.source ? `<span class="tag ${q.source === 'ai' ? 'ai' : q.source === 'book' ? 'book' : ''}">${esc(SOURCE_LABEL[q.source] || q.source)}</span>` : '',
     q.topic ? `<span class="tag">${esc(q.topic)}</span>` : '',
     q.grade ? `<span class="tag">${esc(gradeLabel(q.grade))}</span>` : '',
     q.difficulty ? `<span class="tag amber">${esc(q.difficulty)}</span>` : '',
-    q.qtype === 'open' ? '<span class="tag">açıq sual</span>' : ''
+    q.exam === 'tryos' ? '<span class="tag book">TR-YÖS</span>' : '',
+    q.subtype ? `<span class="tag">${esc(q.subtype)}</span>` : '',
+    q.qtype === 'open' ? '<span class="tag">açıq sual</span>' : '',
+    ver
   ].join(' ');
   return `<div class="q">
     ${selectable ? `<input type="checkbox" class="check" data-id="${esc(q.id ?? '')}" ${checked ? 'checked' : ''} aria-label="Sualı seç">` : ''}
     <div class="q-body">
       <div class="row">${meta}</div>
       <div class="q-text">${esc(q.body)}</div>
+      ${fig}
       ${opts}
       ${showAnswer && q.solution ? `<details class="sol"><summary>Həlli göstər</summary><div>${esc(q.solution)}</div></details>` : ''}
       ${actions ? `<div class="row">${actions}</div>` : ''}
@@ -124,6 +175,7 @@ function route() {
   const [page, id] = parts;
   if (page === 't' && id) return studentTest(id);
   if (!session) return loginView();
+  if (page === 'print') return printView();
 
   const views = {
     '': dashboard, classes: classesView, class: classView, bank: bankView,
@@ -309,18 +361,20 @@ async function classView(id) {
 async function bankView() {
   const { data, error } = await sb.from('questions').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) throw error;
-  let filter = { text: '', source: '', difficulty: '' };
+  let filter = { text: '', source: '', difficulty: '', exam: '' };
+  let visible = [];
   const selected = new Set();
 
   view().innerHTML = `
     <div class="page-head"><div><h1>Sual bankı</h1><p class="muted">${data.length} sual. Seçib test yarada bilərsiniz.</p></div>
-      <div class="row"><button class="btn" id="toggleManual">+ Əl ilə sual</button><button class="btn primary" id="makeTest" disabled>Seçilənlərdən test (0)</button></div></div>
+      <div class="row"><button class="btn" id="toggleManual">+ Əl ilə sual</button><button class="btn" id="selAll">Görünənləri seç</button><button class="btn" id="makePdf" disabled>PDF (0)</button><button class="btn primary" id="makeTest" disabled>Seçilənlərdən test (0)</button></div></div>
     <form class="card stack" id="manual" hidden></form>
     <div class="card stack">
       <div class="form-grid">
         <label class="field">Axtar<input type="search" id="fText" placeholder="mətn və ya mövzu"></label>
         <label class="field">Mənbə<select id="fSource"><option value="">Hamısı</option><option value="ai">AI</option><option value="book">Kitabdan</option><option value="manual">Əl ilə</option></select></label>
         <label class="field">Çətinlik<select id="fDiff"><option value="">Hamısı</option>${DIFF.map((d) => `<option>${d}</option>`).join('')}</select></label>
+        <label class="field">Format<select id="fExam"><option value="">Hamısı</option><option value="tryos">TR-YÖS</option><option value="general">Ümumi</option></select></label>
       </div>
       <div id="list"></div>
     </div>`;
@@ -328,7 +382,9 @@ async function bankView() {
   const renderList = () => {
     const t = filter.text.toLocaleLowerCase('az');
     const rows = data.filter((q) => (!filter.source || q.source === filter.source) && (!filter.difficulty || q.difficulty === filter.difficulty)
-      && (!t || (q.body + ' ' + (q.topic || '')).toLocaleLowerCase('az').includes(t)));
+      && (!filter.exam || (q.exam || 'general') === filter.exam)
+      && (!t || (q.body + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az').includes(t)));
+    visible = rows;
     $('#list').innerHTML = rows.length
       ? rows.map((q) => questionHtml(q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
       : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/ai">AI ilə</a> və ya <a href="#/book">kitabdan</a> sual əlavə edin.'}</div>`;
@@ -342,12 +398,23 @@ async function bankView() {
       updateBtn(); renderList();
     });
   };
-  const updateBtn = () => { const b = $('#makeTest'); b.disabled = !selected.size; b.textContent = `Seçilənlərdən test (${selected.size})`; };
+  const updateBtn = () => {
+    const b = $('#makeTest'); b.disabled = !selected.size; b.textContent = `Seçilənlərdən test (${selected.size})`;
+    const pdf = $('#makePdf'); pdf.disabled = !selected.size; pdf.textContent = `PDF (${selected.size})`;
+  };
 
   $('#fText').oninput = (e) => { filter.text = e.target.value; renderList(); };
   $('#fSource').onchange = (e) => { filter.source = e.target.value; renderList(); };
   $('#fDiff').onchange = (e) => { filter.difficulty = e.target.value; renderList(); };
   $('#makeTest').onclick = () => { pendingTestIds = [...selected]; go('#/tests'); };
+  $('#fExam').onchange = (e) => { filter.exam = e.target.value; renderList(); };
+  $('#selAll').onclick = () => { visible.forEach((q) => selected.add(q.id)); updateBtn(); renderList(); };
+  $('#makePdf').onclick = () => {
+    // Bankdakı sıra ilə (ən yenisi yuxarıda) yox, seçilmə sırası ilə də ola bilər; burada görünən sıra saxlanılır
+    const qs = data.filter((q) => selected.has(q.id)).reverse();
+    pendingPrint = { questions: qs, title: '', back: '#/bank' };
+    go('#/print');
+  };
   $('#toggleManual').onclick = () => { const m = $('#manual'); m.hidden = !m.hidden; if (!m.hidden) manualForm(m); };
   renderList();
 }
@@ -392,12 +459,29 @@ function manualForm(form) {
 }
 
 async function saveQuestions(list, source) {
-  const rows = list.map((q) => ({
-    body: q.body, qtype: q.qtype, options: q.options || [], answer: q.answer, solution: q.solution || null,
-    topic: q.topic || null, grade: q.grade || null, difficulty: DIFF.includes(q.difficulty) ? q.difficulty : 'orta', source
-  }));
+  const t0 = Date.now();
+  const rows = list.map((q, i) => {
+    const row = {
+      created_at: new Date(t0 + i).toISOString(), // sıra qorunsun
+      body: q.body, qtype: q.qtype, options: q.options || [], answer: q.answer, solution: q.solution || null,
+      topic: q.topic || null, grade: q.grade || null, difficulty: DIFF.includes(q.difficulty) ? q.difficulty : 'orta', source
+    };
+    // Yeni sahələr yalnız lazım olanda göndərilir (köhnə baza ilə də işləsin)
+    if (q.exam && q.exam !== 'general') row.exam = q.exam;
+    if (q.figure) row.figure = q.figure;
+    if (hasOptionFigures(q)) row.option_figures = q.option_figures;
+    if (q.section) row.section = q.section;
+    if (q.subtype) row.subtype = q.subtype;
+    if (typeof q.verified === 'boolean') { row.verified = q.verified; row.verify_note = q.verify_note || null; }
+    return row;
+  });
   const { error } = await sb.from('questions').insert(rows);
-  if (error) throw error;
+  if (error) {
+    if (/column .* does not exist|schema cache/i.test(error.message || '')) {
+      throw new Error('Baza yenilənməyib: Supabase-də supabase/002_tryos.sql faylını işə salın (README-də yazılıb).');
+    }
+    throw error;
+  }
 }
 
 // ================= Şəkil / PDF seçici (kəsmə ilə) =================
@@ -521,52 +605,86 @@ function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', acti
 
 // ================= AI ilə sual =================
 
+const TRYOS_TOPICS = {
+  matematik: ['Sayılar', 'Rasyonel sayılar', 'Birbirine bağlı değişkenler ve denklemler', 'Üslü sayılar', 'Köklü sayılar',
+    'Basit eşitsizlikler', 'Mutlak değer', 'Çarpanlara ayırma', 'Oran-orantı', 'Faktöriyel', 'Kümeler ve Venn şemaları',
+    'Fonksiyonlar', 'Polinomlar'],
+  sayisal: ['Sayı ve sembol tablolarında eksik değer', 'Satır-sütun ve bölgeler arası ilişkiler', 'Terazi, eşitlik ve şekil değerleri',
+    'İşlem makineleri ve giriş-çıkış şemaları', 'Kurala dayalı özel işlemler', 'Sayı yerleştirme ve koşullu dizilişler',
+    'Şekil dizileri ve matris tamamlama', 'Döndürme, yansıma, konum değiştirme', 'Parça-bütün, birleştirme ve kesme',
+    'Kâğıt katlama ve kesme', 'Denklem eşleştirme']
+};
+
 async function aiView() {
   let results = [];
+  let format = 'tryos';
   view().innerHTML = `
     <div class="page-head"><div><h1>AI ilə sual yarat</h1><p class="muted">Suallar həlli ilə gəlir. Banka əlavə etməzdən əvvəl yoxlayın.</p></div></div>
     <form class="card stack" id="gen">
-      <label class="field">Mövzu<span class="hint">nə qədər dəqiq yazsanız, o qədər yaxşı</span><input type="text" name="topic" maxlength="200" placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
+      <div class="pills" role="radiogroup" aria-label="Format">
+        <button type="button" class="pill-opt" role="radio" aria-checked="true" data-format="tryos"><strong>TR-YÖS</strong><span>Türkcə, 5 variant, tip planı, şəkillər, ikinci yoxlama</span></button>
+        <button type="button" class="pill-opt" role="radio" aria-checked="false" data-format="general"><strong>Ümumi (məktəb)</strong><span>Azərbaycan dilində, sinif üzrə</span></button>
+      </div>
+
+      <div id="tryosFields" class="stack">
+        <div class="form-grid">
+          <label class="field">Bölmə<select name="section" id="tySection">
+            <option value="matematik">Temel Matematik</option>
+            <option value="sayisal">Sayısal Yetenek (mantık)</option>
+            <option value="deneme">Deneme (karışık)</option></select></label>
+          <label class="field">Mövzu<select name="tyTopic" id="tyTopic"></select></label>
+          <label class="field">Çətinlik<select name="tyDifficulty">
+            <option value="qarisiq">Qarışıq (asan → orta-çətin)</option><option value="asan">Asan</option><option value="orta">Orta</option><option value="cetin">Orta-çətin</option></select></label>
+          <label class="field">Sual sayı<select name="tyCount">${[3, 5, 10, 15, 20, 30, 40].map((n) => `<option ${n === 10 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        </div>
+      </div>
+
+      <div id="generalFields" class="stack" hidden>
+        <label class="field">Mövzu<span class="hint">nə qədər dəqiq yazsanız, o qədər yaxşı</span><input type="text" name="topic" maxlength="200" placeholder="məs. Tənliklər sistemi, əvəzetmə üsulu"></label>
+        <div class="form-grid">
+          <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
+          <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === 'orta' ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+          <label class="field">Sual sayı<select name="count">${[3, 5, 8, 10].map((n) => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <label class="field">Növ<select name="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
+        </div>
+      </div>
+
       <fieldset class="stack" style="border:1px solid var(--line);border-radius:12px;padding:14px;margin:0;gap:12px">
         <legend style="font-weight:700;padding:0 6px">Nümunə suallar <span class="muted small" style="font-weight:400">· istəyə bağlı</span></legend>
         <div id="exPicker" class="stack" style="gap:10px"></div>
-        <label class="field">Nümunə mətni<span class="hint">şəkildən oxunan suallar bura düşür; özünüz də yaza və ya düzəldə bilərsiniz</span><textarea name="example" id="exText" rows="5" maxlength="6000" placeholder="məs. Mağazada 3 dəftər və 2 qələm 11 manata satılır. Dəftər qələmdən 2 manat bahadır. Dəftər neçə manatdır?"></textarea></label>
+        <label class="field">Nümunə mətni<span class="hint">şəkildən oxunan suallar bura düşür; özünüz də yaza və ya düzəldə bilərsiniz</span><textarea name="example" id="exText" rows="5" maxlength="6000"></textarea></label>
         <div class="stack" style="gap:8px">
-          <strong style="font-size:14px">Necə yaradılsın?</strong>
+          <strong style="font-size:14px">Nümunədən necə yaradılsın?</strong>
           <div class="pills" role="radiogroup" aria-label="Yaratma rejimi">
             <button type="button" class="pill-opt" role="radio" aria-checked="false" data-mode="izomorf"><strong>İzomorf</strong><span>Eyni quruluş, yalnız rəqəmlər dəyişir</span></button>
-            <button type="button" class="pill-opt" role="radio" aria-checked="true" data-mode="benzer"><strong>Bənzər</strong><span>Eyni bacarıq, yeni kontekst və rəqəmlər</span></button>
+            <button type="button" class="pill-opt" role="radio" aria-checked="true" data-mode="benzer"><strong>Bənzər</strong><span>Eyni bacarıq, yeni təqdimat və rəqəmlər</span></button>
             <button type="button" class="pill-opt" role="radio" aria-checked="false" data-mode="ferqli"><strong>Fərqli quruluş</strong><span>Eyni bilik, başqa formada sual</span></button>
           </div>
         </div>
       </fieldset>
-      <div class="form-grid">
-        <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
-        <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === 'orta' ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
-        <label class="field">Sual sayı<select name="count">${[3, 5, 8, 10].map((n) => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-        <label class="field">Növ<select name="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
-      </div>
-      <label class="field">Əlavə istək<span class="hint">istəyə bağlı, məs. "həyati məsələlər olsun"</span><input type="text" name="notes" maxlength="500"></label>
-      <div><button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button></div>
+
+      <label class="field">Əlavə istək<span class="hint">istəyə bağlı, məs. "qrafikli suallar çox olsun"</span><input type="text" name="notes" maxlength="800"></label>
+      <div class="row"><button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Sualları yarat</button>
+        <span id="progress" class="muted small" role="status" aria-live="polite"></span></div>
     </form>
     <section id="results"></section>`;
 
-  const renderResults = () => {
-    if (!results.length) { $('#results').innerHTML = ''; return; }
-    $('#results').innerHTML = `<div class="card stack">
-      <div class="row between"><h2>${results.length} sual hazırdır</h2><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div>
-      <div>${results.map((q, i) => questionHtml({ ...q, id: i, source: 'ai' }, { selectable: true, checked: true })).join('')}</div>
-    </div>`;
-    $('#saveSel').onclick = (e) => {
-      const chosen = $$('#results .check').filter((c) => c.checked).map((c) => results[+c.dataset.id]);
-      if (!chosen.length) return toast('Heç bir sual seçilməyib', true);
-      busy(e.currentTarget, async () => {
-        await saveQuestions(chosen, 'ai');
-        toast(chosen.length + ' sual banka əlavə olundu');
-        results = []; renderResults();
-      }).catch(fail);
-    };
+  // ---- format / bölmə ----
+  const fillTopics = () => {
+    const sec = $('#tySection').value;
+    const list = sec === 'deneme' ? [] : TRYOS_TOPICS[sec];
+    $('#tyTopic').innerHTML = `<option value="">${sec === 'deneme' ? 'Bütün mövzular (karışık)' : 'Bölmənin bütün mövzuları (qarışıq)'}</option>`
+      + list.map((t) => `<option>${esc(t)}</option>`).join('');
+    $('#tyTopic').disabled = sec === 'deneme';
   };
+  fillTopics();
+  $('#tySection').onchange = fillTopics;
+  $$('[data-format]').forEach((b) => b.onclick = () => {
+    format = b.dataset.format;
+    $$('[data-format]').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
+    $('#tryosFields').hidden = format !== 'tryos';
+    $('#generalFields').hidden = format === 'tryos';
+  });
 
   let mode = 'benzer';
   $$('[data-mode]').forEach((b) => b.onclick = () => {
@@ -583,25 +701,111 @@ async function aiView() {
         const ta = $('#exText');
         ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + data.text.trim();
         const form = $('#gen');
-        if (!form.topic.value.trim() && data.topic) form.topic.value = data.topic;
-        if (data.grade) form.grade.value = String(data.grade);
+        if (format === 'general') {
+          if (!form.topic.value.trim() && data.topic) form.topic.value = data.topic;
+          if (data.grade) form.grade.value = String(data.grade);
+        }
         picker.clearSelection();
         toast('Nümunə əlavə olundu');
       }).catch(fail);
     }
   });
 
+  // ---- nəticələr ----
+  const progress = (t) => { $('#progress').textContent = t || ''; };
+  const renderResults = (doneLabel) => {
+    if (!results.length) { $('#results').innerHTML = ''; return; }
+    const checked = new Set($$('#results .check').filter((c) => !c.checked).map((c) => c.dataset.id));
+    const bad = results.filter((q) => q.verified === false).length;
+    $('#results').innerHTML = `<div class="card stack">
+      <div class="row between"><h2>${doneLabel || results.length + ' sual hazırdır'}</h2>
+        <div class="row"><button class="btn" id="pdfSel">PDF</button><button class="btn primary" id="saveSel">Seçilənləri banka əlavə et</button></div></div>
+      ${bad ? `<p class="notice">${bad} sualda ikinci yoxlama fərqli cavab tapdı və ya problem gördü. Onları diqqətlə yoxlayın və ya seçimdən çıxarın.</p>` : ''}
+      <div>${results.map((q, i) => questionHtml({ ...q, id: i, source: 'ai' }, { selectable: true, checked: !checked.has(String(i)) })).join('')}</div>
+    </div>`;
+    const chosen = () => $$('#results .check').filter((c) => c.checked).map((c) => results[+c.dataset.id]);
+    $('#saveSel').onclick = (e) => {
+      const list = chosen();
+      if (!list.length) return toast('Heç bir sual seçilməyib', true);
+      busy(e.currentTarget, async () => {
+        await saveQuestions(list, 'ai');
+        toast(list.length + ' sual banka əlavə olundu');
+        results = []; renderResults();
+      }).catch(fail);
+    };
+    $('#pdfSel').onclick = () => {
+      const list = chosen();
+      if (!list.length) return toast('Heç bir sual seçilməyib', true);
+      pendingPrint = { questions: list, title: '', back: '#/ai' };
+      go('#/print');
+    };
+  };
+
+  async function runGeneral(f) {
+    const data = await callAI('generate', f);
+    results = data.questions;
+    renderResults();
+    $('#results').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  async function runTryos(f) {
+    const base = {
+      section: f.section, topic: f.tyTopic || '', difficulty: f.tyDifficulty,
+      notes: f.notes, example: f.example, mode
+    };
+    const count = +f.tyCount || 10;
+    progress('Tip planı hazırlanır…');
+    const { plan, notes } = await callAI('tryos_plan', { ...base, count });
+    if (notes) toast(notes);
+    results = [];
+    const batches = [];
+    for (let i = 0; i < plan.length; i += 3) batches.push(plan.slice(i, i + 3));
+    let done = 0;
+    const verifyBatch = async (qs) => {
+      qs.forEach((q) => { q.verifying = true; });
+      renderResults();
+      try {
+        const v = await callAI('verify', { questions: qs.map((q) => ({ body: q.body, figure: q.figure, options: q.options, option_figures: q.option_figures, answer: q.answer })) });
+        v.results.forEach((r, i) => { if (qs[i]) { qs[i].verified = r.ok; qs[i].verify_note = r.issue || (r.ok ? '' : `ikinci həll ${'ABCDE'[r.index] || '?'} variantını tapdı`); } });
+      } catch (err) { console.error(err); }
+      qs.forEach((q) => { delete q.verifying; });
+      renderResults();
+    };
+    const verifications = [];
+    const worker = async (queue) => {
+      while (queue.length) {
+        const items = queue.shift();
+        const avoid = results.map((q) => q.body.replace(/\s+/g, ' ').slice(0, 140));
+        try {
+          const data = await callAI('tryos_generate', { ...base, items, avoid });
+          results.push(...data.questions);
+          verifications.push(verifyBatch(data.questions));
+        } catch (err) {
+          console.error(err);
+          toast('Bir partiya alınmadı: ' + err.message, true);
+        }
+        done += items.length;
+        progress(`Suallar yaradılır: ${Math.min(done, plan.length)} / ${plan.length}…`);
+        renderResults(`${results.length} sual hazırdır, davam edir…`);
+      }
+    };
+    progress(`Suallar yaradılır: 0 / ${plan.length}…`);
+    const queue = [...batches];
+    await Promise.all([worker(queue), worker(queue), worker(queue)]);
+    progress('Yoxlama tamamlanır…');
+    await Promise.all(verifications);
+    progress('');
+    renderResults();
+    if (!results.length) throw new Error('Sual yaradılmadı, yenidən yoxlayın');
+  }
+
   $('#gen').onsubmit = (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     f.mode = mode;
-    if (!String(f.topic || '').trim() && !String(f.example || '').trim()) return toast('Mövzu yazın və ya nümunə sual əlavə edin', true);
-    busy($('button[type=submit]', e.target), async () => {
-      const data = await callAI('generate', f);
-      results = data.questions;
-      renderResults();
-      $('#results').scrollIntoView({ behavior: 'smooth' });
-    }).catch(fail);
+    if (format === 'general' && !String(f.topic || '').trim() && !String(f.example || '').trim()) return toast('Mövzu yazın və ya nümunə sual əlavə edin', true);
+    busy($('button[type=submit]', e.target), () => (format === 'tryos' ? runTryos(f) : runGeneral(f)))
+      .catch((err) => { progress(''); fail(err); });
   };
 }
 
@@ -802,7 +1006,7 @@ async function testResultsView(id) {
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>${esc(test.title)}</h1>
       <p class="muted">${esc(test.classes?.name || 'Sinifsiz')} · ${questions.length} sual · ${test.is_open ? 'açıq' : 'bağlı'}</p></div>
-      <div class="row"><button class="btn primary" id="copy">Linki kopyala</button><button class="btn danger" id="del">Testi sil</button></div></div>
+      <div class="row"><button class="btn primary" id="copy">Linki kopyala</button><button class="btn" id="pdf">PDF</button><button class="btn danger" id="del">Testi sil</button></div></div>
     <section class="grid">
       <div class="card stat"><div class="label">Göndərilən iş</div><div class="value">${subs.length}</div></div>
       <div class="card stat"><div class="label">Orta nəticə</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
@@ -828,6 +1032,7 @@ async function testResultsView(id) {
       }).join('')}
     </section>`;
   $('#copy').onclick = () => copyText(link);
+  $('#pdf').onclick = () => { pendingPrint = { questions, title: test.title, back: '#/test/' + id }; go('#/print'); };
   $('#del').onclick = async () => {
     if (!confirm('Test və bütün nəticələri silinsin?')) return;
     const { error: err } = await sb.from('tests').delete().eq('id', id);
@@ -863,8 +1068,9 @@ async function studentTest(id) {
       <legend class="sr">Sual ${i + 1}</legend>
       <div class="muted small">Sual ${i + 1} / ${test.questions.length}</div>
       <div class="q-text pre" style="font-size:17px">${esc(q.body)}</div>
+      ${q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : ''}
       ${q.qtype === 'mcq'
-        ? `<div class="stack" style="gap:8px">${q.options.map((o, j) => `<label class="opt-choice"><input type="radio" name="q_${q.id}" value="${esc(o)}"><span>${'ABCDEF'[j]}) ${esc(o)}</span></label>`).join('')}</div>`
+        ? `<div class="${hasOptionFigures(q) ? 'fig-choices' : 'stack'}" style="gap:8px">${q.options.map((o, j) => `<label class="opt-choice"><input type="radio" name="q_${q.id}" value="${esc(o)}"><span>${'ABCDEF'[j]})</span>${hasOptionFigures(q) ? `<span class="opt-fig">${safeSvg(q.option_figures[j])}</span>` : `<span>${esc(o)}</span>`}</label>`).join('')}</div>`
         : `<label class="field"><span class="sr">Cavabınız</span><textarea name="q_${q.id}" rows="3" placeholder="Cavabınızı yazın"></textarea></label>`}
     </fieldset>`).join('')}
     <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
@@ -897,6 +1103,101 @@ function studentDone(test, r) {
     ${r.total ? `<div class="score-big">${r.score}/${r.total}</div><p class="muted">çoxseçimli suallardan düz cavab</p>` : ''}
     ${hasOpen ? '<p class="notice">Açıq sualları müəlliminiz yoxlayacaq.</p>' : ''}
   </div></div>`;
+}
+
+// ================= PDF (çap) görünüşü =================
+// A4, iki sütun, səhifədə 4 və ya 6 sual; sonda cavab açarı. "Həllər" rejimi ayrıca sənəd verir.
+function printView() {
+  if (!pendingPrint || !pendingPrint.questions?.length) { go('#/bank'); return; }
+  const { questions, back } = pendingPrint;
+  const turkish = questions.every((q) => q.exam === 'tryos');
+  const L = turkish
+    ? { key: 'Cevap Anahtarı', sol: 'Çözümler', answer: 'Cevap' }
+    : { key: 'Cavab açarı', sol: 'Həllər', answer: 'Cavab' };
+  let opts = { perPage: 4, mode: 'questions', title: pendingPrint.title || '' };
+  try { opts.perPage = +(localStorage.getItem('mp_per_page') || 4) || 4; } catch (_) { /* yaddaş yoxdur */ }
+
+  const letter = (q) => 'ABCDE'[(q.options || []).indexOf(q.answer)] || '—';
+
+  const pq = (q, n) => `<div class="pq">
+      <div class="pq-num">${n}.</div>
+      <div class="pq-body">
+        <div class="pq-text">${esc(q.body)}</div>
+        ${q.figure ? `<div class="pq-fig">${safeSvg(q.figure)}</div>` : ''}
+        ${q.qtype === 'mcq' && q.options?.length
+          ? (hasOptionFigures(q)
+            ? `<div class="pq-figopts">${q.options.map((o, i) => `<div><b>${'ABCDE'[i]})</b>${safeSvg(q.option_figures[i])}</div>`).join('')}</div>`
+            : `<ol class="pq-opts">${q.options.map((o, i) => `<li><b>${'ABCDE'[i]})</b> ${esc(o)}</li>`).join('')}</ol>`)
+          : ''}
+      </div>
+    </div>`;
+
+  const header = (page, total) => `${opts.title ? `<div class="sheet-head">${esc(opts.title)}</div>` : ''}<div class="sheet-foot">${page} / ${total}</div>`;
+
+  const render = () => {
+    const per = opts.perPage;
+    const rows = per / 2;
+    let sheets = '';
+    if (opts.mode === 'questions') {
+      const pages = Math.ceil(questions.length / per);
+      const total = pages + 1;
+      for (let p = 0; p < pages; p++) {
+        const chunk = questions.slice(p * per, p * per + per);
+        sheets += `<section class="sheet">${header(p + 1, total)}
+          <div class="sheet-grid" style="grid-template-rows:repeat(${rows}, minmax(0, 1fr))">${chunk.map((q, i) => pq(q, p * per + i + 1)).join('')}</div></section>`;
+      }
+      sheets += `<section class="sheet">${header(total, total)}<div class="sheet-key"><h2>${L.key}</h2>
+        <div class="key-grid">${questions.map((q, i) => `<div><span>${i + 1}.</span> <b>${q.qtype === 'mcq' ? letter(q) : esc(q.answer)}</b></div>`).join('')}</div></div></section>`;
+    } else {
+      sheets = `<section class="sheet sheet-flow">${opts.title ? `<div class="sheet-head">${esc(opts.title)} · ${L.sol}</div>` : `<div class="sheet-head">${L.sol}</div>`}
+        <div class="flow-cols">${questions.map((q, i) => `<div class="sol-item"><div class="sol-h">${i + 1}. <span>${L.answer}: <b>${q.qtype === 'mcq' ? letter(q) : esc(q.answer)}</b></span></div>
+          <div class="sol-t">${esc(q.solution || '—')}</div></div>`).join('')}</div></section>`;
+    }
+
+    $app.innerHTML = `<div class="print-root">
+      <div class="print-toolbar">
+        <a class="btn" href="${back || '#/bank'}">‹ Geri</a>
+        <label class="row small" style="gap:6px">Başlıq <input type="text" id="pTitle" value="${esc(opts.title)}" placeholder="istəyə bağlı" style="width:200px;min-height:40px"></label>
+        <label class="row small" style="gap:6px">Səhifədə <select id="pPer" style="width:auto;min-height:40px"><option ${opts.perPage === 4 ? 'selected' : ''}>4</option><option ${opts.perPage === 6 ? 'selected' : ''}>6</option></select> sual</label>
+        <div class="pills" style="grid-template-columns:repeat(2, auto);gap:6px" role="radiogroup" aria-label="Sənəd">
+          <button type="button" class="pill-opt" style="min-height:40px;padding:6px 12px" role="radio" aria-checked="${opts.mode === 'questions'}" data-pm="questions"><strong>Suallar + açar</strong></button>
+          <button type="button" class="pill-opt" style="min-height:40px;padding:6px 12px" role="radio" aria-checked="${opts.mode === 'solutions'}" data-pm="solutions"><strong>${L.sol}</strong></button>
+        </div>
+        <button class="btn primary" id="pPrint">PDF kimi saxla / Çap et</button>
+        <span class="muted small">${questions.length} sual</span>
+      </div>
+      <p class="print-hint muted small">iPad-də: “PDF kimi saxla” → Paylaş → <b>Fayllara saxla</b>. Kompüterdə: Çap pəncərəsində “PDF olaraq saxla” seçin.</p>
+      <div class="sheets">${sheets}</div>
+    </div>`;
+
+    $('#pTitle').onchange = (e) => { opts.title = e.target.value.trim(); render(); };
+    $('#pPer').onchange = (e) => { opts.perPage = +e.target.value; try { localStorage.setItem('mp_per_page', String(opts.perPage)); } catch (_) { /* boş */ } render(); };
+    $$('[data-pm]').forEach((b) => b.onclick = () => { opts.mode = b.dataset.pm; render(); });
+    $('#pPrint').onclick = () => { fitAll(); setTimeout(() => window.print(), 50); };
+    setTimeout(fitAll, 300);
+    setTimeout(fitAll, 1200);
+  };
+
+  // Sual xanaya sığmırsa, şrifti və şəkli tədricən kiçildir
+  function fitAll() {
+    $$('.pq').forEach((box) => {
+      let size = 11;
+      box.style.fontSize = size + 'pt';
+      box.style.setProperty('--fig-max', '62mm');
+      let fig = 62;
+      let guard = 0;
+      while (box.scrollHeight > box.clientHeight + 1 && guard++ < 30) {
+        if (fig > 34) { fig -= 4; box.style.setProperty('--fig-max', fig + 'mm'); continue; }
+        if (size <= 7.5) break;
+        size -= 0.5;
+        box.style.fontSize = size + 'pt';
+      }
+      box.classList.toggle('overflow', box.scrollHeight > box.clientHeight + 1);
+    });
+  }
+  window.addEventListener('beforeprint', fitAll, { once: true });
+
+  render();
 }
 
 // ================= Riyazi formullar (KaTeX) =================

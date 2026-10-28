@@ -46,6 +46,19 @@ Riyaziyyat müəllimləri üçün platforma: siniflər, şagirdlər, AI ilə sua
 ### 4. Son addım
 Supabase → **Authentication → URL Configuration** → **Site URL** yerinə Vercel linkini yaz.
 
+## Yeniləmələr (bazaya)
+- **002_tryos.sql** — TR-YÖS, şəkillər və yoxlama üçün yeni sütunlar. Supabase → SQL Editor → faylın hamısını yapışdır → Run.
+
+## TR-YÖS rejimi
+- AI ilə sual → **TR-YÖS**: türkcə, 5 variant, əvvəlcə tip planı, sonra 3-lük partiyalarla suallar (40-a qədər).
+- Qrafik, Venn, cədvəl, sxem və şəkilli variantlar SVG kimi çəkilir.
+- Hər sual ikinci AI tərəfindən cavab açarı görmədən həll edilir: uyğun gəlirsə "✓ yoxlanılıb", gəlmirsə "⚠ yoxla".
+- Qaydalar: `api/_tryos.js`.
+
+## PDF
+- Sual bankı → sualları seç → **PDF**; və ya AI nəticələrindən, test səhifəsindən.
+- A4, iki sütun, səhifədə 4 və ya 6 sual, sonda cavab açarı; ayrıca "Həllər" sənədi.
+
 ## Qeydlər
 - Model `ANTHROPIC_MODEL` dəyişəni ilə dəyişdirilə bilər (standart: `claude-opus-5-5`; daha ucuz variant: `claude-sonnet-5-5`).
 - AI istifadəsi hər sorğuya görə ödənişlidir; Anthropic Console-da xərc limiti qoymaq tövsiyə olunur.

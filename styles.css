@@ -204,3 +204,61 @@ td { padding: 12px 8px; border-bottom: 1px solid #EEF1F5; vertical-align: top; }
 .q-text .katex-display { margin: 14px 0; }
 .opts li .katex, .opt-choice .katex { font-size: 1.15em; }
 .opts li { display: flex; align-items: center; gap: 4px; min-height: 44px; }
+
+/* ---------- Şəkillər (SVG) ---------- */
+.q-fig { max-width: 420px; }
+.q-fig svg { width: 100%; height: auto; max-height: 340px; display: block; }
+.opts .opt-l { font-weight: 600; margin-right: 4px; }
+.fig-opts { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.opt-fig { display: inline-flex; width: 96px; }
+.opt-fig svg { width: 100%; height: auto; }
+.fig-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+
+/* ---------- PDF / çap ---------- */
+.print-root { background: #E9ECF1; min-height: 100vh; padding-bottom: 40px; }
+.print-toolbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--line); }
+.print-hint { padding: 8px 16px 0; }
+.sheets { padding: 16px; overflow-x: auto; }
+.sheet {
+  width: 210mm; height: 297mm; margin: 0 auto 16px; background: #fff; color: #111; box-sizing: border-box;
+  padding: 12mm 11mm 12mm; position: relative; display: flex; flex-direction: column;
+  box-shadow: 0 2px 12px rgba(20, 32, 48, 0.15); font-family: Inter, Arial, sans-serif;
+  break-after: page; page-break-after: always;
+}
+.sheet:last-child { break-after: auto; page-break-after: auto; }
+.sheet-head { font-size: 9pt; color: #555; margin-bottom: 4mm; }
+.sheet-foot { position: absolute; bottom: 6mm; left: 0; right: 0; text-align: center; font-size: 8pt; color: #777; }
+.sheet-grid { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-flow: column; column-gap: 9mm; row-gap: 5mm; position: relative; min-height: 0; }
+.sheet-grid::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 0.6pt solid #bbb; }
+.pq { display: flex; gap: 2.5mm; overflow: hidden; font-size: 11pt; line-height: 1.38; min-height: 0; }
+.pq.overflow { outline: 2px dashed #d0312d; outline-offset: -2px; }
+.pq-num { font-weight: 700; font-size: 0.85em; min-width: 6mm; padding-top: 0.1em; }
+.pq-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2mm; }
+.pq-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pq-text .katex-display { margin: 1.5mm 0; }
+.pq-fig { display: flex; justify-content: center; }
+.pq-fig svg { width: 100%; height: auto; max-height: var(--fig-max, 62mm); }
+.pq-opts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1mm; }
+.pq-opts li b { margin-right: 1.5mm; }
+.pq-figopts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2mm; }
+.pq-figopts div { display: flex; gap: 1mm; align-items: flex-start; }
+.pq-figopts svg { width: 100%; height: auto; max-height: 26mm; }
+.sheet-key h2 { font-size: 14pt; margin-bottom: 6mm; }
+.key-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2.5mm 6mm; font-size: 11pt; }
+.key-grid span { color: #555; display: inline-block; min-width: 8mm; }
+.sheet-flow { height: auto; min-height: 297mm; }
+.flow-cols { column-count: 2; column-gap: 9mm; column-rule: 0.6pt solid #bbb; font-size: 10pt; line-height: 1.4; }
+.sol-item { break-inside: avoid; margin-bottom: 5mm; }
+.sol-h { font-weight: 700; margin-bottom: 1mm; display: flex; justify-content: space-between; }
+.sol-h span { font-weight: 400; }
+.sol-t { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media print {
+  @page { size: A4; margin: 0; }
+  html, body { background: #fff !important; }
+  .print-toolbar, .print-hint, #toast { display: none !important; }
+  .print-root { background: #fff; padding: 0; min-height: 0; }
+  .sheets { padding: 0; overflow: visible; }
+  .sheet { margin: 0; box-shadow: none; }
+  .pq.overflow { outline: none; }
+}

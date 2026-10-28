@@ -5,6 +5,8 @@
 //   SUPABASE_ANON_KEY   — Supabase "anon public" açarı
 //   ANTHROPIC_MODEL     — (istəyə bağlı) model adı
 
+import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS } from './_tryos.js';
+
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 
 const SYSTEM = `Sən Azərbaycanda orta məktəb riyaziyyat müəllimlərinə kömək edən təcrübəli metodistsən.
@@ -62,6 +64,9 @@ export default async function handler(req, res) {
     if (action === 'generate') return res.status(200).json(await generate(body));
     if (action === 'extract') return res.status(200).json(await extract(body));
     if (action === 'transform') return res.status(200).json(await transform(body));
+    if (action === 'tryos_plan') return res.status(200).json(await tryosPlan(body));
+    if (action === 'tryos_generate') return res.status(200).json(await tryosGenerate(body));
+    if (action === 'verify') return res.status(200).json(await verify(body));
 
     return res.status(400).json({ error: 'Naməlum əməliyyat' });
   } catch (err) {
@@ -159,6 +164,139 @@ Bu formada qaytar: {"question": ${QUESTION_SHAPE}, "changes": ["nə dəyişdi, 3
   return { question, changes };
 }
 
+// ---------- TR-YÖS ----------
+
+const DIFF_TR = { asan: 'asan', orta: 'orta', cetin: 'çətin', 'çətin': 'çətin', qarisiq: 'qarışıq' };
+
+function tryosContext(b) {
+  const section = pick(b.section, ['matematik', 'sayisal', 'deneme'], 'matematik');
+  const topic = String(b.topic || '').slice(0, 200).trim();
+  const notes = String(b.notes || '').slice(0, 800).trim();
+  const example = String(b.example || '').slice(0, 6000).trim();
+  const mode = GEN_MODES[b.mode] ? b.mode : 'benzer';
+  const difficulty = DIFF_TR[b.difficulty] || 'qarışıq';
+  const sectionText = section === 'matematik'
+    ? 'Bölmə: Temel Matematik. Mümkün mövzular: ' + TRYOS_TOPICS.matematik.join(', ') + '.'
+    : section === 'sayisal'
+      ? 'Bölmə: Sayısal Yetenek (məntiq). Mümkün tip ailələri: ' + TRYOS_TOPICS.sayisal.join(', ') + '.'
+      : 'Deneme: Temel Matematik və Sayısal Yetenek mövzularını imtahan axınına uyğun qarışdır; eyni tipi ardıcıl təkrarlama. Riyaziyyat: '
+        + TRYOS_TOPICS.matematik.join(', ') + '. Sayısal: ' + TRYOS_TOPICS.sayisal.join(', ') + '.';
+  const exampleText = example ? `\nMüəllimin nümunə sual(lar)ı:\n"""\n${example}\n"""\n${GEN_MODES[mode]}` : '';
+  return { section, topic, notes, example, mode, difficulty, sectionText, exampleText };
+}
+
+async function tryosPlan(b) {
+  const count = clampInt(b.count, 1, 40, 10);
+  const c = tryosContext(b);
+  const prompt = `${c.sectionText}
+${c.topic ? 'Müəllimin seçdiyi mövzu: ' + c.topic + '.' : ''}
+Çətinlik: ${c.difficulty === 'qarışıq' ? 'qarışıq (asan → orta → çətin inkişafı ilə)' : c.difficulty}.
+${c.notes ? 'Müəllimin əlavə istəyi: ' + c.notes : ''}${c.exampleText}
+
+${count} sual üçün DAXİLİ TİP PLANI qur. Hər bənd həqiqətən fərqli tip olsun (quruluş, axtarılan kəmiyyət, təqdimat forması, əsas həll ideyası).
+Hələ sualları yazma, yalnız plan.
+Bu formada qaytar:
+{"plan": [{"subtype": "qısa tip adı (türkcə)", "idea": "sualın əsas ideyası, 1 cümlə", "topic": "mövzu (türkcə)", "section": "matematik|sayisal", "difficulty": "asan|orta|çətin", "visual": "yok|grafik|venn|tablo|şema|şekil"}],
+ "notes": "mövzu dar olduğu üçün fərqli tip çatışmırsa, bunu Azərbaycan dilində qısa yaz; əks halda boş"}`;
+  const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 6000 });
+  const plan = (Array.isArray(data.plan) ? data.plan : []).slice(0, count).map((p) => ({
+    subtype: String(p.subtype || '').slice(0, 120),
+    idea: String(p.idea || '').slice(0, 400),
+    topic: String(p.topic || c.topic || '').slice(0, 120),
+    section: pick(p.section, ['matematik', 'sayisal'], c.section === 'sayisal' ? 'sayisal' : 'matematik'),
+    difficulty: pick(p.difficulty, ['asan', 'orta', 'çətin'], 'orta'),
+    visual: String(p.visual || 'yok').slice(0, 20)
+  }));
+  if (!plan.length) throw publicError('AI plan qaytarmadı, yenidən yoxlayın', 502);
+  return { plan, notes: String(data.notes || '').slice(0, 600) };
+}
+
+async function tryosGenerate(b) {
+  const items = (Array.isArray(b.items) ? b.items : []).slice(0, 4);
+  if (!items.length) throw publicError('Plan boşdur');
+  const c = tryosContext(b);
+  const avoid = (Array.isArray(b.avoid) ? b.avoid : []).slice(0, 40).map((t) => '- ' + String(t).slice(0, 160)).join('\n');
+  const prompt = `${c.sectionText}${c.exampleText}
+${c.notes ? 'Müəllimin əlavə istəyi: ' + c.notes : ''}
+
+Aşağıdakı plan bəndlərinin HƏR BİRİ üçün düz bir sual yaz (sıra ilə, cəmi ${items.length} sual):
+${items.map((it, i) => `${i + 1}) [${it.section}] ${it.topic} · ${it.subtype} · çətinlik: ${it.difficulty} · vizual: ${it.visual}\n   İdeya: ${it.idea}`).join('\n')}
+${avoid ? '\nBu paketdə artıq yazılmış suallar (bunları və onların ədəd dəyişdirilmiş formalarını təkrarlama):\n' + avoid : ''}
+
+Hər sualı yazmazdan əvvəl özün tam həll et və yoxla. Vizual "yok" deyilsə, "figure" sahəsinə SVG çək.
+Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE} ]}`;
+  const data = await askJSON([{ type: 'text', text: prompt }], { system: TRYOS_SYSTEM, maxTokens: 16000 });
+  const list = Array.isArray(data.questions) ? data.questions : [];
+  const questions = list.map((q, i) => normalizeTryos(q, items[i] || items[0])).filter(Boolean);
+  if (!questions.length) throw publicError('AI sual qaytarmadı, yenidən yoxlayın', 502);
+  return { questions };
+}
+
+function normalizeTryos(q, item) {
+  if (!q || typeof q !== 'object' || !q.body) return null;
+  const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o).trim()).slice(0, 5);
+  if (options.length !== 5 || options.some((o) => !o)) return null;
+  if (new Set(options).size !== 5) return null;
+  const idx = Number.isInteger(q.correct_index) ? q.correct_index : options.indexOf(String(q.answer || '').trim());
+  if (idx < 0 || idx > 4) return null;
+  let optionFigures = Array.isArray(q.option_figures) ? q.option_figures.map((f) => cleanSvg(f)) : [];
+  if (optionFigures.filter(Boolean).length !== 5) optionFigures = [];
+  return {
+    body: String(q.body).trim().slice(0, 4000),
+    figure: cleanSvg(q.figure),
+    option_figures: optionFigures,
+    qtype: 'mcq',
+    options,
+    answer: options[idx],
+    solution: String(q.solution || '').trim().slice(0, 4000),
+    topic: String(q.topic || item.topic || '').slice(0, 200),
+    subtype: String(q.subtype || item.subtype || '').slice(0, 120),
+    difficulty: pick(q.difficulty, ['asan', 'orta', 'çətin'], item.difficulty || 'orta'),
+    section: pick(q.section, ['matematik', 'sayisal'], item.section || 'matematik'),
+    exam: 'tryos',
+    grade: null
+  };
+}
+
+// Server tərəfində SVG-ni sadə təmizləmə (brauzer də ayrıca təmizləyir)
+function cleanSvg(svg) {
+  let s = String(svg || '').trim();
+  if (!/^<svg[\s>]/i.test(s) || s.length > 80000) return '';
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
+    .replace(/<(image|iframe|object|embed)[^>]*>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, '')
+    .replace(/(href\s*=\s*["'])\s*javascript:[^"']*/gi, '$1#');
+  return s;
+}
+
+async function verify(b) {
+  const qs = (Array.isArray(b.questions) ? b.questions : []).slice(0, 6);
+  if (!qs.length) throw publicError('Yoxlanılacaq sual yoxdur');
+  const prompt = `Sən müstəqil yoxlayıcısan. Aşağıdakı TR-YÖS üslubunda sualları cavab açarını görmədən özün həll et.
+Hər sual üçün: düzgün variantın indeksini (0-4) tap, birdən çox variant düzgün ola bilərsə və ya şərt çatışmırsa/ziddiyyətlidirsə, "issue" sahəsində Azərbaycan dilində qısa yaz.
+Şəkil SVG kodu kimi verilib; koordinatları və yazıları oxu.
+
+${qs.map((q, i) => `### Sual ${i + 1}
+${String(q.body || '').slice(0, 4000)}
+${q.figure ? 'Şəkil (SVG):\n' + String(q.figure).slice(0, 20000) : ''}
+Variantlar:
+${(q.options || []).map((o, j) => `${'ABCDE'[j]}) ${o}${q.option_figures && q.option_figures[j] ? '\n   (SVG) ' + String(q.option_figures[j]).slice(0, 6000) : ''}`).join('\n')}`).join('\n\n')}
+
+Bu formada qaytar: {"results": [{"index": 0, "issue": ""}]} (sualların sırası ilə).`;
+  const data = await askJSON([{ type: 'text', text: prompt }], { system: 'Sən diqqətli riyaziyyat yoxlayıcısan. Yalnız JSON qaytar.', maxTokens: 8000 });
+  const results = (Array.isArray(data.results) ? data.results : []).slice(0, qs.length);
+  return {
+    results: qs.map((q, i) => {
+      const r = results[i] || {};
+      const expected = (q.options || []).indexOf(q.answer);
+      const index = Number.isInteger(r.index) ? r.index : -1;
+      const issue = String(r.issue || '').slice(0, 400);
+      return { ok: index === expected && !issue, index, expected, issue };
+    })
+  };
+}
+
 // ---------- Köməkçilər ----------
 
 async function verifyTeacher(req) {
@@ -174,7 +312,7 @@ async function verifyTeacher(req) {
   return user && user.id ? user : null;
 }
 
-async function askJSON(content) {
+async function askJSON(content, { system = SYSTEM, maxTokens = 12000 } = {}) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -184,8 +322,8 @@ async function askJSON(content) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 12000,
-      system: SYSTEM,
+      max_tokens: maxTokens,
+      system,
       messages: [{ role: 'user', content }]
     })
   });
@@ -214,16 +352,18 @@ function parseJSON(text) {
 }
 
 // JSON "\f", "\t", "\b", "\r", "\n" kimi oxuduğu LaTeX əmrlərini bərpa et (\frac, \times, \beta, \right, \neq)
-function fixLatex(v) {
+const SVG_KEYS = new Set(['figure', 'option_figures']);
+function fixLatex(v, key) {
+  if (key && SVG_KEYS.has(key)) return v;
   if (typeof v === 'string') {
     return v
       .replace(/\f/g, '\\f').replace(/\t/g, '\\t').replace(/\x08/g, '\\b').replace(/\r/g, '\\r')
       .replace(/\n(?=(eq|leq|geq|eg|ot|abla|e\b|i\b|u\b|mid|parallel|subseteq|ewline))/g, '\\n');
   }
-  if (Array.isArray(v)) return v.map(fixLatex);
+  if (Array.isArray(v)) return v.map((x) => fixLatex(x));
   if (v && typeof v === 'object') {
     const o = {};
-    for (const k of Object.keys(v)) o[k] = fixLatex(v[k]);
+    for (const k of Object.keys(v)) o[k] = fixLatex(v[k], k);
     return o;
   }
   return v;
