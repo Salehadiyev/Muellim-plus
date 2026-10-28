@@ -549,6 +549,10 @@ async function saveQuestions(list, source) {
     if (typeof q.verified === 'boolean') { row.verified = q.verified; row.verify_note = q.verify_note || null; }
     return row;
   });
+  // Toplu yazılışda bütün sətirlər eyni sütunlara malik olmalıdır, çatışmayanlar standart dəyərlə doldurulur
+  const DEFAULTS = { exam: 'general', figure: null, option_figures: [], section: null, subtype: null, model: null, verified: null, verify_note: null };
+  const keys = new Set(rows.flatMap((r) => Object.keys(r)));
+  rows.forEach((r) => keys.forEach((k) => { if (!(k in r)) r[k] = k in DEFAULTS ? DEFAULTS[k] : null; }));
   const { error } = await sb.from('questions').insert(rows);
   if (error) {
     if (/column .* does not exist|schema cache/i.test(error.message || '')) {
