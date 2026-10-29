@@ -245,4 +245,14 @@ select t_ok(student_portal('AAAAAAAA')::text not like '%gizli%' and student_port
 select t_ok(student_analysis('AAAAAAAA')::text not like '%gizli%' and student_mistakes('AAAAAAAA')::text not like '%gizli%', 'tələbə funksiyaları gizli qeydi qaytarmır');
 reset role;
 
+-- ---------- 014: video link ----------
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+insert into lesson_notes (class_id, title, link_url) values ('00000000-0000-4000-8000-0000000000c1', 'Video dərs', 'https://youtu.be/abc');
+select t_err($q$ insert into lesson_notes (class_id, title, link_url) values ('00000000-0000-4000-8000-0000000000c1', 'pis', 'javascript:alert(1)') $q$, 'yalnız http(s) link');
+set role anon;
+reset request.jwt.claim.sub;
+select t_ok(student_notes('AAAAAAAA')::text like '%https://youtu.be/abc%', 'tələbə video linkini görür');
+reset role;
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

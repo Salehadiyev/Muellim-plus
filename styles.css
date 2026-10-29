@@ -669,3 +669,16 @@ details.nt-item[open] { border-color: var(--accent); }
 @media (max-width: 620px) { .h-row { grid-template-columns: 1fr auto; } .h-row .h-t { grid-column: 1 / -1; } .ls-act { width: 100%; margin-left: 0; } .ls-act .btn { flex: 1; } }
 .qt-stat { font-size: 11px; color: #4C3DB5; }
 .real-box { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 12px; background: #F5F3FF; border: 1px solid #DDD6FE; font-size: 14px; }
+
+/* ---------- Tələbələr / qruplar / materiallar ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line-strong); background: #fff; color: #3D4759; border-radius: 999px; padding: 0 14px; min-height: 38px; font: inherit; font-size: 14px; cursor: pointer; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.chip-cb { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 0 12px; min-height: 40px; cursor: pointer; background: #fff; font-size: 14px; }
+.chip-cb input { width: 18px; height: 18px; accent-color: var(--accent); }
+.chip-cb:has(input:checked) { border: 2px solid var(--accent); background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
+.chip-cb[hidden] { display: none; }
+.nt-to { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 0; }
+.bulk-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-dark); }
+.st-row .st-grp select { min-height: 40px; width: auto; max-width: 200px; }
+#moreGroups .chips { margin-top: 6px; }

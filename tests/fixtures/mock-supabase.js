@@ -107,7 +107,7 @@ export function createClient() {
           if (!Array.isArray(db.lesson_notes)) return { data: null, error: { message: 'Could not find the function public.' + fn } };
           if (!st) return { data: null, error: { message: 'Link etibarsızdır' } };
           if (fn === 'student_notes') return { data: db.lesson_notes.filter((n) => n.student_id === st.id || (!n.student_id && n.class_id === st.class_id)).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))
-            .map((n) => ({ id: n.id, title: n.title, topic: n.topic, body: n.body, file_path: n.file_path, file_name: n.file_name, file_type: n.file_type, personal: !!n.student_id, created_at: n.created_at })), error: null };
+            .map((n) => ({ id: n.id, title: n.title, topic: n.topic, body: n.body, file_path: n.file_path, file_name: n.file_name, file_type: n.file_type, link_url: n.link_url || null, personal: !!n.student_id, created_at: n.created_at })), error: null };
           const cls = db.classes.find((c) => c.id === st.class_id);
           const subs = db.submissions.filter((x) => x.student_id === st.id).sort((x, y) => (x.created_at > y.created_at ? 1 : -1));
           const rv = (t) => (t.review_mode || 'never') === 'after_submit' || (t.review_mode === 'after_close' && !t.is_open);

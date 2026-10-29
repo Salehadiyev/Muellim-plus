@@ -11,14 +11,14 @@ const DB = {
     { id: 's1', class_id: 'c1', full_name: 'Əli Həsənov', access_code: 'ALI23456', created_at: now(700) },
     { id: 's2', class_id: 'c1', full_name: 'Nərgiz Quliyeva', access_code: 'NRG23456', created_at: now(700) },
     { id: 's3', class_id: 'c1', full_name: 'Rəşad Məmmədov', access_code: 'RSD23456', created_at: now(700) },
-    { id: 's4', class_id: 'c2', full_name: 'Başqa Şagird', access_code: 'OTH23456', created_at: now(700) }],
+    { id: 's4', class_id: 'c2', full_name: 'Başqa tələbə', access_code: 'OTH23456', created_at: now(700) }],
   questions: [
     { id: 'q1', teacher_id: 'u1', body: '2 + 3 = ?', qtype: 'mcq', options: ['4', '5', '6', '7', '8'], answer: '5', created_at: now(600), option_figures: [] },
     { id: 'q2', teacher_id: 'u1', body: '3 · 4 = ?', qtype: 'mcq', options: ['7', '10', '12', '14', '16'], answer: '12', created_at: now(600), option_figures: [] }],
   tests: [
     { id: 'tA', teacher_id: 'u1', class_id: 'c1', title: 'Toplama və vurma', question_ids: ['q1', 'q2'], is_open: true, created_at: now(300) },
     { id: 'tB', teacher_id: 'u1', class_id: 'c1', title: 'Bağlı test', question_ids: ['q1'], is_open: false, created_at: now(200) },
-    { id: 'tC', teacher_id: 'u1', class_id: 'c2', title: 'Başqa sinif', question_ids: ['q1'], is_open: true, created_at: now(100) }],
+    { id: 'tC', teacher_id: 'u1', class_id: 'c2', title: 'Başqa qrup', question_ids: ['q1'], is_open: true, created_at: now(100) }],
   submissions: [], ai_usage: []
 };
 const errors = []; const step = (s) => console.log('✓', s);
@@ -71,7 +71,7 @@ const fail = (m) => { throw new Error(m); };
   const todo = await st.$$eval('a.portal-row', (x) => x.map((a) => a.textContent.trim()));
   if (todo.length !== 1 || !todo[0].includes('Toplama')) fail('todo ' + JSON.stringify(todo));
   if (await st.isVisible('text=Bağlı test')) fail('closed test shown');
-  if (await st.isVisible('text=Başqa sinif')) fail('other class shown');
+  if (await st.isVisible('text=Başqa qrup')) fail('other class shown');
   await shot(st, 'p2-portal'); step('portal: lower-case code ok, 1 open test, closed/other class hidden');
   await st.click('text=Başla'); await st.waitForSelector('#st');
   if (await st.$('select[name=name], input[name=name]')) fail('name field present');

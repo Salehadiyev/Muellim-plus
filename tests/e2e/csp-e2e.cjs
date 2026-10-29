@@ -1,4 +1,4 @@
-// CSP (index.html) heç nəyi səssizcə bloklamır: əsas səhifələr + real pdf.js ilə PDF açma + şagird səhifəsi
+// CSP (index.html) heç nəyi səssizcə bloklamır: əsas səhifələr + real pdf.js ilə PDF açma + tələbə səhifəsi
 const { chromium } = require(process.env.PW || 'playwright');
 const path = require('path'); const fs = require('fs');
 const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
