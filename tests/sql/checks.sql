@@ -168,4 +168,21 @@ select t_err($q$ update mistakes set status = 'open' $q$, 'müəllim statusu bir
 select t_ok((select status from mistakes) = 'cleared', 'status dəyişmədi');
 reset role;
 
+-- ---------- 011: açıq testdəki sualın cavabı dəftərdən sızmır ----------
+reset role;
+insert into mistakes (teacher_id, student_id, question_id, test_id, due_at) values
+  ('00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000f2', now() - interval '1 minute');
+set role anon;
+select t_ok((student_mistakes('AAAAAAAA') ->> 'due')::int = 0 and jsonb_array_length(student_mistakes('AAAAAAAA') -> 'items') = 0, 'açıq ("bağlananda") testdəki sual təkrara verilmir');
+reset role;
+select id as mid2 from mistakes where question_id = '00000000-0000-4000-8000-0000000000e1' \gset
+update mistakes set practice_id = '00000000-0000-4000-8000-0000000000e1' where id = :'mid2';
+set role anon;
+select t_err(format('select student_answer_mistake(%L, %L, %L)', 'AAAAAAAA', :'mid2', '2'), 'açıq testdəki suala dəftərdən cavab almaq olmur');
+reset role;
+update tests set is_open = false where '00000000-0000-4000-8000-0000000000e1' = any(question_ids);
+set role anon;
+select t_ok(student_mistakes('AAAAAAAA') #>> '{items,0,question,id}' = '00000000-0000-4000-8000-0000000000e1', 'test bağlanandan sonra təkrara verilir');
+reset role;
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'
