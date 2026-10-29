@@ -71,6 +71,13 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - Test nəticələrində **Hələ göndərməyənlər** siyahısı və xatırlatma mətni.
 - Köhnə ümumi test linki (`#/t/...`, ad seçməklə) də işləyir.
 
+## Testə PDF-dən sual
+- Testlər → Yeni test → **Kitabdan / PDF-dən sual**: istənilən PDF və ya şəkil açılır, sual çərçivəyə alınır, aşağıda seçim çıxır:
+  - **Orijinalı təmiz çıxart** (`clean_copy`): sual dəyişmədən, kitabın dilində yenidən yazılır, şəkillər SVG ilə çəkilir, cavab tapılır (4–5 variant).
+  - **AI ilə yarat**: **Bənzər** və ya **Yeni quruluş**, 1–3 sual (`tryos_from_examples`).
+- Hər ikisində əvvəl analiz (natamam kəsik dayandırılır), sonra yoxlama; keçməyən bir dəfə yenidən yaradılır, yenə keçməsə qaralama (avtomatik seçilmir).
+- Seçilən suallar **Testi yarat** basılanda banka yazılır və testə əlavə olunur.
+
 ## PDF
 - Sual bankı → sualları seç → **PDF**; və ya AI nəticələrindən, test səhifəsindən.
 - A4, iki sütun, səhifədə 4 və ya 6 sual, sonda cavab açarı; ayrıca "Həllər" sənədi.

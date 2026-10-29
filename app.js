@@ -617,13 +617,14 @@ async function saveQuestions(list, source) {
   const DEFAULTS = { exam: 'general', figure: null, option_figures: [], section: null, subtype: null, model: null, verified: null, verify_note: null, ai_status: null, fit_ok: null, fit_note: null };
   const keys = new Set(rows.flatMap((r) => Object.keys(r)));
   rows.forEach((r) => keys.forEach((k) => { if (!(k in r)) r[k] = k in DEFAULTS ? DEFAULTS[k] : null; }));
-  const { error } = await sb.from('questions').insert(rows);
+  const { data: saved, error } = await sb.from('questions').insert(rows).select('id');
   if (error) {
     if (/column .* does not exist|schema cache/i.test(error.message || '')) {
       throw new Error('Baza yenilənməyib: Supabase SQL Editor-də supabase/004_status.sql faylını işə salın.');
     }
     throw error;
   }
+  return (saved || []).map((r) => r.id);
 }
 
 // ================= Şəkil / PDF seçici (kəsmə ilə) =================
@@ -1589,6 +1590,12 @@ async function testsView() {
         <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz (şagird adını özü yazır)</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
       </div>
       <div class="row between"><strong>Suallar · <span id="selCount">${preset.size}</span> seçilib · bankda ${(questions || []).length}</strong>${questions?.length ? '' : '<a href="#/ai">Əvvəlcə sual yaradın</a>'}</div>
+      <div class="pdf-box stack">
+        <div class="row between"><strong>Kitabdan / PDF-dən sual</strong>${modelPicker()}</div>
+        <p class="muted small">PDF və ya şəkil aç, sualı barmaqla çərçivəyə al: təmiz orijinalını çıxart və ya AI ilə yenisini yarat. Hazır suallar testə əlavə olunur.</p>
+        <div id="tqPicker" class="stack"></div>
+        <div id="tqPdf"></div>
+      </div>
       ${questions?.length ? `<div class="row"><input type="search" id="tqFind" placeholder="Axtar: mətn və ya mövzu" style="flex:1;min-width:180px">
         <button type="button" class="btn small" id="tqAll">Görünənləri seç</button><button type="button" class="btn small" id="tqNone">Seçimi sil</button></div>
         <p class="muted small">Suala basanda tam halı açılır.</p>` : ''}
@@ -1609,6 +1616,7 @@ async function testsView() {
 
   const form = $('#newTest');
   const countSel = () => { $('#selCount').textContent = $$('.check:checked', form).length; };
+  form.addEventListener('pdfchange', countSel);
   form.addEventListener('change', (e) => { if (e.target.classList.contains('check')) countSel(); });
   const qById = Object.fromEntries((questions || []).map((q) => [q.id, q]));
   bindMini(form, (id) => ({ q: qById[id] }));
@@ -1621,12 +1629,20 @@ async function testsView() {
     $('#tqAll').onclick = () => { $$('#tqList .mini:not([hidden]) .check').forEach((c) => { c.checked = true; }); countSel(); };
     $('#tqNone').onclick = () => { $$('#tqList .check').forEach((c) => { c.checked = false; }); countSel(); };
   }
+  bindModelPicker(form);
+  const pdf = pdfQuestions($('#tqPicker'), $('#tqPdf'));
   form.onsubmit = (e) => {
     e.preventDefault();
-    const ids = $$('.check:checked', form).map((c) => c.dataset.id);
-    if (!ids.length) return toast('Ən azı bir sual seçin', true);
+    if (pdf.busy()) return toast('PDF sualları hələ hazırlanır, bir az gözləyin', true);
+    const ids = $$('#tqList .check:checked', form).map((c) => c.dataset.id);
+    const extra = pdf.selected();
+    if (!ids.length && !extra.length) return toast('Ən azı bir sual seçin', true);
     const f = new FormData(form);
     busy($('button[type=submit]', form), async () => {
+      for (const src of ['book', 'ai']) {
+        const list = extra.filter((q) => q._source === src);
+        if (list.length) ids.push(...await saveQuestions(list, src));
+      }
       const { data: row, error: err } = await sb.from('tests').insert({ title: f.get('title').trim(), class_id: f.get('class_id') || null, question_ids: ids }).select().single();
       if (err) throw err;
       await copyText(link(row.id));
@@ -1639,6 +1655,161 @@ async function testsView() {
     if (err) return fail(err);
     route();
   });
+}
+
+// ================= Test üçün PDF-dən sual: təmiz orijinal və ya AI ilə yeni =================
+// picker: seçici yeri; out: nəticə kartları. Qaytarır: { busy(), selected() }
+function pdfQuestions(pickerRoot, out) {
+  const jobs = [];
+  const run = makeQueue(3);
+  let crop = null; // son kəsik: { image }
+  const MODE_LABEL = { original: 'Təmiz orijinal', benzer: 'AI · bənzər', ferqli: 'AI · yeni quruluş' };
+
+  const panel = document.createElement('div');
+  panel.className = 'crop-choice';
+  panel.hidden = true;
+  $app.appendChild(panel);
+  const closePanel = () => { panel.hidden = true; crop = null; picker.clearSelection(); };
+  const showPanel = (step = 'main') => {
+    panel.innerHTML = `<img src="${crop.image}" alt="Seçilən sual">
+      <div class="stack" style="gap:8px;flex:1;min-width:0">
+        ${step === 'main' ? `<strong>Bu sualla nə edək?</strong>
+          <div class="row"><button type="button" class="btn primary" data-pick="original">Orijinalı təmiz çıxart</button>
+          <button type="button" class="btn primary" data-step="ai">AI ilə yarat</button>
+          <button type="button" class="btn" data-cancel>Ləğv et</button></div>`
+        : `<strong>AI ilə yarat</strong>
+          <div class="row"><label class="row small" style="gap:6px">Say <select data-n style="min-height:40px">${[1, 2, 3].map((n) => `<option>${n}</option>`).join('')}</select></label>
+          <button type="button" class="btn primary" data-pick="benzer">Bənzər</button>
+          <button type="button" class="btn primary" data-pick="ferqli">Yeni quruluş</button>
+          <button type="button" class="btn" data-step="main">‹ Geri</button></div>`}
+      </div>`;
+    panel.hidden = false;
+    $$('[data-step]', panel).forEach((b) => b.onclick = () => showPanel(b.dataset.step));
+    const c = $('[data-cancel]', panel); if (c) c.onclick = closePanel;
+    $$('[data-pick]', panel).forEach((b) => b.onclick = () => {
+      const n = +($('[data-n]', panel)?.value || 1);
+      startJob(crop.image, b.dataset.pick, n);
+      closePanel();
+    });
+  };
+
+  // Səhifə nömrəsində Enter testi göndərməsin
+  pickerRoot.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); e.target.dispatchEvent(new Event('change', { bubbles: true })); }
+  });
+  const picker = createPicker(pickerRoot, {
+    label: 'PDF və ya şəkil aç',
+    hint: 'Sual çərçivəyə alınanda seçim pəncərəsi aşağıda açılır.',
+    onCrop: (api) => { crop = { image: api.dataUrl(1600) }; showPanel(); }
+  });
+
+  // Yoxla; keçməsə bir dəfə yenidən cəhd; yenə keçməsə qaralama
+  const settle = async (job, q, remake) => {
+    let cur = q;
+    let ok = await checkQuestion(cur, { mode: job.mode, sample: job.sample });
+    render();
+    if (!ok) {
+      const fb = [cur.verify_note, cur.fit_note].filter(Boolean).join('; ');
+      let repl = null;
+      try { repl = await remake(fb); } catch (err) { job.errors.push(err.message); }
+      if (repl) {
+        job.questions[job.questions.indexOf(cur)] = repl;
+        cur = repl;
+        render();
+        ok = await checkQuestion(cur, { mode: job.mode, sample: job.sample });
+      }
+    }
+    if (!ok) cur.ai_status = 'draft';
+    render();
+  };
+
+  const prep = (x, job) => ({ ...x, _uid: ++qSeq, _source: job.mode === 'original' ? 'book' : 'ai', ai_status: 'checking' });
+
+  function startJob(image, mode, n) {
+    const job = { id: ++qSeq, image, mode, n, state: 'reading', questions: [], errors: [], warnings: [], sample: null };
+    jobs.push(job);
+    render();
+    run(async () => {
+      const d = await callAI('tryos_analyze', { image, text: '' });
+      const a = d.analysis;
+      job.sample = { text: d.text, image, topic: a.topic, section: a.section, analysis: a };
+      (a.uncertain || []).forEach((u) => job.warnings.push('qeyri-müəyyən: ' + u));
+      if (a.conflict) job.warnings.push('ziddiyyət: ' + a.conflict);
+      if (!a.complete) { job.state = 'incomplete'; render(); return; }
+      job.state = 'working';
+      render();
+      if (mode === 'original') {
+        const make = async (feedback = '') => {
+          const r = await callAI('clean_copy', { image, text: d.text, analysis: a, feedback });
+          const q = prep(r.questions[0], job);
+          (q.unreadable || []).forEach((u) => job.warnings.push('oxunmadı: ' + u));
+          return q;
+        };
+        const q = await make();
+        job.questions.push(q);
+        render();
+        await settle(job, q, make);
+      } else {
+        const make = async (count, feedback = '') => {
+          const r = await callAI('tryos_from_examples', {
+            samples: [job.sample], mode, perSample: count, feedback,
+            avoid: job.questions.map((x) => x.body.replace(/\s+/g, ' ').slice(0, 180))
+          });
+          (r.rejected || []).forEach((x) => job.errors.push('rədd edildi: ' + x.reason));
+          return r.questions.slice(0, count).map((x) => prep(x, job));
+        };
+        const settles = [];
+        for (let left = n; left > 0; left -= CHUNK) {
+          const got = await make(Math.min(CHUNK, left));
+          got.forEach((q) => { job.questions.push(q); settles.push(settle(job, q, async (fb) => (await make(1, fb))[0])); });
+          render();
+        }
+        await Promise.all(settles);
+        if (job.questions.length < n) job.errors.push(`${n} sual istənildi, ${job.questions.length} alındı`);
+      }
+      job.state = 'done';
+      render();
+    }).catch((err) => { job.state = 'error'; job.errors.push(err.message); render(); });
+  }
+
+  const allQs = () => jobs.flatMap((j) => j.questions);
+  const isSel = (q) => (q._sel === undefined ? defaultChecked(q) : q._sel);
+
+  function render() {
+    if (!out.isConnected) return;
+    if (!jobs.length) { out.innerHTML = ''; return; }
+    const stateTag = { reading: ['', 'oxunur…'], working: ['', 'hazırlanır…'], done: ['ai', 'hazır'], error: ['red', 'alınmadı'], incomplete: ['red', 'natamam kəsik'] };
+    out.innerHTML = `<div class="stack" style="gap:10px">${jobs.map((j) => {
+      const [cls, txt] = stateTag[j.state];
+      return `<div class="pdf-job">
+        <img src="${j.image}" alt="Kitabdakı sual">
+        <div class="stack" style="gap:6px;flex:1;min-width:0">
+          <div class="row"><span class="tag book">${MODE_LABEL[j.mode]}${j.mode === 'original' ? '' : ' · ' + j.n}</span><span class="tag ${cls}">${txt}</span>
+            <button type="button" class="btn small" data-rmjob="${j.id}" style="margin-left:auto">Sil</button></div>
+          ${j.state === 'incomplete' ? '<p class="small" style="color:var(--red)">Kəsik natamamdır: şərt, şəkil və ya variantlar çatışmır. Sualı tam çərçivəyə alıb yenidən seçin.</p>' : ''}
+          ${j.warnings.length ? `<ul class="warn-list">${j.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
+          ${j.errors.length ? `<p class="small" style="color:var(--red)">${j.errors.map(esc).join('<br>')}</p>` : ''}
+          <div class="mini-grid">${j.questions.map((q) => `<div class="mini">${miniQ(q, 'p' + q._uid, isSel(q))}</div>`).join('')}</div>
+        </div></div>`;
+    }).join('')}</div>`;
+    const byKey = Object.fromEntries(jobs.flatMap((j) => j.questions.map((q) => ['p' + q._uid, { q, sample: j.sample || { image: j.image } }])));
+    bindMini(out, (k) => byKey[k] || {});
+    $$('.check', out).forEach((c) => c.onchange = () => { const it = byKey[c.dataset.id]; if (it) it.q._sel = c.checked; out.dispatchEvent(new Event('pdfchange', { bubbles: true })); });
+    $$('[data-rmjob]', out).forEach((b) => b.onclick = () => {
+      const i = jobs.findIndex((j) => j.id === +b.dataset.rmjob);
+      if (i >= 0) jobs.splice(i, 1);
+      render();
+    });
+    out.dispatchEvent(new Event('pdfchange', { bubbles: true }));
+  }
+
+  // səhifədən çıxanda panel qalmasın
+  window.addEventListener('hashchange', () => panel.remove(), { once: true });
+
+  return {
+    busy: () => jobs.some((j) => j.state === 'reading' || j.state === 'working'),
+    selected: () => allQs().filter((q) => q.ai_status !== 'checking' && isSel(q))
+  };
 }
 
 async function testResultsView(id) {

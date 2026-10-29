@@ -6,7 +6,7 @@
 //   ANTHROPIC_MODEL     — (istəyə bağlı) model adı
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS, TRYOS_MODES, TRYOS_ANALYSIS_SHAPE } from './_tryos.js';
+import { TRYOS_SYSTEM, TRYOS_QUESTION_SHAPE, TRYOS_TOPICS, TRYOS_MODES, TRYOS_ANALYSIS_SHAPE, GEN_MODE_KEYS } from './_tryos.js';
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 // Köməkçi işlər (şəkil oxuma, ikinci yoxlama) üçün daha ucuz model
@@ -95,7 +95,8 @@ export default async function handler(req, res) {
       tryos_generate: async () => tag(await tryosGenerate(body)),
       verify: () => verify(body),
       tryos_analyze: () => tryosAnalyze(body),
-      tryos_from_examples: async () => tag(await tryosFromExamples(body))
+      tryos_from_examples: async () => tag(await tryosFromExamples(body)),
+      clean_copy: async () => tag(await cleanCopy(body))
     };
     if (!actions[action]) return res.status(400).json({ error: 'Naməlum əməliyyat' });
     const store = { calls: [] };
@@ -243,7 +244,7 @@ async function tryosFromExamples(b) {
   const samples = (Array.isArray(b.samples) ? b.samples : []).slice(0, 3);
   if (!samples.length) throw publicError('Nümunə yoxdur');
   const per = clampInt(b.perSample, 1, 3, 1);
-  const mode = TRYOS_MODES[b.mode] ? b.mode : 'benzer';
+  const mode = GEN_MODE_KEYS.includes(b.mode) ? b.mode : 'benzer';
   const notes = String(b.notes || '').slice(0, 800).trim();
   const feedback = String(b.feedback || '').slice(0, 1200).trim();
   const avoid = (Array.isArray(b.avoid) ? b.avoid : []).slice(0, 20).map((t) => '- ' + String(t).slice(0, 200)).join('\n');
@@ -281,6 +282,34 @@ Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE.replace('{', '{\n  "sa
   });
   if (!questions.length) throw publicError('AI yararlı sual qaytarmadı' + (rejected.length ? ': ' + rejected.map((r) => r.reason).join('; ') : ''), 502);
   return { questions, rejected };
+}
+
+// Kitabdakı sualın təmiz nüsxəsi: dəyişmədən yenidən yazılır, şəkillər SVG ilə yenidən çəkilir
+async function cleanCopy(b) {
+  const img = imageBlock(b.image);
+  if (!img) throw publicError('Sualın şəkli yoxdur');
+  const a = b.analysis || {};
+  const feedback = String(b.feedback || '').slice(0, 1200).trim();
+  const content = [img, { type: 'text', text: `Yuxarıdakı şəkil kitabdan kəsilmiş bir sualdır.
+${b.text ? 'Əvvəlcədən oxunmuş mətn (səhv ola bilər, şəkillə tutuşdur):\n"""\n' + String(b.text).slice(0, 4000) + '\n"""' : ''}
+${analysisText(a)}
+
+TAPŞIRIQ: yeni sual YARATMA. Bu sualın TƏMİZ NÜSXƏSİNİ hazırla.
+${TRYOS_MODES.original}
+- Şərti sözbəsöz, kitabın öz dilində yaz (türkcə tələbi və yaratma qaydaları bu tapşırığa aid deyil; yalnız SVG qaydaları qüvvədədir). Sual nömrəsini və variant hərflərini yazma. Riyazi ifadələr LaTeX ilə $...$.
+- Variantları eyni sırada ver (4 və ya 5 variant — kitabda neçədirsə).
+- Sualda şəkil, qrafik, cədvəl, kadr və ya şəkilli variantlar varsa, onları SVG ilə kitabdakına maksimum yaxın çək (ölçülər, sayılar, istiqamətlər, qaralmış hissələr eyni).
+- Cavab şəkildə göstərilibsə onu götür; göstərilməyibsə, sualı özün diqqətlə həll et və düzgün variantı seç. Qısa həll yaz.
+- Oxunmayan hissə varsa uydurma: "unreadable" siyahısına yaz.
+${feedback ? 'Əvvəlki cəhd yoxlamadan keçmədi. Bu problemləri düzəlt (orijinaldan uzaqlaşmadan):\n' + feedback : ''}
+Bu formada qaytar: {"question": ${TRYOS_QUESTION_SHAPE}, "unreadable": []}` }];
+  const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 16000, model: b._model });
+  const res = normalizeTryos(data.question, {
+    topic: a.topic || '', section: a.section || 'matematik', subtype: '', difficulty: a.difficulty || 'orta'
+  }, { figureRequired: a.figure_required === true, optionsAreFigures: a.options_are_figures === true, optionCounts: [4, 5] });
+  if (res.error) throw publicError('Təmiz nüsxə alınmadı: ' + res.error, 502);
+  const unreadable = (Array.isArray(data.unreadable) ? data.unreadable : []).map((x) => String(x).slice(0, 200)).filter(Boolean).slice(0, 6);
+  return { questions: [{ ...res.q, unreadable }] };
 }
 
 async function extract(b) {
@@ -409,11 +438,13 @@ Bu formada qaytar: {"questions": [ ${TRYOS_QUESTION_SHAPE} ]}`;
 // Qaytarır: { q } və ya { error }. req: { figureRequired, optionsAreFigures }
 function normalizeTryos(q, item, req = {}) {
   if (!q || typeof q !== 'object' || !q.body) return { error: 'sual mətni yoxdur' };
+  const counts = req.optionCounts || [5];
   const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o).trim()).slice(0, 5);
-  if (options.length !== 5 || options.some((o) => !o)) return { error: '5 variant yoxdur' };
-  if (new Set(options).size !== 5) return { error: 'eyni yazılmış variantlar var' };
+  if (!counts.includes(options.length) || options.some((o) => !o)) return { error: counts.join(' və ya ') + ' variant yoxdur' };
+  const n = options.length;
+  if (new Set(options).size !== n) return { error: 'eyni yazılmış variantlar var' };
   const idx = Number.isInteger(q.correct_index) ? q.correct_index : options.indexOf(String(q.answer || '').trim());
-  if (idx < 0 || idx > 4) return { error: 'cavab indeksi yanlışdır' };
+  if (idx < 0 || idx > n - 1) return { error: 'cavab indeksi yanlışdır' };
   const issues = [];
   const fig = cleanSvg(q.figure);
   if (fig.removed) issues.push('əsas şəkildən ' + fig.removed + ' icazəsiz element silindi');
@@ -422,9 +453,9 @@ function normalizeTryos(q, item, req = {}) {
   const wantsOptFigs = req.optionsAreFigures || rawOpts.length > 0;
   let optionFigures = [];
   if (wantsOptFigs) {
-    if (optFigs.length !== 5 || optFigs.some((f) => !f.svg)) return { error: 'variant şəkilləri natamamdır (' + optFigs.filter((f) => f.svg).length + '/5)' };
+    if (optFigs.length !== n || optFigs.some((f) => !f.svg)) return { error: 'variant şəkilləri natamamdır (' + optFigs.filter((f) => f.svg).length + '/' + n + ')' };
     const norm = optFigs.map((f) => f.svg.replace(/\s+/g, ' ').replace(/\sid="[^"]*"/g, ''));
-    if (new Set(norm).size !== 5) return { error: 'eyni çəkilmiş variant şəkilləri var' };
+    if (new Set(norm).size !== n) return { error: 'eyni çəkilmiş variant şəkilləri var' };
     optFigs.forEach((f, i) => { if (f.removed) issues.push('variant ' + 'ABCDE'[i] + ' şəklindən ' + f.removed + ' element silindi'); });
     optionFigures = optFigs.map((f) => f.svg);
   }

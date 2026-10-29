@@ -99,8 +99,11 @@ Yalnız tələb olunan JSON-u qaytar, başqa heç nə yazma.`;
 export const TRYOS_MODES = {
   izomorf: 'Rejim: İZOMORF. Nümunənin quruluşu, əməliyyat ardıcıllığı, həll üsulu və çətinliyi eyni qalsın; yalnız rəqəmlər, simvollar, başlanğıc vəziyyətlər dəyişsin.',
   benzer: 'Rejim: BƏNZƏR. Sual ailəsi, təqdimat növü, əsas həll mexanizmi və çətinlik eyni qalsın; düzülüş, elementlər və parametrlər yeni olsun. Kəşf edilməli qayda şərtdə açıqlanmasın.',
-  ferqli: 'Rejim: FƏRQLİ QURULUŞ. Eyni əsas bacarıq və yaxın çətinlik; quruluş və təqdimat yeni ola bilər. Başqa bacarıq yoxlayan sual yaratma.'
+  ferqli: 'Rejim: FƏRQLİ QURULUŞ. Eyni əsas bacarıq və yaxın çətinlik; quruluş və təqdimat yeni ola bilər. Başqa bacarıq yoxlayan sual yaratma.',
+  original: 'Rejim: ORİJİNAL TƏMİZ NÜSXƏ. Sual kitabdakı kimi köçürülməlidir: eyni dil, eyni ədədlər, eyni şərt, eyni şəkil və eyni variantlar eyni sırada. Heç nə dəyişdirilməməli, əlavə edilməməli, sadələşdirilməməlidir.'
 };
+// Nümunədən yeni sual yaradan rejimlər (original yalnız təmiz nüsxə üçündür)
+export const GEN_MODE_KEYS = ['izomorf', 'benzer', 'ferqli'];
 
 // Nümunənin strukturlaşdırılmış analizi (yaratmadan əvvəl)
 export const TRYOS_ANALYSIS_SHAPE = `{
