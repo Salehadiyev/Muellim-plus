@@ -49,6 +49,7 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 ## Yeniləmələr (bazaya)
 - **002_tryos.sql** — TR-YÖS, şəkillər və yoxlama üçün yeni sütunlar. Supabase → SQL Editor → faylın hamısını yapışdır → Run.
 - **004_status.sql** — AI yoxlama statusları (keçib / yoxlama tələb edir / qaralama) və müəllim təsdiqi.
+- **005_student_links.sql** — hər şagirdə şəxsi link (8 simvollu kod), şagird kabineti, bir şagird bir testi bir dəfə göndərir.
 - **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
 
 ## TR-YÖS rejimi
@@ -63,6 +64,12 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - "Səhifədəki bütün suallar"da hər sual üçün orijinal səhifədən ayrıca kəsik götürülür və yaratmaya göndərilir.
 - Hər nümunəyə 1–5 sual; sorğular 2-lik hissələrə bölünür, çatışmayan bir dəfə avtomatik tamamlanır, sonra "Çatışmayanları yarat".
 - Yoxlama iki ayrı hissədir: (A) düzgünlük — cavab açarını görmədən, brauzerdə çəkilmiş yekun görüntü ilə; (B) nümunəyə uyğunluq — orijinal nümunə, analiz və rejimlə. Keçməyən sual bir dəfə yenidən yaradılır, yenə keçməsə qaralama olur. Müəllim təsdiqi ayrıca (Sual bankı → Təsdiqlə).
+
+## Şagird kabineti
+- Sinif səhifəsində hər şagirdin **Linki göndər** düyməsi var (iPad-də paylaşma pəncərəsi açılır, WhatsApp seçmək olar). **Yeni link** köhnəsini etibarsız edir.
+- Şagird `#/s/KOD` linkini açır: sinfinin açıq testlərini yazır (ad seçmədən), öz nəticələrini və orta faizini görür. Eyni testi iki dəfə göndərə bilmir.
+- Test nəticələrində **Hələ göndərməyənlər** siyahısı və xatırlatma mətni.
+- Köhnə ümumi test linki (`#/t/...`, ad seçməklə) də işləyir.
 
 ## PDF
 - Sual bankı → sualları seç → **PDF**; və ya AI nəticələrindən, test səhifəsindən.

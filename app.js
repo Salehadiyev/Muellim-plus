@@ -75,10 +75,22 @@ async function callAI(action, payload) {
   return data;
 }
 
-async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); toast('Link kopyalandı'); }
-  catch (_) { window.prompt('Linki kopyalayın:', text); }
+async function copyText(text, msg = 'Link kopyalandı') {
+  try { await navigator.clipboard.writeText(text); toast(msg); }
+  catch (_) { window.prompt('Kopyalayın:', text); }
 }
+
+// iPad/telefonda paylaşma pəncərəsi (WhatsApp və s.), olmasa kopyalayır
+async function shareText(text, msg) {
+  if (navigator.share) {
+    try { await navigator.share({ text }); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  copyText(text, msg);
+}
+
+const appBase = () => location.origin + location.pathname;
+const studentLink = (code) => appBase() + '#/s/' + code;
 
 const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
 const PDFJS_WORKER_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
@@ -207,6 +219,7 @@ function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const [page, id] = parts;
   if (page === 't' && id) return studentTest(id);
+  if (page === 's') return studentPortal(id, parts[2]);
   if (!session) return loginView();
   if (page === 'print') return printView();
 
@@ -364,7 +377,7 @@ async function classesView() {
   const { data, error } = await sb.from('classes').select('id, name, grade, created_at, students(count)').order('created_at');
   if (error) throw error;
   view().innerHTML = `
-    <div class="page-head"><div><h1>Siniflər</h1><p class="muted">Hər sinfə şagird siyahısı əlavə edin, testlərdə adlar seçim kimi çıxacaq.</p></div></div>
+    <div class="page-head"><div><h1>Siniflər</h1><p class="muted">Hər sinfə şagird siyahısı əlavə edin. Hər şagird testləri və nəticələrini görmək üçün öz linkini alır.</p></div></div>
     <form class="card stack" id="newClass"><h2>Yeni sinif</h2>
       <div class="form-grid">
         <label class="field">Sinfin adı<input type="text" name="name" placeholder="məs. 7A" required maxlength="60"></label>
@@ -388,6 +401,9 @@ async function classesView() {
   };
 }
 
+const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => CODE_ABC[b % 31]).join('');
+
 async function classView(id) {
   const [{ data: cls, error }, { data: students }, { data: tests }] = await Promise.all([
     sb.from('classes').select('*').eq('id', id).single(),
@@ -395,12 +411,22 @@ async function classView(id) {
     sb.from('tests').select('id, title, is_open, created_at').eq('class_id', id).order('created_at', { ascending: false })
   ]);
   if (error) throw error;
+  const hasCodes = students.length > 0 && students.every((s) => s.access_code);
+  const needsSql = students.length > 0 && !hasCodes;
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/classes">Siniflər</a> /</div><h1>${esc(cls.name)}</h1></div>
       <button class="btn danger" id="delClass">Sinfi sil</button></div>
     <div class="split">
-      <section class="card stack"><h2>Şagirdlər (${students.length})</h2>
-        ${students.length ? `<div class="table-wrap"><table><tbody>${students.map((s) => `<tr><td>${esc(s.full_name)}</td><td style="text-align:right"><button class="btn small danger" data-del="${s.id}" aria-label="${esc(s.full_name)} sil">Sil</button></td></tr>`).join('')}</tbody></table></div>`
+      <section class="card stack"><div class="row between"><h2>Şagirdlər (${students.length})</h2>
+          ${hasCodes ? '<button class="btn small" id="allLinks">Bütün linkləri kopyala</button>' : ''}</div>
+        ${needsSql ? '<p class="notice">Şəxsi linklər üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>005_student_links.sql</strong> → Run.</p>'
+          : hasCodes ? '<p class="muted small">Hər şagirdin öz linki var. Linklə o, sinfin açıq testlərini yazır və öz nəticələrini görür. Linki yalnız həmin şagirdə göndərin.</p>' : ''}
+        ${students.length ? `<div class="table-wrap"><table><tbody>${students.map((s) => `<tr>
+            <td>${esc(s.full_name)}${s.access_code ? `<div class="small muted mono">${esc(s.access_code)}</div>` : ''}</td>
+            <td style="text-align:right;white-space:nowrap">
+              ${s.access_code ? `<button class="btn small primary" data-share="${s.id}">Linki göndər</button>
+              <button class="btn small" data-recode="${s.id}" title="Köhnə link işləməyəcək">Yeni link</button>` : ''}
+              <button class="btn small danger" data-del="${s.id}" aria-label="${esc(s.full_name)} sil">Sil</button></td></tr>`).join('')}</tbody></table></div>`
           : '<div class="empty">Siyahı boşdur.</div>'}
         <form id="addStudents" class="stack">
           <label class="field">Şagird əlavə et<span class="hint">Hər sətirdə bir ad. Siyahını Excel və ya qeydlərdən yapışdıra bilərsiniz.</span>
@@ -413,6 +439,18 @@ async function classView(id) {
           : '<div class="empty">Hələ test yoxdur.</div>'}
       </section>
     </div>`;
+  const byId = Object.fromEntries(students.map((s) => [s.id, s]));
+  const msgFor = (s) => `${s.full_name}, bu sənin şəxsi Müəllim+ linkindir. Testləri buradan yaz, nəticələrini də burada görəcəksən:\n${studentLink(s.access_code)}`;
+  $$('[data-share]').forEach((b) => b.onclick = () => shareText(msgFor(byId[b.dataset.share]), 'Link kopyalandı'));
+  $('#allLinks') && ($('#allLinks').onclick = () => copyText(
+    `${cls.name} · şəxsi linklər\n\n` + students.map((s) => `${s.full_name}: ${studentLink(s.access_code)}`).join('\n'), 'Bütün linklər kopyalandı'));
+  $$('[data-recode]').forEach((b) => b.onclick = async () => {
+    if (!confirm(`${byId[b.dataset.recode].full_name} üçün yeni link yaradılsın? Köhnə link daha işləməyəcək, nəticələr qalacaq.`)) return;
+    const { error: err } = await sb.from('students').update({ access_code: newCode() }).eq('id', b.dataset.recode);
+    if (err) return fail(err);
+    toast('Yeni link yaradıldı');
+    route();
+  });
   $('#addStudents').onsubmit = (e) => {
     e.preventDefault();
     const names = new FormData(e.target).get('names').split('\n').map((n) => n.trim()).filter(Boolean).slice(0, 200);
@@ -425,6 +463,7 @@ async function classView(id) {
     }).catch(fail);
   };
   $$('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!confirm(`${byId[b.dataset.del].full_name} silinsin? Onun göndərdiyi nəticələr qalacaq.`)) return;
     const { error: err } = await sb.from('students').delete().eq('id', b.dataset.del);
     if (err) return fail(err);
     route();
@@ -1542,7 +1581,7 @@ async function testsView() {
   const link = (id) => location.origin + location.pathname + '#/t/' + id;
 
   view().innerHTML = `
-    <div class="page-head"><div><h1>Testlər</h1><p class="muted">Test yaradın və linki şagirdlərə göndərin. Şagirdlər qeydiyyatsız açır.</p></div></div>
+    <div class="page-head"><div><h1>Testlər</h1><p class="muted">Test yaradın. Sinfə bağlı test şagirdlərin şəxsi linkində avtomatik görünür. Ümumi linki də göndərmək olar.</p></div></div>
     <form class="card stack" id="newTest"><h2>Yeni test</h2>
       <div class="form-grid">
         <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Tənliklər · qısa yoxlama"></label>
@@ -1592,7 +1631,13 @@ async function testResultsView(id) {
     sb.from('submissions').select('*').eq('test_id', id).order('created_at', { ascending: false })
   ]);
   if (error) throw error;
-  const { data: qs } = await sb.from('questions').select('*').in('id', test.question_ids.length ? test.question_ids : ['00000000-0000-0000-0000-000000000000']);
+  const [{ data: qs }, { data: roster }] = await Promise.all([
+    sb.from('questions').select('*').in('id', test.question_ids.length ? test.question_ids : ['00000000-0000-0000-0000-000000000000']),
+    test.class_id ? sb.from('students').select('id, full_name, access_code').eq('class_id', test.class_id).order('full_name') : Promise.resolve({ data: [] })
+  ]);
+  const sentIds = new Set(subs.map((s) => s.student_id).filter(Boolean));
+  const sentNames = new Set(subs.map((s) => s.student_name.trim().toLocaleLowerCase('az')));
+  const notSent = (roster || []).filter((st) => !sentIds.has(st.id) && !sentNames.has(st.full_name.trim().toLocaleLowerCase('az')));
   const questions = test.question_ids.map((qid) => (qs || []).find((q) => q.id === qid)).filter(Boolean);
   const avg = subs.length ? Math.round(subs.reduce((a, s) => a + (s.total ? s.score / s.total : 0), 0) / subs.length * 100) : null;
   const norm = (v) => String(v ?? '').trim().toLocaleLowerCase('az');
@@ -1606,6 +1651,9 @@ async function testResultsView(id) {
       <div class="card stat"><div class="label">Göndərilən iş</div><div class="value">${subs.length}</div></div>
       <div class="card stat"><div class="label">Orta nəticə</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
     </section>
+    ${notSent.length ? `<section class="card stack"><div class="row between"><h2>Hələ göndərməyənlər (${notSent.length})</h2>
+        ${notSent.every((st) => st.access_code) && test.is_open ? '<button class="btn small" id="remind">Xatırlatma mətnini kopyala</button>' : ''}</div>
+      <div class="missing-list">${notSent.map((st) => `<span class="tag">${esc(st.full_name)}</span>`).join('')}</div></section>` : ''}
     <section class="card stack"><h2>Şagirdlər</h2>
       ${subs.length ? `<div class="table-wrap"><table><thead><tr><th>Şagird</th><th>Bal</th><th>Faiz</th><th>Vaxt</th></tr></thead><tbody>
         ${subs.map((s) => { const p = s.total ? Math.round(s.score / s.total * 100) : 0; return `<tr><td>${esc(s.student_name)}</td><td><strong>${s.score}/${s.total}</strong></td>
@@ -1627,6 +1675,8 @@ async function testResultsView(id) {
       }).join('')}
     </section>`;
   $('#copy').onclick = () => copyText(link);
+  $('#remind') && ($('#remind').onclick = () => copyText(`«${test.title}» testini hələ yazmayanlar, öz linkinizdən açın:\n\n`
+    + notSent.map((st) => `${st.full_name}: ${studentLink(st.access_code)}`).join('\n'), 'Mətn kopyalandı'));
   $('#pdf').onclick = () => { pendingPrint = { questions, title: test.title, back: '#/test/' + id }; go('#/print'); };
   $('#del').onclick = async () => {
     if (!confirm('Test və bütün nəticələri silinsin?')) return;
@@ -1638,13 +1688,34 @@ async function testResultsView(id) {
 
 // ================= Şagird test səhifəsi =================
 
+const studentQuestionsHtml = (test) => test.questions.map((q, i) => `<fieldset class="card stack" style="margin:0">
+      <legend class="sr">Sual ${i + 1}</legend>
+      <div class="muted small">Sual ${i + 1} / ${test.questions.length}</div>
+      <div class="q-text pre" style="font-size:17px">${esc(q.body)}</div>
+      ${q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : ''}
+      ${q.qtype === 'mcq'
+        ? `<div class="${hasOptionFigures(q) ? 'fig-choices' : 'stack'}" style="gap:8px">${q.options.map((o, j) => `<label class="opt-choice"><input type="radio" name="q_${q.id}" value="${esc(o)}"><span>${'ABCDEF'[j]})</span>${hasOptionFigures(q) ? `<span class="opt-fig">${safeSvg(q.option_figures[j])}</span>` : `<span>${esc(o)}</span>`}</label>`).join('')}</div>`
+        : `<label class="field"><span class="sr">Cavabınız</span><textarea name="q_${q.id}" rows="3" placeholder="Cavabınızı yazın"></textarea></label>`}
+    </fieldset>`).join('');
+
+// Cavabları toplayır; boş sual varsa təsdiq istəyir (imtina edilsə null)
+function collectAnswers(form, test) {
+  const f = new FormData(form);
+  const answers = {};
+  test.questions.forEach((q) => { const v = f.get('q_' + q.id); if (v !== null && String(v).trim() !== '') answers[q.id] = String(v); });
+  const missing = test.questions.length - Object.keys(answers).length;
+  if (missing && !confirm(missing + ' suala cavab verilməyib. Yenə də göndərilsin?')) return null;
+  return answers;
+}
+
+const studentMsg = (title, text, extra = '') => {
+  $app.innerHTML = `<div class="center-screen"><div class="card auth-card stack"><h1>${title}</h1><p class="muted">${text}</p>${extra}</div></div>`;
+};
+
 async function studentTest(id) {
   $app.innerHTML = '<div class="center-screen"><div class="spinner" aria-label="Yüklənir"></div></div>';
   const { data: test, error } = await sb.rpc('get_test_for_student', { p_test_id: id });
-  if (error || !test) {
-    $app.innerHTML = `<div class="center-screen"><div class="card auth-card stack"><h1>Test açılmadı</h1><p class="muted">Test tapılmadı və ya müəllim onu bağlayıb.</p></div></div>`;
-    return;
-  }
+  if (error || !test) return studentMsg('Test açılmadı', 'Test tapılmadı və ya müəllim onu bağlayıb.');
   const doneKey = 'mp_done_' + id;
   let done = null;
   try { done = JSON.parse(localStorage.getItem(doneKey) || 'null'); } catch (_) { done = null; }
@@ -1659,27 +1730,16 @@ async function studentTest(id) {
         ? `<label class="field">Adınızı seçin<select name="name" required><option value="">— seçin —</option>${students.map((s) => `<option>${esc(s)}</option>`).join('')}</select></label>`
         : '<label class="field">Ad və soyadınız<input type="text" name="name" required maxlength="80" autocomplete="name"></label>'}
     </div>
-    ${test.questions.map((q, i) => `<fieldset class="card stack" style="margin:0">
-      <legend class="sr">Sual ${i + 1}</legend>
-      <div class="muted small">Sual ${i + 1} / ${test.questions.length}</div>
-      <div class="q-text pre" style="font-size:17px">${esc(q.body)}</div>
-      ${q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : ''}
-      ${q.qtype === 'mcq'
-        ? `<div class="${hasOptionFigures(q) ? 'fig-choices' : 'stack'}" style="gap:8px">${q.options.map((o, j) => `<label class="opt-choice"><input type="radio" name="q_${q.id}" value="${esc(o)}"><span>${'ABCDEF'[j]})</span>${hasOptionFigures(q) ? `<span class="opt-fig">${safeSvg(q.option_figures[j])}</span>` : `<span>${esc(o)}</span>`}</label>`).join('')}</div>`
-        : `<label class="field"><span class="sr">Cavabınız</span><textarea name="q_${q.id}" rows="3" placeholder="Cavabınızı yazın"></textarea></label>`}
-    </fieldset>`).join('')}
+    ${studentQuestionsHtml(test)}
     <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
   </form>`;
 
   $('#st').onsubmit = (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
-    const name = String(f.get('name') || '').trim();
+    const name = String(new FormData(e.target).get('name') || '').trim();
     if (!name) return toast('Adınızı seçin', true);
-    const answers = {};
-    test.questions.forEach((q) => { const v = f.get('q_' + q.id); if (v !== null && String(v).trim() !== '') answers[q.id] = String(v); });
-    const missing = test.questions.length - Object.keys(answers).length;
-    if (missing && !confirm(missing + ' suala cavab verilməyib. Yenə də göndərilsin?')) return;
+    const answers = collectAnswers(e.target, test);
+    if (!answers) return;
     busy($('button[type=submit]', e.target), async () => {
       const { data, error: err } = await sb.rpc('submit_test', { p_test_id: id, p_student_name: name, p_answers: answers });
       if (err) throw new Error(err.message);
@@ -1690,14 +1750,96 @@ async function studentTest(id) {
   };
 }
 
-function studentDone(test, r) {
-  const hasOpen = test.questions.some((q) => q.qtype === 'open');
+function studentDone(test, r, back = '') {
+  const hasOpen = (test.questions || []).some((q) => q.qtype === 'open');
   $app.innerHTML = `<div class="center-screen"><div class="card auth-card stack" style="text-align:center">
     <h1>${esc(test.title)}</h1>
     <p class="muted">${esc(r.name)}, cavablarınız göndərildi.</p>
     ${r.total ? `<div class="score-big">${r.score}/${r.total}</div><p class="muted">çoxseçimli suallardan düz cavab</p>` : ''}
     ${hasOpen ? '<p class="notice">Açıq sualları müəlliminiz yoxlayacaq.</p>' : ''}
+    ${back ? `<a class="btn primary block" href="${back}">Testlərimə qayıt</a>` : ''}
   </div></div>`;
+}
+
+// ================= Şagird kabineti (şəxsi link: #/s/KOD) =================
+
+const CODE_KEY = 'mp_student_code';
+const pct = (r) => (r.total ? Math.round(r.score / r.total * 100) : 0);
+
+function studentCodeForm(note = '') {
+  $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="codeForm">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
+    <h1>Şagird girişi</h1>
+    ${note ? `<p class="notice">${note}</p>` : '<p class="muted">Müəlliminizin göndərdiyi linki açın və ya kodu yazın.</p>'}
+    <label class="field">Kod<input name="code" required maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="məs. K7M2QX9A" style="text-transform:uppercase;letter-spacing:2px"></label>
+    <button class="btn primary block" type="submit">Daxil ol</button>
+  </form></div>`;
+  $('#codeForm').onsubmit = (e) => {
+    e.preventDefault();
+    const code = String(new FormData(e.target).get('code') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code) go('#/s/' + code);
+  };
+}
+
+async function studentPortal(rawCode, testId) {
+  let code = String(rawCode || '').trim().toUpperCase();
+  if (!code) {
+    try { code = localStorage.getItem(CODE_KEY) || ''; } catch (_) { code = ''; }
+    if (code) return go('#/s/' + code);
+    return studentCodeForm();
+  }
+  $app.innerHTML = '<div class="center-screen"><div class="spinner" aria-label="Yüklənir"></div></div>';
+  window.scrollTo(0, 0);
+  const home = '#/s/' + code;
+
+  if (testId) {
+    const { data: test, error } = await sb.rpc('student_get_test', { p_code: code, p_test_id: testId });
+    if (error || !test) return studentMsg('Test açılmadı', 'Test tapılmadı.', `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
+    if (test.result) return studentDone(test, { ...test.result, name: test.name }, home);
+    if (test.closed) return studentMsg(esc(test.title), 'Müəllim bu testi bağlayıb.', `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
+    $app.innerHTML = `<form class="student" id="st">
+      <div class="row between"><a class="muted" href="${home}">‹ Testlərim</a><span class="muted">${esc(test.name)}</span></div>
+      <h1>${esc(test.title)}</h1>
+      ${studentQuestionsHtml(test)}
+      <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
+    </form>`;
+    $('#st').onsubmit = (e) => {
+      e.preventDefault();
+      const answers = collectAnswers(e.target, test);
+      if (!answers) return;
+      busy($('button[type=submit]', e.target), async () => {
+        const { data, error: err } = await sb.rpc('student_submit_test', { p_code: code, p_test_id: testId, p_answers: answers });
+        if (err) throw new Error(err.message);
+        studentDone(test, { ...data, name: test.name }, home);
+      }).catch(fail);
+    };
+    return;
+  }
+
+  const { data: me, error } = await sb.rpc('student_portal', { p_code: code });
+  if (error || !me) {
+    try { if (localStorage.getItem(CODE_KEY) === code) localStorage.removeItem(CODE_KEY); } catch (_) { /* */ }
+    return studentCodeForm(error ? 'Hazırda açmaq olmadı, bir az sonra yenidən yoxlayın.' : 'Bu link və ya kod etibarsızdır. Müəlliminizdən yeni link istəyin.');
+  }
+  try { localStorage.setItem(CODE_KEY, code); } catch (_) { /* */ }
+  const todo = me.tests.filter((t) => !t.result && t.is_open);
+  const done = me.tests.filter((t) => t.result);
+  const avg = done.length ? Math.round(done.reduce((a, t) => a + pct(t.result), 0) / done.length) : null;
+  $app.innerHTML = `<div class="student">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
+    <div><h1>Salam, ${esc(me.name)}</h1><p class="muted">${esc(me.class || '')}</p></div>
+    <section class="card stack"><h2>Yazılacaq testlər${todo.length ? ` (${todo.length})` : ''}</h2>
+      ${todo.length ? todo.map((t) => `<a class="portal-row" href="${home}/${t.id}">
+          <span><strong>${esc(t.title)}</strong><span class="small muted"> · ${t.count} sual</span></span><span class="btn small primary">Başla</span></a>`).join('')
+        : '<div class="empty">Hazırda yazılacaq test yoxdur.</div>'}
+    </section>
+    <section class="card stack"><div class="row between"><h2>Nəticələrim</h2>${avg === null ? '' : `<span class="tag ai">orta ${avg}%</span>`}</div>
+      ${done.length ? done.map((t) => `<div class="portal-row">
+          <span><strong>${esc(t.title)}</strong><span class="small muted"> · ${fmtDate(t.result.created_at)}</span></span>
+          <span class="row" style="flex-wrap:nowrap;gap:8px"><span class="bar" style="width:70px"><i style="width:${pct(t.result)}%"></i></span><strong>${t.result.score}/${t.result.total}</strong></span></div>`).join('')
+        : '<div class="empty">Hələ test yazmamısınız.</div>'}
+    </section>
+  </div>`;
 }
 
 function loadScript(src) {
