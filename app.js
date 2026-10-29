@@ -534,29 +534,56 @@ async function dashboard() {
   (subs || []).forEach((x) => { sentBy[x.test_id] = (sentBy[x.test_id] || 0) + 1; });
   const recent = (subs || []).slice(0, 6);
   const warn = access && access.daily_limit !== undefined && (Number(access.today) >= 0.8 * Number(access.daily_limit) || Number(access.month) >= 0.8 * Number(access.monthly_limit));
+  const pc = (r) => r.total ? Math.round(r.score / r.total * 100) : null;
+  const weekAgo = Date.now() - 7 * 864e5;
+  const week = (subs || []).filter((r) => new Date(r.created_at).getTime() >= weekAgo);
+  const wAvg = week.filter((r) => r.total).length ? Math.round(week.filter((r) => r.total).reduce((x, r) => x + r.score / r.total, 0) / week.filter((r) => r.total).length * 100) : null;
+  const seenWeak = new Set();
+  const weak = (subs || []).filter((r) => new Date(r.created_at).getTime() >= weekAgo && pc(r) !== null && pc(r) < 50)
+    .filter((r) => { const k = r.student_id || r.student_name; if (seenWeak.has(k)) return false; seenWeak.add(k); return true; }).slice(0, 4);
+  const AV = ['#0E7490', '#6D5BD0', '#C2410C', '#1D7A4E', '#B42318', '#0369A1', '#A16207', '#7E22CE'];
+  const avatar = (n) => { const t = String(n || '?').trim(); let h = 0; for (const ch of t) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    const ini = t.split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toLocaleUpperCase('az');
+    return `<span class="avatar" style="background:${AV[h % AV.length]}" aria-hidden="true">${esc(ini)}</span>`; };
   view().innerHTML = `
-    <div class="page-head"><div>
-      <div class="crumb">${todayAz()}</div>
-      <h1>Salam${name ? ', ' + esc(name) : ''}</h1></div></div>
+    <section class="hero">
+      <div class="hero-txt"><div class="hero-date">${todayAz()}</div>
+        <h1>Salam${name ? ', ' + esc(name) : ''} 👋</h1>
+        <p>${tests?.length ? `<strong>${tests.length}</strong> açıq test var` : 'Açıq test yoxdur'}${week.length ? ` · bu həftə <strong>${week.length}</strong> iş gəlib` : ''}.</p></div>
+      <div class="hero-stats">
+        <div><span>${qCount ?? 0}</span><small>sual bankda</small></div>
+        <div><span>${(studs || []).length}</span><small>şagird</small></div>
+        <div><span>${wAvg === null ? '—' : wAvg + '%'}</span><small>həftənin ortası</small></div>
+      </div>
+    </section>
     ${warn ? limitLine() : ''}
     <section class="big-actions">
-      <a class="card big-action" href="#/pdf"><span class="icon-box">${icons.cut}</span><strong>Sual yarat</strong><span class="muted small">Kitabdan, PDF-dən və ya AI ilə · bankda ${qCount ?? 0} sual</span></a>
-      <a class="card big-action" href="#/newtest"><span class="icon-box">${icons.test}</span><strong>Test yarat</strong><span class="muted small">Sualları seç, sinfə göndər</span></a>
-      <a class="card big-action" href="#/classes"><span class="icon-box">${icons.users}</span><strong>Siniflər və nəticələr</strong><span class="muted small">Şagirdlər, analiz, hesabat</span></a>
+      <a class="card big-action ba-teal" href="#/pdf"><span class="icon-box">${icons.cut}</span><strong>Sual yarat</strong><span class="muted small">Kitabdan, PDF-dən və ya AI ilə · bankda ${qCount ?? 0} sual</span></a>
+      <a class="card big-action ba-violet" href="#/newtest"><span class="icon-box">${icons.test}</span><strong>Test yarat</strong><span class="muted small">Sualları seç, sinfə göndər</span></a>
+      <a class="card big-action ba-orange" href="#/classes"><span class="icon-box">${icons.users}</span><strong>Siniflər və nəticələr</strong><span class="muted small">Şagirdlər, analiz, hesabat</span></a>
     </section>
+    ${weak.length ? `<section class="card stack attn"><h2><span class="attn-dot" aria-hidden="true"></span>Diqqət: bu həftə zəif nəticə</h2>
+      ${weak.map((r) => `<a class="drow" href="${r.student_id ? '#/student/' + r.student_id : '#/test/' + r.test_id}">${avatar(r.student_name)}
+        <span class="d-main"><strong>${esc(r.student_name)}</strong><span class="small muted">${esc(r.tests?.title || '')}</span></span>${pctChip(pc(r))}<span class="muted">›</span></a>`).join('')}
+    </section>` : ''}
+    <div class="dash-cols">
     <section class="card stack"><h2>Açıq testlər</h2>
       ${tests?.length ? tests.map((t) => {
         const total = t.student_id ? 1 : (t.class_id ? perClass[t.class_id] || 0 : 0);
         const done = sentBy[t.id] || 0;
-        return `<a class="portal-row" href="#/test/${t.id}"><span><strong>${esc(t.title)}</strong><span class="small muted"> · ${esc(t.classes?.name || 'sinifsiz')}${t.due_at ? ' · son tarix ' + esc(fmtDue(t.due_at)) : ''}</span></span>
-          <span class="row" style="gap:8px;flex-wrap:nowrap">${total ? `<span class="small ${done < total ? '' : 'muted'}">${done} / ${total} yazıb</span>` : `<span class="small muted">${done} iş</span>`}<span class="muted">›</span></span></a>`;
+        const p = total ? Math.min(100, Math.round(done / total * 100)) : 0;
+        return `<a class="drow" href="#/test/${t.id}"><span class="d-main"><strong>${esc(t.title)}</strong><span class="small muted">${esc(t.classes?.name || 'sinifsiz')}${t.due_at ? ' · son tarix ' + esc(fmtDue(t.due_at)) : ''}</span>
+          ${total ? `<span class="d-bar" aria-hidden="true"><span style="width:${p}%"></span></span>` : ''}</span>
+          <span class="small ${total && done >= total ? 'd-done' : ''}">${total ? `${done} / ${total} yazıb` : `${done} iş`}</span><span class="muted">›</span></a>`;
       }).join('') : '<div class="empty">Açıq test yoxdur. <a href="#/newtest">Test yaradın</a>.</div>'}
     </section>
     <section class="card stack"><h2>Son nəticələr</h2>
-      ${recent.length ? `<div class="table-wrap"><table><thead><tr><th>Şagird</th><th>Test</th><th>Bal</th><th>Vaxt</th></tr></thead><tbody>
-        ${recent.map((r) => `<tr><td>${esc(r.student_name)}</td><td><a href="#/test/${r.test_id}">${esc(r.tests?.title || '')}</a></td><td><strong>${r.score}/${r.total}</strong></td><td class="muted small">${fmtDate(r.created_at)}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">Hələ nəticə yoxdur.</div>'}
-    </section>`;
+      ${recent.length ? recent.map((r) => `<a class="drow" href="#/test/${r.test_id}">${avatar(r.student_name)}
+          <span class="d-main"><strong>${esc(r.student_name)}</strong><span class="small muted">${esc(r.tests?.title || '')} · ${fmtDate(r.created_at)}</span></span>
+          <span class="d-score"><strong>${r.score}/${r.total}</strong>${pctChip(pc(r))}</span></a>`).join('')
+        : '<div class="empty">Hələ nəticə yoxdur.</div>'}
+    </section>
+    </div>`;
 }
 
 // Ayarlar: AI xərci və limit, müəllimlər (admin), hesab

@@ -527,3 +527,43 @@ a.seg-b { text-decoration: none; }
   .res-stats .stat .value { font-size: 22px; }
   .res-stats .stat .value .of { font-size: 12px; display: block; }
 }
+
+/* ---------- Ana səhifə: rəngli ---------- */
+.hero { position: relative; overflow: hidden; border-radius: 20px; padding: 26px 28px; color: #fff; display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-between;
+  background: radial-gradient(circle at 92% 10%, rgba(255,255,255,.18) 0 80px, transparent 81px), radial-gradient(circle at 70% 135%, rgba(251,146,60,.38) 0 110px, transparent 111px), linear-gradient(120deg, #0B3A47 0%, #0E7490 55%, #14A3B8 100%); }
+.hero h1 { color: #fff; font-size: 30px; margin: 2px 0 6px; }
+.hero p { color: #D7EEF2; font-size: 15px; }
+.hero p strong { color: #fff; }
+.hero-date { font-size: 13px; color: #BFE3EA; text-transform: lowercase; }
+.hero-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.hero-stats div { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); border-radius: 14px; padding: 10px 16px; min-width: 96px; display: flex; flex-direction: column; }
+.hero-stats span { font-family: 'Space Grotesk', sans-serif; font-size: 24px; font-weight: 700; }
+.hero-stats small { font-size: 12px; color: #D7EEF2; }
+.big-action { border-top: 4px solid var(--ba, var(--accent)); background: linear-gradient(180deg, var(--ba-soft, #fff) 0, #fff 70%); }
+.big-action:hover { border-color: var(--ba); box-shadow: 0 6px 18px rgba(20, 32, 48, .08); }
+.big-action .icon-box { background: var(--ba); }
+.big-action .icon-box svg { stroke: #fff; }
+.ba-teal { --ba: #0E7490; --ba-soft: #E6F5F8; }
+.ba-violet { --ba: #6D5BD0; --ba-soft: #EFEDFC; }
+.ba-orange { --ba: #EA7A1E; --ba-soft: #FDF0E4; }
+.dash-cols { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); align-items: start; }
+.drow { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #EEF1F5; text-decoration: none; color: var(--ink); min-height: 52px; }
+.card > h2 + .drow { border-top: 0; }
+.drow:hover strong { color: var(--accent); }
+.d-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.d-main .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-bar { height: 6px; border-radius: 3px; background: #E8EDF1; overflow: hidden; margin-top: 6px; max-width: 260px; }
+.d-bar span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #0E7490, #14A3B8); }
+.d-done { color: var(--green); font-weight: 700; }
+.d-score { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.avatar { width: 38px; height: 38px; flex: none; border-radius: 50%; color: #fff; font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.attn { border-left: 4px solid var(--red); background: linear-gradient(90deg, #FFF6F5 0, #fff 40%); }
+.attn h2 { display: flex; align-items: center; gap: 8px; }
+.attn-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+@media (max-width: 520px) { .hero { padding: 20px; } .hero h1 { font-size: 24px; } .hero-stats { width: 100%; } .hero-stats div { flex: 1; min-width: 0; padding: 8px 10px; } .hero-stats span { font-size: 20px; } .dash-cols { grid-template-columns: 1fr; } }
+.dash-cols > * { min-width: 0; }
+@media (max-width: 520px) {
+  .big-actions { gap: 10px; }
+  .big-action { display: grid; grid-template-columns: 44px 1fr; column-gap: 14px; row-gap: 2px; min-height: 0; padding: 14px 16px; align-items: center; }
+  .big-action .icon-box { grid-row: span 2; }
+}
