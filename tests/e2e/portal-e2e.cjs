@@ -58,7 +58,7 @@ const fail = (m) => { throw new Error(m); };
   const clip = teacher.lastDialog || await teacher.evaluate(() => navigator.clipboard.readText().catch(() => ''));
   step('all links → ' + (teacher.lastDialog ? 'prompt fallback' : 'clipboard') + ': ' + JSON.stringify((clip || '').split('\n').slice(0, 3)));
   teacher.lastDialog = null;
-  await teacher.click('[data-recode="s3"]'); await teacher.waitForSelector('text=Yeni link yaradıldı');
+  await teacher.click('[data-more="s3"] summary'); await teacher.click('[data-recode="s3"]'); await teacher.waitForSelector('text=Yeni link yaradıldı');
   let db = await getDb(teacher); const newRsd = db.students.find((s) => s.id === 's3').access_code;
   if (newRsd === 'RSD23456' || !/^[A-HJ-NP-Z2-9]{8}$/.test(newRsd)) fail('recode ' + newRsd);
   step('new link for Rəşad: ' + newRsd + ' (old invalid)');

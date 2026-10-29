@@ -482,3 +482,48 @@ a.seg-b { text-decoration: none; }
 .qs-text { font-size: 12.5px; line-height: 1.4; color: #3D4759; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .qs-text .katex-display { margin: 0; display: inline; }
 @media (max-width: 520px) { .qstat-grid, #tqList.mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tc-bar { width: 100px; } .tc-act { width: 100%; } .tc-act .btn { flex: 1; } }
+
+/* ---------- Siniflər ---------- */
+.pchip { display: inline-block; min-width: 46px; text-align: center; font-size: 13px; font-weight: 700; padding: 3px 8px; border-radius: 8px; background: #EEF1F5; color: #5B6577; }
+.pchip.hi { background: var(--green-soft); color: var(--green); }
+.pchip.mid { background: var(--amber-soft); color: var(--amber); }
+.pchip.low { background: var(--red-soft); color: var(--red); }
+.ccards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.ccard { display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; text-decoration: none; color: var(--ink); transition: border-color .15s, box-shadow .15s; }
+.ccard:hover { border-color: var(--accent); box-shadow: 0 4px 14px rgba(14, 116, 144, .12); color: var(--ink); }
+.cc-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cc-name { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 700; }
+.cc-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; color: var(--muted); margin-top: 6px; }
+.cc-facts strong { color: var(--ink); }
+.cc-go { margin-top: 8px; font-weight: 600; color: var(--accent); font-size: 14px; }
+.slist { display: flex; flex-direction: column; }
+.srow { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #EEF1F5; flex-wrap: wrap; }
+.srow:first-child { border-top: 0; }
+.s-name { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; text-decoration: none; color: var(--ink); }
+.s-name:hover strong { color: var(--accent); text-decoration: underline; }
+.s-res { display: flex; align-items: center; gap: 8px; flex: 0 0 150px; }
+.s-act { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.s-act .btn { min-height: 40px; }
+.more { position: relative; }
+.more > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; font-size: 18px; }
+.more > summary::-webkit-details-marker { display: none; }
+.more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(20, 32, 48, .16); padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 170px; }
+.more-menu .btn { justify-content: flex-start; width: 100%; }
+.mtlist { display: flex; flex-direction: column; }
+.mtrow { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-top: 1px solid #EEF1F5; text-decoration: none; color: var(--ink); min-height: 48px; }
+.mtrow:first-child { border-top: 0; }
+.mtrow:hover .mt-title { color: var(--accent); }
+.mt-title { flex: 1; font-weight: 600; min-width: 0; }
+.mt-go { font-size: 20px; color: var(--muted); }
+.tc-status.on { background: var(--green-soft); color: var(--green); }
+.danger-zone { color: var(--muted); font-size: 14px; }
+.danger-zone summary { cursor: pointer; padding: 8px 0; }
+.danger-zone[open] { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 4px 18px 16px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+@media (max-width: 520px) { .s-res { flex-basis: auto; } .s-act { width: 100%; margin-left: 0; } .s-act .btn.primary { flex: 1; } }
+@media (max-width: 520px) {
+  .res-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .res-stats .stat { padding: 12px; }
+  .res-stats .stat .label { font-size: 12px; }
+  .res-stats .stat .value { font-size: 22px; }
+  .res-stats .stat .value .of { font-size: 12px; display: block; }
+}

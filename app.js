@@ -669,27 +669,47 @@ ${esc(e.agent || '')}</pre></details></td>
 
 // ================= Siniflər =================
 
+const pctCls = (p) => p === null ? '' : p >= 75 ? 'hi' : p >= 50 ? 'mid' : 'low';
+const pctChip = (p) => p === null ? '<span class="pchip">—</span>' : `<span class="pchip ${pctCls(p)}">${p}%</span>`;
+
 async function classesView() {
-  const { data, error } = await sb.from('classes').select('id, name, grade, created_at, students(count)').order('created_at');
+  const [{ data, error }, { data: tests }, { data: subs }] = await Promise.all([
+    sb.from('classes').select('id, name, grade, created_at, students(count)').order('created_at'),
+    sb.from('tests').select('id, class_id, is_open'),
+    sb.from('submissions').select('test_id, score, total')
+  ]);
   if (error) throw error;
+  const testClass = Object.fromEntries((tests || []).map((t) => [t.id, t.class_id]));
+  const info = {};
+  (data || []).forEach((c) => { info[c.id] = { open: 0, sum: 0, n: 0 }; });
+  (tests || []).forEach((t) => { if (t.is_open && info[t.class_id]) info[t.class_id].open++; });
+  (subs || []).forEach((x) => { const k = info[testClass[x.test_id]]; if (k && x.total) { k.sum += x.score / x.total; k.n++; } });
+
   view().innerHTML = `
-    <div class="page-head"><div><h1>Siniflər</h1><p class="muted">Hər sinfə şagird siyahısı əlavə edin. Hər şagird testləri və nəticələrini görmək üçün öz linkini alır.</p></div></div>
-    <form class="card stack" id="newClass"><h2>Yeni sinif</h2>
+    <div class="page-head"><div><h1>Siniflər</h1><p class="muted">Sinfi açın: şagirdlər, onların linkləri və nəticələri oradadır.</p></div>
+      <button class="btn primary" id="showNew">+ Yeni sinif</button></div>
+    <form class="card stack" id="newClass" ${data.length ? 'hidden' : ''}><h2>Yeni sinif</h2>
       <div class="form-grid">
-        <label class="field">Sinfin adı<input type="text" name="name" placeholder="məs. 7A" required maxlength="60"></label>
-        <label class="field">Sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === 7 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
+        <label class="field">Sinfin adı<input type="text" name="name" placeholder="məs. 11A" required maxlength="60"></label>
+        <label class="field">Neçənci sinif<select name="grade">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === 11 ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></label>
       </div>
-      <div><button class="btn primary" type="submit">Sinif yarat</button></div>
+      <div class="row"><button class="btn primary" type="submit">Sinif yarat</button>${data.length ? '<button class="btn" type="button" id="hideNew">Ləğv et</button>' : ''}</div>
     </form>
-    <section class="grid">
-      ${data.length ? data.map((c) => `<a class="card action-card" href="#/class/${c.id}">
-        <h3>${esc(c.name)}</h3><p class="muted small">${c.grade ? gradeLabel(c.grade) + ' · ' : ''}${c.students?.[0]?.count ?? 0} şagird</p></a>`).join('')
-      : '<div class="empty">Hələ sinif yoxdur.</div>'}
-    </section>`;
+    ${data.length ? `<section class="ccards">${data.map((c) => {
+      const k = info[c.id]; const n = c.students?.[0]?.count ?? 0;
+      const avg = k.n ? Math.round(k.sum / k.n * 100) : null;
+      return `<a class="ccard" href="#/class/${c.id}">
+        <span class="cc-top"><span class="cc-name">${esc(c.name)}</span>${pctChip(avg)}</span>
+        <span class="small muted">${c.grade ? esc(gradeLabel(c.grade)) : ''}</span>
+        <span class="cc-facts"><span><strong>${n}</strong> şagird</span><span><strong>${k.open}</strong> açıq test</span><span><strong>${k.n}</strong> iş</span></span>
+        <span class="cc-go">Sinfi aç ›</span></a>`; }).join('')}</section>`
+      : '<div class="card"><div class="empty">Hələ sinif yoxdur. Yuxarıda ilk sinfi yaradın.</div></div>'}`;
+  $('#showNew').onclick = () => { $('#newClass').hidden = false; $('input[name=name]', $('#newClass')).focus(); };
+  $('#hideNew') && ($('#hideNew').onclick = () => { $('#newClass').hidden = true; });
   $('#newClass').onsubmit = (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    busy($('button', e.target), async () => {
+    busy($('button[type=submit]', e.target), async () => {
       const { data: row, error: err } = await sb.from('classes').insert({ name: f.get('name').trim(), grade: +f.get('grade') }).select().single();
       if (err) throw err;
       go('#/class/' + row.id);
@@ -704,38 +724,73 @@ async function classView(id) {
   const [{ data: cls, error }, { data: students }, { data: tests }] = await Promise.all([
     sb.from('classes').select('*').eq('id', id).single(),
     sb.from('students').select('*').eq('class_id', id).order('full_name'),
-    sb.from('tests').select('id, title, is_open, created_at').eq('class_id', id).order('created_at', { ascending: false })
+    sb.from('tests').select('id, title, is_open, created_at, student_id, question_ids').eq('class_id', id).order('created_at', { ascending: false })
   ]);
   if (error) throw error;
+  const tids = (tests || []).map((t) => t.id);
+  const { data: subs } = tids.length ? await sb.from('submissions').select('test_id, student_id, student_name, score, total').in('test_id', tids) : { data: [] };
+  const per = {}; const perTest = {}; let sum = 0; let cnt = 0;
+  (subs || []).forEach((x) => {
+    perTest[x.test_id] = (perTest[x.test_id] || 0) + 1;
+    if (!x.total) return;
+    sum += x.score / x.total; cnt++;
+    if (x.student_id) { const k = per[x.student_id] || (per[x.student_id] = { sum: 0, n: 0 }); k.sum += x.score / x.total; k.n++; }
+  });
+  const avgOf = (sid) => per[sid] ? Math.round(per[sid].sum / per[sid].n * 100) : null;
+  const classAvg = cnt ? Math.round(sum / cnt * 100) : null;
+  const openTests = (tests || []).filter((t) => t.is_open).length;
   const hasCodes = students.length > 0 && students.every((s) => s.access_code);
   const needsSql = students.length > 0 && !hasCodes;
   view().innerHTML = `
-    <div class="page-head"><div><div class="crumb"><a href="#/classes">Siniflər</a> /</div><h1>${esc(cls.name)}</h1></div>
-      <div class="row"><a class="btn primary" href="#/analysis/${id}">Analiz</a><button class="btn danger" id="delClass">Sinfi sil</button></div></div>
-    <div class="split">
-      <section class="card stack"><div class="row between"><h2>Şagirdlər (${students.length})</h2>
+    <div class="page-head"><div><div class="crumb"><a href="#/classes">Siniflər</a> /</div><h1>${esc(cls.name)}</h1>
+        <p class="muted">${cls.grade ? esc(gradeLabel(cls.grade)) + ' · ' : ''}${students.length} şagird</p></div>
+      <div class="row"><button class="btn" id="showAdd">+ Şagird əlavə et</button><a class="btn primary" href="#/analysis/${id}">Analiz</a></div></div>
+    <section class="grid res-stats">
+      <div class="card stat"><div class="label">Şagird</div><div class="value">${students.length}</div></div>
+      <div class="card stat"><div class="label">Sinfin ortası</div><div class="value">${classAvg === null ? '—' : classAvg + '%'}</div></div>
+      <div class="card stat"><div class="label">Açıq test</div><div class="value">${openTests}</div></div>
+    </section>
+    <form id="addStudents" class="card stack" ${students.length ? 'hidden' : ''}>
+      <h2>Şagird əlavə et</h2>
+      <label class="field">Adlar<span class="hint">Hər sətirdə bir ad. Siyahını Excel və ya qeydlərdən yapışdıra bilərsiniz.</span>
+        <textarea name="names" rows="5" placeholder="Əli Həsənov&#10;Nərgiz Quliyeva"></textarea></label>
+      <div class="row"><button class="btn primary" type="submit">Əlavə et</button>${students.length ? '<button class="btn" type="button" id="hideAdd">Ləğv et</button>' : ''}</div>
+    </form>
+    <div class="seg tseg" role="tablist" aria-label="Sinif bölmələri">
+      <button type="button" class="seg-b on" data-ctab="st" role="tab">Şagirdlər <span class="seg-c">${students.length}</span></button>
+      <button type="button" class="seg-b" data-ctab="ts" role="tab">Testlər <span class="seg-c">${(tests || []).length}</span></button>
+    </div>
+    <section class="card stack" data-cpane="st">
+      ${needsSql ? '<p class="notice">Şəxsi linklər üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>005_student_links.sql</strong> → Run.</p>' : ''}
+      ${students.length ? `<div class="row between"><p class="small muted" style="margin:0">${hasCodes ? 'Hər şagirdin öz linki var: <strong>Linki göndər</strong> basın, mesajda göndərin. Şagird testləri orada yazır, nəticəsini görür. Ada basanda bütün işləri açılır.' : 'Ada basanda şagirdin bütün işləri açılır.'}</p>
           ${hasCodes ? '<button class="btn small" id="allLinks">Bütün linkləri kopyala</button>' : ''}</div>
-        ${needsSql ? '<p class="notice">Şəxsi linklər üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>005_student_links.sql</strong> → Run.</p>'
-          : hasCodes ? '<p class="muted small">Hər şagirdin öz linki var. Linklə o, sinfin açıq testlərini yazır və öz nəticələrini görür. Linki yalnız həmin şagirdə göndərin. Şagirdin adına basanda onun bütün işləri açılır.</p>' : ''}
-        ${students.length ? `<div class="table-wrap"><table><tbody>${students.map((s) => `<tr>
-            <td><a href="#/student/${s.id}"><strong>${esc(s.full_name)}</strong></a>${s.access_code ? `<div class="small muted mono">${esc(s.access_code)}</div>` : ''}</td>
-            <td style="text-align:right;white-space:nowrap">
-              ${s.access_code ? `<a class="btn small" href="${esc(studentLink(s.access_code))}" target="_blank" rel="noopener">Bax</a>
-              <button class="btn small primary" data-share="${s.id}">Linki göndər</button>
-              <button class="btn small" data-recode="${s.id}" title="Köhnə link işləməyəcək">Yeni link</button>` : ''}
-              <button class="btn small danger" data-del="${s.id}" aria-label="${esc(s.full_name)} sil">Sil</button></td></tr>`).join('')}</tbody></table></div>`
-          : '<div class="empty">Siyahı boşdur.</div>'}
-        <form id="addStudents" class="stack">
-          <label class="field">Şagird əlavə et<span class="hint">Hər sətirdə bir ad. Siyahını Excel və ya qeydlərdən yapışdıra bilərsiniz.</span>
-            <textarea name="names" rows="5" placeholder="Əli Həsənov&#10;Nərgiz Quliyeva"></textarea></label>
-          <div><button class="btn primary" type="submit">Əlavə et</button></div>
-        </form>
-      </section>
-      <section class="card stack"><div class="row between"><h2>Bu sinfin testləri</h2><a class="btn small" href="#/tests">+ Test</a></div>
-        ${tests?.length ? tests.map((t) => `<div class="row between" style="padding:8px 0;border-bottom:1px solid #EEF1F5"><a href="#/test/${t.id}">${esc(t.title)}</a><span class="tag ${t.is_open ? 'ai' : ''}">${t.is_open ? 'açıq' : 'bağlı'}</span></div>`).join('')
-          : '<div class="empty">Hələ test yoxdur.</div>'}
-      </section>
-    </div>`;
+        <div class="slist">${students.map((s) => { const a = avgOf(s.id); return `<div class="srow">
+          <a class="s-name" href="#/student/${s.id}"><strong>${esc(s.full_name)}</strong>${s.access_code ? `<span class="small muted">kod: <span class="mono">${esc(s.access_code)}</span></span>` : ''}</a>
+          <span class="s-res">${pctChip(a)}<span class="small muted">${per[s.id] ? per[s.id].n + ' test' : 'hələ test yox'}</span></span>
+          <span class="s-act">
+            ${s.access_code ? `<button class="btn small primary" data-share="${s.id}">Linki göndər</button>
+            <a class="btn small" href="${esc(studentLink(s.access_code))}" target="_blank" rel="noopener">Bax</a>` : ''}
+            <details class="more" data-more="${s.id}"><summary class="btn small" aria-label="${esc(s.full_name)}: digər">⋯</summary><div class="more-menu">
+              ${s.access_code ? `<button class="btn small" data-recode="${s.id}" title="Köhnə link işləməyəcək">Yeni link yarat</button>` : ''}
+              <button class="btn small danger" data-del="${s.id}" aria-label="${esc(s.full_name)} sil">Siyahıdan sil</button></div></details>
+          </span></div>`; }).join('')}</div>`
+        : '<div class="empty">Siyahı boşdur. Yuxarıda şagird adlarını yazın.</div>'}
+    </section>
+    <section class="card stack" data-cpane="ts" hidden>
+      <div class="row between"><h2>Bu sinfin testləri</h2><a class="btn small primary" href="#/newtest">+ Yeni test</a></div>
+      ${(tests || []).length ? `<div class="mtlist">${tests.map((t) => { const target = t.student_id ? 1 : students.length; const sent = perTest[t.id] || 0;
+        return `<a class="mtrow" href="#/test/${t.id}"><span class="tc-status ${t.is_open ? 'on' : ''}">${t.is_open ? 'Açıq' : 'Bağlı'}</span>
+          <span class="mt-title">${esc(t.title)}${t.student_id ? ` <span class="tag book">fərdi: ${esc((students.find((x) => x.id === t.student_id) || {}).full_name || 'şagird')}</span>` : ''}</span>
+          <span class="small muted">${sent} / ${target} göndərib</span><span class="mt-go">›</span></a>`; }).join('')}</div>`
+        : '<div class="empty">Hələ test yoxdur.</div>'}
+    </section>
+    <details class="danger-zone"><summary>Sinfi silmək</summary><p class="small muted">Sinif və şagird siyahısı silinir. Testlər və göndərilmiş nəticələr qalır.</p><button class="btn danger" id="delClass">Sinfi sil</button></details>`;
+  $$('[data-ctab]').forEach((b) => b.onclick = () => {
+    $$('[data-ctab]').forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-cpane]').forEach((p) => { p.hidden = p.dataset.cpane !== b.dataset.ctab; });
+  });
+  $('#showAdd').onclick = () => { $('#addStudents').hidden = false; $('textarea', $('#addStudents')).focus(); };
+  $('#hideAdd') && ($('#hideAdd').onclick = () => { $('#addStudents').hidden = true; });
   const byId = Object.fromEntries(students.map((s) => [s.id, s]));
   const msgFor = (s) => `${s.full_name}, bu sənin şəxsi Müəllim+ linkindir. Testləri buradan yaz, nəticələrini də burada görəcəksən:\n${studentLink(s.access_code)}`;
   $$('[data-share]').forEach((b) => b.onclick = () => shareText(msgFor(byId[b.dataset.share]), 'Link kopyalandı'));
