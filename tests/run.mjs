@@ -28,7 +28,8 @@ const tests = {
   // server (api/ai.js, saxta provayderlər)
   'server/srv2.mjs': [/verify disagree -> false/, /no render -> false/, /izomorf omits dup rule: true/],
   'server/clean.mjs': [/4-option clean copy: 200 4 4/, /no image: 400/],
-  'server/fallback.mjs': [/Sol chosen, Claude broke → 200 X \| tried: anthropic>google/, /only Claude, broke → 402/],
+  'server/fallback.mjs': [/Sol chosen, Claude broke → 200 X \| tried: anthropic>openai/, /only Claude, broke → 402/],
+  'server/order.mjs': [/Sol chosen, no Claude → 200 gpt-sol \| tried: anthropic>openai/, /Sol 429 → 200 gemini-flash \| tried: openai>google \| fast: true/],
   'server/gem.mjs': [/gemini rejects thinkingLevel → 200 \| configs: low>default/],
   'server/gate.mjs': [/not approved\s+403 \| AI called: 0/, /daily limit hit\s+429 \| AI called: 0/, /monthly limit hit\s+429/, /gate error 500\s+503/, /no 008 \(404\)\s+200/]
 };

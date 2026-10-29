@@ -728,8 +728,9 @@ function helperChain() {
   const gen = store.genModel;
   const has = (m) => Boolean(process.env[PROVIDER_KEY[m.provider]]) && !(store.badProviders || new Set()).has(m.provider);
   const asHelper = (m) => ({ ...m, helper: true });
-  const others = [MODELS['gemini-flash'], MODELS['gpt-sol']].filter((m) => m.provider !== gen?.provider);
-  let list = [HELPER, ...others, ...(gen && gen.provider !== 'anthropic' ? [gen] : [])].filter(has).map(asHelper);
+  // Claude yoxdursa: əvvəl müəllimin seçdiyi (pullu) model, sonra digərləri; pulsuz limitli Gemini ən sonda
+  const others = [MODELS['gpt-sol'], MODELS['gemini-flash']].filter((m) => m.provider !== gen?.provider);
+  let list = [HELPER, ...(gen && gen.provider !== 'anthropic' ? [gen] : []), ...others].filter(has).map(asHelper);
   if (!list.length) list = [HELPER, ...others].filter((m) => Boolean(process.env[PROVIDER_KEY[m.provider]])).map(asHelper);
   const seen = new Set();
   return list.filter((m) => (seen.has(m.provider) ? false : seen.add(m.provider)));
@@ -741,13 +742,16 @@ async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HE
   if (!chain.length) throw publicError('Köməkçi model üçün işləyən API açarı yoxdur (Claude balansı bitib və başqa açar qoşulmayıb)', 402);
   const store = usageStore.getStore();
   let last;
-  for (const m of chain) {
+  for (const [i, m] of chain.entries()) {
+    // növbədə başqa model varsa, limitə (429) dəyəndə gözləmə — dərhal növbətisinə keç
+    if (store) store.fastFail = i < chain.length - 1;
     try {
       const out = await askOnce(m, system, content, maxTokens);
       if (store) store.lastHelper = m.key;
       return out;
     } catch (err) {
       last = err;
+      if (err.status === 429 && store?.fastFail) providerDown[m.provider] = Math.max(providerDown[m.provider] || 0, Date.now() + 60 * 1000);
       // balans/açar problemi olan provayder bu sorğuda bir daha sınanmasın
       if ([401, 402, 403].includes(err.status) || /balans|açarı/.test(err.publicMessage || "")) {
         if (store) (store.badProviders = store.badProviders || new Set()).add(m.provider);
@@ -771,7 +775,9 @@ function aiError(name, status, data) {
 // Müvəqqəti xətalarda (həddən artıq yüklənmə) bir dəfə yenidən cəhd
 async function fetchRetry(url, opts) {
   let r = await fetch(url, opts);
-  for (let i = 0; i < 2 && [429, 500, 502, 503, 529].includes(r.status); i++) {
+  const fast = usageStore.getStore()?.fastFail;
+  if (fast && r.status === 429) return r;
+  for (let i = 0; i < (fast ? 1 : 2) && [429, 500, 502, 503, 529].includes(r.status); i++) {
     // limitə dəyəndə provayderin dediyi qədər (ən çox 20 saniyə) gözlə və yenidən cəhd et
     const ra = parseFloat(r.headers?.get?.('retry-after') || '');
     const wait = Number.isFinite(ra) ? Math.min(20, Math.max(1, ra)) * 1000 : (r.status === 429 ? 8000 : 2500);
