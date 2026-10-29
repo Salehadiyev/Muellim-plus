@@ -6,7 +6,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }],
   students: [{ id: 's1', class_id: 'c1', full_name: 'Əli Həsənov', access_code: 'ALI23456' }, { id: 's2', class_id: 'c1', full_name: 'Nərgiz Quliyeva', access_code: 'NRG23456' }],
   questions: [{ id: 'q1', teacher_id: 'u1', body: 'Bank sualı', qtype: 'mcq', options: ['1', '2', '3', '4', '5'], answer: '2', option_figures: [], ai_status: 'passed', created_at: new Date().toISOString() }],
-  tests: [], submissions: [], ai_usage: [], mistakes: [], lesson_notes: [], lessons: [], payments: [] };
+  tests: [{ id: 'pt1', teacher_id: 'u1', class_id: 'c1', student_id: 's1', title: 'Əli üçün', question_ids: ['q1'], is_open: true, created_at: new Date().toISOString() }], submissions: [], ai_usage: [], mistakes: [], lesson_notes: [], lessons: [], payments: [] };
 (async () => {
   const b = await chromium.launch(); const errs = [];
   const ctx = await b.newContext({ viewport: { width: 1024, height: 1200 } });
@@ -36,6 +36,7 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }],
   const bId = d.classes.find((c) => c.name === 'B qrupu').id;
   await p.check('[data-sel=s1]'); await p.check('[data-sel=s2]'); await p.selectOption('#bulkTo', bId); await p.click('#bulkGo'); await p.waitForSelector('text=2 tələbə köçürüldü');
   d = await db(); console.log('bulk moved:', gname(d, 's1'), gname(d, 's2'));
+  console.log('personal test follows:', (d.classes.find((c) => c.id === d.tests.find((t) => t.id === 'pt1').class_id) || {}).name);
   await p.waitForSelector('#stList .st-row');
   await p.selectOption('[data-move=s1]', 'c1'); await p.waitForSelector('text=1 tələbə köçürüldü');
   d = await db(); console.log('row moved:', gname(d, 's1'));
@@ -54,11 +55,24 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }],
   // test iki qrupa
   await p.goto('http://app.test/#/newtest'); await p.waitForSelector('#newTest'); await p.fill('#newTest input[name=title]', 'Ortaq test'); await p.selectOption('#newTest select[name=class_id]', 'c1');
   await p.check(`#moreGroups input[name=also][value="${noG}"]`); await p.check('#tqList .check'); await p.click('#newTest button[type=submit]'); await p.waitForSelector('text=Test 2 qrupa göndərildi');
-  d = await db(); console.log('tests:', d.tests.map((t) => t.title + '@' + (d.classes.find((c) => c.id === t.class_id) || {}).name).join(','));
+  d = await db(); console.log('tests:', d.tests.filter((t) => !t.student_id).map((t) => t.title + '@' + (d.classes.find((c) => c.id === t.class_id) || {}).name).join(','));
   // tələbə: video düyməsi
   await p.setViewportSize({ width: 390, height: 844 });
   await p.goto('http://app.test/#/s/ALI23456'); await p.waitForSelector('details.nt-item'); await p.click('details.nt-item summary');
   console.log('student video:', await p.$eval('details.nt-item a.btn', (e) => e.textContent.trim() + ' → ' + e.href), '| todo:', await p.$$eval('a.portal-row', (x) => x.length));
   await p.screenshot({ path: path.join(T, 'gr3-student.png'), fullPage: true });
+  // adını dəyiş, tək sil, toplu sil
+  await p.setViewportSize({ width: 1024, height: 1200 });
+  d = await db(); const tural = d.students.find((x) => x.full_name === 'Tural Hüseynov').id, aysel = d.students.find((x) => x.full_name === 'Aysel Kərimova').id, resad = d.students.find((x) => x.full_name === 'Rəşad Məmmədov').id;
+  await p.goto('http://app.test/#/students'); await p.waitForSelector('#stList .st-row');
+  promptAnswer = 'Tural Hüseynli'; await p.click(`.st-row:has([data-ren="${tural}"]) .more summary`); await p.click(`[data-ren="${tural}"]`); await p.waitForSelector('text=Ad dəyişdirildi');
+  await p.waitForSelector('#stList .st-row'); await p.click(`.st-row:has([data-sdel="${aysel}"]) .more summary`); await p.click(`[data-sdel="${aysel}"]`); await p.waitForSelector('text=Aysel Kərimova silindi');
+  await p.waitForSelector('#stList .st-row'); await p.check(`[data-sel="${resad}"]`); await p.check(`[data-sel="${tural}"]`); await p.click('#bulkDel'); await p.waitForSelector('text=2 tələbə silindi');
+  d = await db(); console.log('after edit/delete:', d.students.map((x) => x.full_name).sort().join(','));
+  // qrup kartı: ⋯ → adını dəyiş, sil (Qrupsuz boş deyil → silinmir)
+  await p.goto('http://app.test/#/classes'); await p.waitForSelector('.ccard-wrap');
+  promptAnswer = '11A qrupu'; await p.click('.ccard-wrap:has([data-gren=c1]) .cc-more summary'); await p.click('[data-gren=c1]'); await p.waitForSelector('text=Qrupun adı dəyişdirildi');
+  await p.waitForSelector('.ccard-wrap'); await p.click('.ccard-wrap:has([data-gren=c1]) .cc-more summary'); await p.click('[data-gdel=c1]'); await p.waitForSelector('text=«11A qrupu» silindi');
+  d = await db(); console.log('card rename+delete:', d.classes.map((c) => c.name).join(','), '| Əli now:', gname(d, 's1'), '| personal test:', (d.classes.find((c) => c.id === d.tests.find((t) => t.id === 'pt1')?.class_id) || {}).name);
   console.log(errs.length ? 'ERRORS ' + errs.join(' | ') : 'NO ERRORS'); await b.close();
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

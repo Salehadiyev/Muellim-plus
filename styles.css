@@ -682,3 +682,7 @@ details.nt-item[open] { border-color: var(--accent); }
 .bulk-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-dark); }
 .st-row .st-grp select { min-height: 40px; width: auto; max-width: 200px; }
 #moreGroups .chips { margin-top: 6px; }
+.ccard-wrap { position: relative; display: flex; }
+.ccard-wrap .ccard { flex: 1; }
+.cc-more { position: absolute; right: 12px; bottom: 12px; }
+.cc-more .more-menu { bottom: calc(100% + 6px); top: auto; }

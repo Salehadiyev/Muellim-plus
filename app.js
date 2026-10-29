@@ -546,7 +546,7 @@ async function dashboard() {
     <section class="big-actions">
       <a class="card big-action ba-teal" href="#/pdf"><span class="icon-box">${icons.cut}</span><strong>Sual yarat</strong><span class="muted small">Kitabdan, PDF-dən və ya AI ilə · bankda ${qCount ?? 0} sual</span></a>
       <a class="card big-action ba-violet" href="#/newtest"><span class="icon-box">${icons.test}</span><strong>Test yarat</strong><span class="muted small">Sualları seç, qrupa göndər</span></a>
-      <a class="card big-action ba-orange" href="#/classes"><span class="icon-box">${icons.users}</span><strong>Qruplar və nəticələr</strong><span class="muted small">tələbələr, analiz, hesabat</span></a>
+      <a class="card big-action ba-orange" href="#/classes"><span class="icon-box">${icons.users}</span><strong>Qruplar və nəticələr</strong><span class="muted small">Tələbələr, analiz, hesabat</span></a>
     </section>
     ${weak.length ? `<section class="card stack attn"><h2><span class="attn-dot" aria-hidden="true"></span>Diqqət: bu həftə zəif nəticə</h2>
       ${weak.map((r) => `<a class="drow" href="${r.student_id ? '#/student/' + r.student_id : '#/test/' + r.test_id}">${avatar(r.student_name)}
@@ -628,19 +628,19 @@ function privacyView() {
       <h2>Hansı məlumatları saxlayırıq</h2>
       <ul>
         <li><strong>Müəllim:</strong> e-poçt, ad, yaratdığı qruplar, suallar, testlər və AI istifadəsinin xərc qeydləri.</li>
-        <li><strong>tələbə:</strong> müəllimin daxil etdiyi ad və soyad, şəxsi giriş kodu, testlərdəki cavablar, ballar və göndərmə vaxtı. tələbədən e-poçt, telefon və ya şifrə istənilmir.</li>
+        <li><strong>Tələbə:</strong> müəllimin daxil etdiyi ad və soyad, şəxsi giriş kodu, testlərdəki cavablar, ballar və göndərmə vaxtı. Tələbədən e-poçt, telefon və ya şifrə istənilmir.</li>
         <li><strong>Texniki:</strong> səhv baş verəndə səhvin mətni, səhifənin ünvanı (şəxsi kodlar olmadan) və brauzer növü.</li>
       </ul>
       <h2>Nə üçün istifadə edirik</h2>
       <p>Yalnız platformanın işləməsi üçün: testlərin keçirilməsi, balların hesablanması, müəllimə nəticə və analizlərin göstərilməsi, səhvlərin düzəldilməsi. Məlumat satılmır və reklam üçün istifadə edilmir.</p>
       <h2>Kim görür</h2>
-      <p>Hər müəllim yalnız öz qruplarının və tələbələrinin məlumatını görür. tələbə yalnız öz testlərini və nəticələrini görür. Bu qayda verilənlər bazasının özündə tətbiq olunur.</p>
+      <p>Hər müəllim yalnız öz qruplarının və tələbələrinin məlumatını görür. Tələbə yalnız öz testlərini və nəticələrini görür. Bu qayda verilənlər bazasının özündə tətbiq olunur.</p>
       <h2>Süni intellekt</h2>
-      <p>Müəllim sual yaradanda və ya yoxlayanda sualın mətni və şəkli AI xidmətlərinə (Anthropic, OpenAI, Google) göndərilir. tələbə adları və cavabları AI-a göndərilmir.</p>
+      <p>Müəllim sual yaradanda və ya yoxlayanda sualın mətni və şəkli AI xidmətlərinə (Anthropic, OpenAI, Google) göndərilir. Tələbə adları və cavabları AI-a göndərilmir.</p>
       <h2>Harada saxlanılır</h2>
       <p>Məlumat Supabase (Avropa serveri) bazasında, sayt isə Vercel-də yerləşir. Bağlantılar şifrələnir (HTTPS).</p>
       <h2>Saxlama müddəti və silmə</h2>
-      <p>Məlumat müəllim hesabı aktiv olduğu müddətdə saxlanılır. Müəllim qrupu, tələbəni, testi və nəticəni istənilən vaxt silə bilər. tələbə və ya valideyn məlumatların silinməsini müəllimdən istəyə bilər. Hesabın tam silinməsi üçün platformanın admininə müraciət edin. Səhv qeydləri 30 gündən sonra avtomatik silinir.</p>
+      <p>Məlumat müəllim hesabı aktiv olduğu müddətdə saxlanılır. Müəllim qrupu, tələbəni, testi və nəticəni istənilən vaxt silə bilər. Tələbə və ya valideyn məlumatların silinməsini müəllimdən istəyə bilər. Hesabın tam silinməsi üçün platformanın admininə müraciət edin. Səhv qeydləri 30 gündən sonra avtomatik silinir.</p>
       <h2>Uşaqlar</h2>
       <p>tələbə məlumatlarını müəllim daxil edir və onların istifadəsinə görə məktəb və müəllim məsuliyyət daşıyır. Müəllim tələbələrin ad-soyadından başqa şəxsi məlumat daxil etməməlidir.</p>
     </section>
@@ -684,6 +684,45 @@ ${esc(e.agent || '')}</pre></details></td>
 const pctCls = (p) => p === null ? '' : p >= 75 ? 'hi' : p >= 50 ? 'mid' : 'low';
 const pctChip = (p) => p === null ? '<span class="pchip">—</span>' : `<span class="pchip ${pctCls(p)}">${p}%</span>`;
 
+// Tələbələri qrupa köçür; onlara xüsusi (fərdi) testlər də yeni qrupa keçir ki, itməsin
+async function moveStudents(ids, gid) {
+  const { error } = await sb.from('students').update({ class_id: gid }).in('id', ids);
+  if (error) throw error;
+  await sb.from('tests').update({ class_id: gid }).in('student_id', ids);
+}
+// Qrupda qalan fərdi testləri (tələbəsi artıq başqa qrupdadırsa) tələbənin indiki qrupuna keçir
+async function rehomePersonalTests(classId) {
+  const { data: pts } = await sb.from('tests').select('id, student_id').eq('class_id', classId).not('student_id', 'is', null);
+  if (!pts || !pts.length) return;
+  const { data: sts } = await sb.from('students').select('id, class_id').in('id', [...new Set(pts.map((t) => t.student_id))]);
+  const where = Object.fromEntries((sts || []).map((x) => [x.id, x.class_id]));
+  for (const t of pts) if (where[t.student_id] && where[t.student_id] !== classId) await sb.from('tests').update({ class_id: where[t.student_id] }).eq('id', t.id);
+}
+// Qrupun adını dəyiş / qrupu sil (tələbələr silinmir — «Qrupsuz» siyahısına keçir)
+async function renameGroup(c) {
+  const name = String(prompt('Qrupun yeni adı:', c.name) || '').trim().slice(0, 60);
+  if (!name || name === c.name) return false;
+  const { error } = await sb.from('classes').update({ name }).eq('id', c.id);
+  if (error) throw error;
+  toast('Qrupun adı dəyişdirildi');
+  route();
+  return true;
+}
+async function deleteGroup(c, nStudents) {
+  if (c.name === NO_GROUP && nStudents) { toast('Əvvəlcə bu tələbələri başqa qrupa köçürün (Tələbələr səhifəsində)', true); return false; }
+  if (!confirm(`«${c.name}» qrupu silinsin?\n\n${nStudents ? `${nStudents} tələbə silinmir — «${NO_GROUP}» siyahısına keçir, nəticələri qalır. ` : ''}Qrupun testləri və nəticələri qalır (qrupsuz kimi). Qrupa göndərilmiş materiallar silinir.`)) return false;
+  if (nStudents) {
+    const gid = await ensureNoGroup();
+    const { data: inG } = await sb.from('students').select('id').eq('class_id', c.id);
+    if (inG && inG.length) await moveStudents(inG.map((x) => x.id), gid);
+  }
+  await rehomePersonalTests(c.id);
+  const { error } = await sb.from('classes').delete().eq('id', c.id);
+  if (error) throw error;
+  toast(`«${c.name}» silindi`);
+  return true;
+}
+
 async function classesView() {
   const [{ data, error }, { data: tests }, { data: subs }] = await Promise.all([
     sb.from('classes').select('id, name, grade, created_at, students(count)').order('created_at'),
@@ -710,12 +749,18 @@ async function classesView() {
     ${data.length ? `<section class="ccards">${data.map((c) => {
       const k = info[c.id]; const n = c.students?.[0]?.count ?? 0;
       const avg = k.n ? Math.round(k.sum / k.n * 100) : null;
-      return `<a class="ccard" href="#/class/${c.id}">
+      return `<div class="ccard-wrap"><a class="ccard" href="#/class/${c.id}">
         <span class="cc-top"><span class="cc-name">${esc(c.name)}</span>${pctChip(avg)}</span>
         <span class="small muted">${c.grade ? esc(gradeLabel(c.grade)) : ''}</span>
         <span class="cc-facts"><span><strong>${n}</strong> tələbə</span><span><strong>${k.open}</strong> açıq test</span><span><strong>${k.n}</strong> iş</span></span>
-        <span class="cc-go">Qrupu aç ›</span></a>`; }).join('')}</section>`
+        <span class="cc-go">Qrupu aç ›</span></a>
+        <details class="more cc-more"><summary class="btn small" aria-label="${esc(c.name)}: digər">⋯</summary><div class="more-menu">
+          <button class="btn small" data-gren="${c.id}">✏️ Adını dəyiş</button>
+          <button class="btn small danger" data-gdel="${c.id}">🗑 Sil</button></div></details></div>`; }).join('')}</section>`
       : '<div class="card"><div class="empty">Hələ qrup yoxdur. Yuxarıda ilk qrupu yaradın.</div></div>'}`;
+  const byG = Object.fromEntries(data.map((c) => [c.id, c]));
+  $$('[data-gren]').forEach((b) => b.onclick = () => renameGroup(byG[b.dataset.gren]).catch(fail));
+  $$('[data-gdel]').forEach((b) => b.onclick = () => deleteGroup(byG[b.dataset.gdel], byG[b.dataset.gdel].students?.[0]?.count ?? 0).then((ok) => { if (ok) route(); }).catch(fail));
   $('#showNew').onclick = () => { $('#newClass').hidden = false; $('input[name=name]', $('#newClass')).focus(); };
   $('#hideNew') && ($('#hideNew').onclick = () => { $('#newClass').hidden = true; });
   $('#newClass').onsubmit = (e) => {
@@ -766,7 +811,7 @@ async function classMistakes(box, students, notes = []) {
   const name = Object.fromEntries(students.map((x) => [x.id, x.full_name]));
   const SIM_LABEL = { ok: ['hi', '✓ bənzəri var'], draft: ['mid', 'bənzəri təsdiq gözləyir'] };
   box.innerHTML = `
-    <p class="small muted" style="margin:0">tələbə testdə səhv etdiyi sual avtomatik dəftərinə düşür. Bir gün sonra öz linkində ona <strong>bənzər sual</strong> çıxır: düz tapsa dəftərdən silinir, səhv etsə 2 gün sonra başqa bənzəri gəlir. Bənzərlər bankdan götürülür: əvvəl AI ilə hazırladığınız (yoxlanmış və ya təsdiqlədiyiniz) bənzərlər, sonra eyni mövzudakı suallar.</p>
+    <p class="small muted" style="margin:0">Tələbə testdə səhv etdiyi sual avtomatik dəftərinə düşür. Bir gün sonra öz linkində ona <strong>bənzər sual</strong> çıxır: düz tapsa dəftərdən silinir, səhv etsə 2 gün sonra başqa bənzəri gəlir. Bənzərlər bankdan götürülür: əvvəl AI ilə hazırladığınız (yoxlanmış və ya təsdiqlədiyiniz) bənzərlər, sonra eyni mövzudakı suallar.</p>
     <div class="grid res-stats">
       <div class="card stat"><div class="label">Dəftərdə</div><div class="value">${open.length}</div></div>
       <div class="card stat"><div class="label">Düzəldilib</div><div class="value" style="color:var(--green)">${cleared}</div></div>
@@ -1005,7 +1050,7 @@ async function studentsView() {
         <div class="chips" id="stChips"><button type="button" class="chip on" data-g="">Hamısı · ${st.length}</button>${cls.filter((c) => count(c.id)).map((c) => `<button type="button" class="chip" data-g="${c.id}">${esc(c.name)} · ${count(c.id)}</button>`).join('')}</div>
       </div>
       <div class="bulk-bar" id="bulkBar" hidden><span><strong id="bulkN">0</strong> tələbə seçilib</span>
-        <span class="row" style="gap:8px">Köçür: <select id="bulkTo" style="min-height:40px;width:auto">${groupOpts('', true)}</select><button class="btn small primary" id="bulkGo">Köçür</button></span></div>
+        <span class="row" style="gap:8px">Köçür: <select id="bulkTo" style="min-height:40px;width:auto">${groupOpts('', true)}</select><button class="btn small primary" id="bulkGo">Köçür</button><button class="btn small danger" id="bulkDel">🗑 Sil</button></span></div>
       <div class="slist" id="stList"></div></div>` : ''}`;
   const form = $('#stNew');
   $('#stNewBtn').onclick = () => { form.hidden = false; $('textarea', form).focus(); };
@@ -1044,23 +1089,54 @@ async function studentsView() {
         <input type="checkbox" class="check" data-sel="${x.id}" ${sel.has(x.id) ? 'checked' : ''} aria-label="${esc(x.full_name)} seç" style="width:22px;height:22px;accent-color:var(--accent)">
         <a class="s-name" href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong>${x.access_code ? `<span class="small muted">kod: <span class="mono">${esc(x.access_code)}</span></span>` : ''}</a>
         <label class="st-grp"><span class="sr">Qrup</span><select data-move="${x.id}">${groupOpts(x.class_id, true)}</select></label>
-        <span class="s-act">${x.access_code ? `<button class="btn small primary" data-share="${x.id}">Linki göndər</button>` : ''}</span></div>`).join('')
+        <span class="s-act">${x.access_code ? `<button class="btn small primary" data-share="${x.id}">Linki göndər</button>` : ''}
+          <details class="more"><summary class="btn small" aria-label="${esc(x.full_name)}: digər">⋯</summary><div class="more-menu">
+            <button class="btn small" data-ren="${x.id}">✏️ Adını dəyiş</button>
+            ${x.access_code ? `<button class="btn small" data-recode2="${x.id}" title="Köhnə link işləməyəcək">🔗 Yeni link yarat</button>` : ''}
+            <button class="btn small danger" data-sdel="${x.id}">🗑 Sil</button></div></details></span></div>`).join('')
       : '<div class="empty">Uyğun tələbə yoxdur.</div>';
     $('#bulkBar').hidden = !sel.size; $('#bulkN').textContent = sel.size;
     $$('[data-sel]').forEach((c) => c.onchange = () => { c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); $('#bulkBar').hidden = !sel.size; $('#bulkN').textContent = sel.size; });
     $$('[data-share]').forEach((b) => b.onclick = () => shareText(studentMsg2(byId[b.dataset.share]), 'Link kopyalandı'));
     $$('[data-move]').forEach((s2) => s2.onchange = () => move([s2.dataset.move], s2.value).catch((err) => { fail(err); draw(); }));
+    $$('[data-ren]').forEach((b) => b.onclick = async () => {
+      const x = byId[b.dataset.ren];
+      const name = String(prompt('Yeni ad:', x.full_name) || '').trim().slice(0, 80);
+      if (!name || name === x.full_name) return;
+      const { error: e6 } = await sb.from('students').update({ full_name: name }).eq('id', x.id);
+      if (e6) return fail(e6);
+      toast('Ad dəyişdirildi');
+      route();
+    });
+    $$('[data-recode2]').forEach((b) => b.onclick = async () => {
+      const x = byId[b.dataset.recode2];
+      if (!confirm(`${x.full_name} üçün yeni link yaradılsın? Köhnə link daha işləməyəcək, nəticələr qalacaq.`)) return;
+      const { error: e7 } = await sb.from('students').update({ access_code: newCode() }).eq('id', x.id);
+      if (e7) return fail(e7);
+      toast('Yeni link yaradıldı');
+      route();
+    });
+    $$('[data-sdel]').forEach((b) => b.onclick = () => removeStudents([b.dataset.sdel]).catch(fail));
+  };
+  const removeStudents = async (ids) => {
+    const names = ids.map((i) => byId[i]?.full_name).filter(Boolean);
+    const who = names.length === 1 ? names[0] : `${names.length} tələbə`;
+    if (!confirm(`${who} silinsin?\n\nGöndərdiyi test nəticələri müəllim tərəfində qalır. Şəxsi linki, səhv dəftəri, ona xüsusi testlər və materiallar, dərs və ödəniş qeydləri silinir. Bunu geri qaytarmaq olmur.`)) return;
+    const { error: e8 } = await sb.from('students').delete().in('id', ids);
+    if (e8) throw e8;
+    toast(names.length === 1 ? `${names[0]} silindi` : `${names.length} tələbə silindi`);
+    route();
   };
   const move = async (ids, to) => {
     const gid = await resolveGroup(to);
-    const { error: e5 } = await sb.from('students').update({ class_id: gid }).in('id', ids);
-    if (e5) throw e5;
+    await moveStudents(ids, gid);
     toast(`${ids.length} tələbə köçürüldü`);
     route();
   };
   $('#stFind').oninput = (e) => { text = e.target.value; draw(); };
   $$('#stChips [data-g]').forEach((b) => b.onclick = () => { filter = b.dataset.g; $$('#stChips .chip').forEach((x) => x.classList.toggle('on', x === b)); draw(); });
   $('#bulkGo').onclick = () => busy($('#bulkGo'), () => move([...sel], $('#bulkTo').value)).catch(fail);
+  $('#bulkDel').onclick = () => removeStudents([...sel]).catch(fail);
   draw();
 }
 
@@ -1088,9 +1164,9 @@ async function classView(id) {
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/classes">Qruplar</a> /</div><h1>${esc(cls.name)}</h1>
         <p class="muted">${cls.grade ? esc(gradeLabel(cls.grade)) + ' · ' : ''}${students.length} tələbə</p></div>
-      <div class="row"><button class="btn" id="showAdd">+ tələbə əlavə et</button><a class="btn primary" href="#/analysis/${id}">Analiz</a></div></div>
+      <div class="row"><button class="btn" id="renClass">✏️ Adını dəyiş</button><button class="btn" id="showAdd">+ Tələbə əlavə et</button><a class="btn primary" href="#/analysis/${id}">Analiz</a></div></div>
     <section class="grid res-stats">
-      <div class="card stat"><div class="label">tələbə</div><div class="value">${students.length}</div></div>
+      <div class="card stat"><div class="label">Tələbə</div><div class="value">${students.length}</div></div>
       <div class="card stat"><div class="label">Qrupun ortası</div><div class="value">${classAvg === null ? '—' : classAvg + '%'}</div></div>
       <div class="card stat"><div class="label">Açıq test</div><div class="value">${openTests}</div></div>
     </section>
@@ -1101,20 +1177,20 @@ async function classView(id) {
       <span class="small muted" id="examLeft">${cls.exam_date ? daysLeftText(cls.exam_date) : 'Tarixi yazın: tələbələr öz səhifəsində geri sayımı görəcək.'}</span>
     </div>
     <form id="addStudents" class="card stack" ${students.length ? 'hidden' : ''}>
-      <h2>tələbə əlavə et</h2>
+      <h2>Tələbə əlavə et</h2>
       <label class="field">Adlar<span class="hint">Hər sətirdə bir ad. Siyahını Excel və ya qeydlərdən yapışdıra bilərsiniz.</span>
         <textarea name="names" rows="5" placeholder="Əli Həsənov&#10;Nərgiz Quliyeva"></textarea></label>
       <div class="row"><button class="btn primary" type="submit">Əlavə et</button>${students.length ? '<button class="btn" type="button" id="hideAdd">Ləğv et</button>' : ''}</div>
     </form>
     <div class="seg tseg" role="tablist" aria-label="Qrup bölmələri">
-      <button type="button" class="seg-b on" data-ctab="st" role="tab">tələbələr <span class="seg-c">${students.length}</span></button>
+      <button type="button" class="seg-b on" data-ctab="st" role="tab">Tələbələr <span class="seg-c">${students.length}</span></button>
       <button type="button" class="seg-b" data-ctab="ts" role="tab">Testlər <span class="seg-c">${(tests || []).length}</span></button>
       <button type="button" class="seg-b" data-ctab="mk" role="tab">📒 Səhv dəftəri</button>
       <button type="button" class="seg-b" data-ctab="nt" role="tab">📚 Materiallar</button>
     </div>
     <section class="card stack" data-cpane="st">
       ${needsSql ? '<p class="notice">Şəxsi linklər üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>005_student_links.sql</strong> → Run.</p>' : ''}
-      ${students.length ? `<div class="row between"><p class="small muted" style="margin:0">${hasCodes ? 'Hər tələbənin öz linki var: <strong>Linki göndər</strong> basın, mesajda göndərin. tələbə testləri orada yazır, nəticəsini görür. Ada basanda bütün işləri açılır.' : 'Ada basanda tələbənin bütün işləri açılır.'}</p>
+      ${students.length ? `<div class="row between"><p class="small muted" style="margin:0">${hasCodes ? 'Hər tələbənin öz linki var: <strong>Linki göndər</strong> basın, mesajda göndərin. Tələbə testləri orada yazır, nəticəsini görür. Ada basanda bütün işləri açılır.' : 'Ada basanda tələbənin bütün işləri açılır.'}</p>
           ${hasCodes ? '<button class="btn small" id="allLinks">Bütün linkləri kopyala</button>' : ''}</div>
         <div class="slist">${students.map((s) => { const a = avgOf(s.id); return `<div class="srow">
           <a class="s-name" href="#/student/${s.id}"><strong>${esc(s.full_name)}</strong>${s.access_code ? `<span class="small muted">kod: <span class="mono">${esc(s.access_code)}</span></span>` : ''}</a>
@@ -1184,20 +1260,8 @@ async function classView(id) {
     if (err) return fail(err);
     route();
   });
-  $('#delClass').onclick = () => {
-    if (cls.name === NO_GROUP && students.length) return toast('Əvvəlcə tələbələri başqa qrupa köçürün', true);
-    if (!confirm(`«${cls.name}» qrupu silinsin? ${students.length ? `${students.length} tələbə «${NO_GROUP}» siyahısına keçəcək (nəticələri qalır). ` : ''}Testlər qalacaq.`)) return;
-    busy($('#delClass'), async () => {
-      if (students.length) {
-        const gid = await ensureNoGroup();
-        const { error: e1 } = await sb.from('students').update({ class_id: gid }).eq('class_id', id);
-        if (e1) throw e1;
-      }
-      const { error: err } = await sb.from('classes').delete().eq('id', id);
-      if (err) throw err;
-      go('#/classes');
-    }).catch(fail);
-  };
+  $('#delClass').onclick = () => busy($('#delClass'), async () => { if (await deleteGroup(cls, students.length)) go('#/classes'); }).catch(fail);
+  $('#renClass').onclick = () => renameGroup(cls).catch(fail);
 }
 
 // ================= Sual bankı =================
@@ -2732,7 +2796,7 @@ async function testsView() {
       </div>
       <div class="tc-act">
         <a class="btn small primary" href="#/test/${t.id}">Nəticələr ›</a>
-        <button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}" title="${t.is_open ? 'tələbələr artıq yaza bilməyəcək' : 'tələbələr yenə yaza biləcək'}">${t.is_open ? 'Bağla' : 'Yenidən aç'}</button>
+        <button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}" title="${t.is_open ? 'Tələbələr artıq yaza bilməyəcək' : 'Tələbələr yenə yaza biləcək'}">${t.is_open ? 'Bağla' : 'Yenidən aç'}</button>
       </div>
     </article>`;
   };
@@ -2745,6 +2809,7 @@ async function testsView() {
         <button type="button" class="seg-b" data-f="closed" role="tab">Bağlı <span class="seg-c">${tests.length - nOpen}</span></button>
         <button type="button" class="seg-b" data-f="all" role="tab">Hamısı <span class="seg-c">${tests.length}</span></button>
       </div>
+      <p class="small muted tl-help"><strong>Açıq</strong> — tələbələr testi öz linkində görür və yaza bilir. <strong>Bağlı</strong> — test yazılmağa bağlanır, yeni cavab qəbul edilmir; yazılmış nəticələr qalır. Cavabları "test bağlananda göstər" olan testdə tələbələr düzgün cavabları bağlayanda görür. İstədiyiniz vaxt <strong>Yenidən aç</strong> edə bilərsiniz.</p>
       <div class="tlist" id="tlist"></div>` : `<div class="card"><div class="empty">Hələ test yoxdur. <a href="#/newtest">İlk testi yaradın</a>.</div></div>`}`;
   const draw = () => {
     const list = tests.filter((t) => tab === 'all' || (tab === 'open') === !!t.is_open);
@@ -2780,13 +2845,13 @@ async function newTestView() {
           <label class="field">Qrup<select name="class_id"><option value="">Qrupsuz — ümumi link</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><span class="hint">Qrupsuz testdə tələbə adını özü yazır.</span></label>
           ${(classes || []).length > 1 ? `<div class="field" id="moreGroups" hidden><span>Başqa qruplara da göndər<span class="hint">hər qrup üçün ayrıca test yaranır, nəticələr ayrı-ayrı görünür</span></span>
             <div class="chips">${(classes || []).map((c) => `<label class="chip-cb"><input type="checkbox" name="also" value="${c.id}"><span>${esc(c.name)}</span></label>`).join('')}</div></div>` : ''}
-          <label class="field">tələbəyə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_submit' ? 'selected' : ''}>${v}</option>`).join('')}</select>
+          <label class="field">Tələbəyə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_submit' ? 'selected' : ''}>${v}</option>`).join('')}</select>
             <span class="hint">"Bağlananda" seçsəniz, test açıq olanda cavablar başqalarına ötürülməz.</span></label>
         </div>
         <details class="more-opts"><summary>Vaxt, son tarix, qarışdırma</summary>
           <div class="form-grid" style="margin-top:10px">
             <label class="field">Vaxt limiti (dəqiqə)<input type="number" name="time_limit_min" min="1" max="300" inputmode="numeric" placeholder="limitsiz">
-              <span class="hint">tələbə "Başla" basandan sayılır, bitəndə cavablar avtomatik göndərilir.</span></label>
+              <span class="hint">Tələbə "Başla" basandan sayılır, bitəndə cavablar avtomatik göndərilir.</span></label>
             <label class="field">Son tarix<input type="datetime-local" name="due_at">
               <span class="hint">Bu vaxtdan sonra cavab qəbul edilmir.</span></label>
             <label class="field row" style="gap:10px;align-items:center;min-height:44px"><input type="checkbox" name="shuffle" style="width:22px;height:22px"> Sualları və variantları hər tələbə üçün qarışdır</label>
@@ -2914,7 +2979,7 @@ async function newTestView() {
   };
 }
 
-// ================= tələbə işinin baxışı (müəllim və tələbə üçün ortaq) =================
+// ================= Tələbə işinin baxışı (müəllim və tələbə üçün ortaq) =================
 const normAns = (v) => String(v ?? '').trim().toLowerCase();
 function answerState(q, given) {
   if (given === undefined || given === null || String(given).trim() === '') return 'empty';
@@ -2979,7 +3044,7 @@ function submissionDetailHtml(questions, sub) {
   const c = countStates(questions, sub.answers);
   return `<p class="muted">${fmtDate(sub.created_at)} · bal <strong>${sub.score}/${sub.total}</strong> ·
       <span class="tag ai">✓ ${c.right}</span> <span class="tag red">✗ ${c.wrong}</span> <span class="tag">— ${c.empty}</span>${c.open ? ` <span class="tag amber">açıq ${c.open}</span>` : ''}</p>
-    <div class="stack">${questions.map((q, i) => reviewQuestionHtml(q, sub.answers?.[q.id], i, { you: 'tələbənin cavabı' })).join('')}</div>`;
+    <div class="stack">${questions.map((q, i) => reviewQuestionHtml(q, sub.answers?.[q.id], i, { you: 'Tələbənin cavabı' })).join('')}</div>`;
 }
 
 // ================= Test üçün PDF-dən sual: təmiz orijinal və ya AI ilə yeni =================
@@ -3265,8 +3330,8 @@ async function classAnalysisView(classId) {
           <span class="small muted">${a.titles.size > 1 ? a.titles.size + ' testdə' : esc(a.test.title)} · ${a.n} cavab${top ? ` · ən çox seçilən səhv: <strong>${top[0]}</strong> (${top[1]})` : ''}${a.empty ? ` · boş: ${a.empty}` : ''}</span></button>`;
       }).join('')}</div>` : '<div class="empty">Hələ kifayət qədər cavab yoxdur.</div>'}
     </section>
-    <section class="card stack"><h2>tələbələr <span class="small muted">(köməyə ehtiyacı olanlar yuxarıda)</span></h2>
-      <div class="table-wrap"><table><thead><tr><th>tələbə</th><th>Test</th><th>Orta</th><th>Son nəticələr</th><th>Zəif mövzu</th></tr></thead><tbody>
+    <section class="card stack"><h2>Tələbələr <span class="small muted">(köməyə ehtiyacı olanlar yuxarıda)</span></h2>
+      <div class="table-wrap"><table><thead><tr><th>Tələbə</th><th>Test</th><th>Orta</th><th>Son nəticələr</th><th>Zəif mövzu</th></tr></thead><tbody>
       ${studentRows.map((r) => `<tr><td><a href="#/student/${r.st.id}">${esc(r.st.full_name)}</a></td><td>${r.n}</td>
         <td>${r.avg === null ? '—' : `<strong style="color:${pctColor(r.avg)}">${r.avg}%</strong>`}</td>
         <td><span class="spark">${r.last.map((p) => `<i style="height:${Math.max(18, p)}%;background:${pctColor(p)}" title="${p}%"></i>`).join('')}</span></td>
@@ -3434,7 +3499,7 @@ async function studentWorkView(id) {
 
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/classes">Qruplar</a> / <a href="#/class/${st.class_id}">${esc(st.classes?.name || 'Qrup')}</a> /</div><h1>${esc(st.full_name)}</h1></div>
-      ${st.access_code ? `<a class="btn" href="${esc(studentLink(st.access_code))}" target="_blank" rel="noopener">tələbənin səhifəsi</a>` : ''}</div>
+      ${st.access_code ? `<a class="btn" href="${esc(studentLink(st.access_code))}" target="_blank" rel="noopener">Tələbənin səhifəsi</a>` : ''}</div>
     <section class="grid">
       <div class="card stat"><div class="label">Yazdığı test</div><div class="value">${done.length} / ${rows.length}</div></div>
       <div class="card stat"><div class="label">Orta nəticə</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
@@ -3629,7 +3694,7 @@ function practiceSection(st, done) {
     render();
     const msg = `${st.full_name}, sənin üçün səhvlərinə uyğun yeni tapşırıq hazırladım (${ids.length} sual). Buradan yaz:\n${studentLink(st.access_code)}`;
     $('#pDone', box).innerHTML = `<div class="notice info stack">Tapşırıq yaradıldı: <a href="#/test/${row.id}">${esc(row.title)}</a>. O yalnız bu tələbənin səhifəsində görünür; düzgün cavablar göndərəndən sonra açılır.
-      ${st.access_code ? '<div><button type="button" class="btn small primary" id="pShare">tələbəyə xəbər göndər</button></div>' : ''}</div>`;
+      ${st.access_code ? '<div><button type="button" class="btn small primary" id="pShare">Tələbəyə xəbər göndər</button></div>' : ''}</div>`;
     const sh = $('#pShare', box);
     if (sh) sh.onclick = () => shareText(msg, 'Mətn kopyalandı');
   };
@@ -3680,9 +3745,9 @@ async function testResultsView(id) {
     ${notSent.length ? `<section class="card stack"><div class="row between"><h2>Hələ göndərməyənlər (${notSent.length})</h2>
         ${notSent.every((st) => st.access_code) && test.is_open ? '<button class="btn small" id="remind">Xatırlatma mətnini kopyala</button>' : ''}</div>
       <div class="missing-list">${notSent.map((st) => `<span class="tag">${esc(st.full_name)}</span>`).join('')}</div></section>` : ''}
-    <section class="card stack"><h2>tələbələr</h2>
-      ${subs.length ? `<p class="small muted">Xanalar suallardır: <span class="cell c-right">✓</span> düz, <span class="cell c-wrong">✗</span> səhv, <span class="cell c-empty">—</span> boş. tələbənin adına basanda işi açılır.</p>
-      <div class="table-wrap"><table><thead><tr><th>tələbə</th><th>Bal</th><th>Suallar</th><th>Vaxt</th></tr></thead><tbody>
+    <section class="card stack"><h2>Tələbələr</h2>
+      ${subs.length ? `<p class="small muted">Xanalar suallardır: <span class="cell c-right">✓</span> düz, <span class="cell c-wrong">✗</span> səhv, <span class="cell c-empty">—</span> boş. Tələbənin adına basanda işi açılır.</p>
+      <div class="table-wrap"><table><thead><tr><th>Tələbə</th><th>Bal</th><th>Suallar</th><th>Vaxt</th></tr></thead><tbody>
         ${subs.map((s) => { const p = s.total ? Math.round(s.score / s.total * 100) : 0; return `<tr><td><button type="button" class="linkish" data-sub="${s.id}">${esc(s.student_name)}</button></td><td><strong>${s.score}/${s.total}</strong> <span class="small muted">${p}%</span>${s.late ? ' <span class="tag amber" title="Vaxt bitəndən sonra göndərilib">gecikib</span>' : ''}</td>
           <td>${cellsHtml(questions, s.answers)}</td><td class="muted small">${fmtDate(s.created_at)}</td></tr>`; }).join('')}
       </tbody></table></div>` : '<div class="empty">Hələ heç kim göndərməyib.</div>'}
@@ -3693,16 +3758,16 @@ async function testResultsView(id) {
           ${x.p === null ? '' : `<span class="qs-bar ${x.p < 50 ? 'low' : x.p < 75 ? 'mid' : 'hi'}" aria-hidden="true"><span style="width:${x.p}%"></span></span>`}
           <span class="qs-text">${esc(x.q.body)}</span></button>`).join('')}</div>
     </section>
-    <section class="card row between"><label class="row small" style="gap:8px">tələbəyə düzgün cavabları və həlli
+    <section class="card row between"><label class="row small" style="gap:8px">Tələbəyə düzgün cavabları və həlli
         <select id="rvMode" style="min-height:40px">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === (test.review_mode || 'never') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-      <span class="small muted">${test.review_mode === undefined ? 'Bu seçim üçün bazaya 006_review.sql lazımdır.' : 'tələbə şəxsi linkindən öz işinə baxır.'}</span></section>`;
+      <span class="small muted">${test.review_mode === undefined ? 'Bu seçim üçün bazaya 006_review.sql lazımdır.' : 'Tələbə şəxsi linkindən öz işinə baxır.'}</span></section>`;
   $$('[data-qs]').forEach((b) => b.onclick = () => {
     const x = qStats[+b.dataset.qs];
     const answered = subs.filter((s) => norm(s.answers?.[x.q.id]) !== '');
     const dist = x.q.qtype === 'mcq' && subs.length ? `<div class="small muted">Kim nə seçib: ${(x.q.options || []).map((o, j) => {
         const n = subs.filter((s) => norm(s.answers?.[x.q.id]) === norm(o)).length; return n ? `<strong>${'ABCDEF'[j]})</strong> ${n}` : ''; }).filter(Boolean).join(' · ') || '—'}${subs.length - answered.length ? ` · boş ${subs.length - answered.length}` : ''}</div>` : '';
     const openAnswers = x.q.qtype === 'open' && answered.length
-      ? `<details class="sol" open><summary>tələbə cavabları (${answered.length})</summary><div>${answered.map((s) => `<strong>${esc(s.student_name)}:</strong> ${esc(s.answers[x.q.id])}`).join('\n')}</div></details>` : '';
+      ? `<details class="sol" open><summary>Tələbə cavabları (${answered.length})</summary><div>${answered.map((s) => `<strong>${esc(s.student_name)}:</strong> ${esc(s.answers[x.q.id])}`).join('\n')}</div></details>` : '';
     openDialog(`Sual ${x.i + 1}${x.p === null ? '' : ` · ${x.p}% düz`}`, dist + questionHtml(x.q) + openAnswers);
   });
   $('#copy').onclick = () => copyText(link);
@@ -3726,7 +3791,7 @@ async function testResultsView(id) {
   };
 }
 
-// ================= tələbə test səhifəsi =================
+// ================= Tələbə test səhifəsi =================
 
 const studentQuestionsHtml = (test) => test.questions.map((q, i) => `<fieldset class="card stack" style="margin:0">
       <legend class="sr">Sual ${i + 1}</legend>
@@ -3918,7 +3983,7 @@ function studentDone(test, r, back = '', reviewHref = '', reviewNote = '') {
   </div></div>`;
 }
 
-// ================= tələbə kabineti (şəxsi link: #/s/KOD) =================
+// ================= Tələbə kabineti (şəxsi link: #/s/KOD) =================
 
 const CODE_KEY = 'mp_student_code';
 const pct = (r) => (r.total ? Math.round(r.score / r.total * 100) : 0);
