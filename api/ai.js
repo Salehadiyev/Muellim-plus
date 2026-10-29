@@ -728,9 +728,11 @@ function helperChain() {
   const gen = store.genModel;
   const has = (m) => Boolean(process.env[PROVIDER_KEY[m.provider]]) && !(store.badProviders || new Set()).has(m.provider);
   const asHelper = (m) => ({ ...m, helper: true });
-  // Claude yoxdursa: əvvəl müəllimin seçdiyi (pullu) model, sonra digərləri; pulsuz limitli Gemini ən sonda
+  // Müəllim Claude-dan başqa model seçibsə (məs. Sol), köməkçi işləri də o görür; Claude və Gemini ehtiyatdır.
+  // Claude seçilibsə köməkçi Claude Sonnet-dir. Pulsuz limitli Gemini həmişə ən sonda.
   const others = [MODELS['gpt-sol'], MODELS['gemini-flash']].filter((m) => m.provider !== gen?.provider);
-  let list = [HELPER, ...(gen && gen.provider !== 'anthropic' ? [gen] : []), ...others].filter(has).map(asHelper);
+  const genFirst = gen && gen.provider !== 'anthropic';
+  let list = (genFirst ? [gen, HELPER, ...others] : [HELPER, ...others]).filter(has).map(asHelper);
   if (!list.length) list = [HELPER, ...others].filter((m) => Boolean(process.env[PROVIDER_KEY[m.provider]])).map(asHelper);
   const seen = new Set();
   return list.filter((m) => (seen.has(m.provider) ? false : seen.add(m.provider)));

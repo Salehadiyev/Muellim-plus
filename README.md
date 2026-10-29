@@ -110,7 +110,7 @@ TR-YÖS səhifəsinin yuxarısında model seçilir. Açarı olmayan model boz g�
 | GPT-6.1 Sol | `OPENAI_API_KEY` |
 | Gemini 3.8 Flash | `GEMINI_API_KEY` |
 
-Şəkil oxuma və ikinci yoxlama həmişə Claude Sonnet ilə edilir (`HELPER_MODEL`).
+Köməkçi işlər (şəkil oxuma, təmiz orijinal, yoxlama): müəllim Claude-dan başqa model seçibsə (məs. GPT-6.1 Sol), hamısını o görür; Claude seçilibsə Claude Sonnet (`HELPER_MODEL`). Ehtiyat sırası: seçilən → Claude → Gemini (pulsuz limitli, ən sonda). Sol üçün düşünmə səviyyəsi `low` (`OPENAI_EFFORT`, `OPENAI_EFFORT_HELPER`).
 Model adları dəyişsə: `ANTHROPIC_MODEL`, `SONNET_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`.
 Yeni dəyişən əlavə edəndən sonra Vercel-də **Redeploy** lazımdır.
 

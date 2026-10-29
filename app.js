@@ -2156,7 +2156,7 @@ function pdfQuestions(pickerRoot, out) {
   const prep = (x, job) => ({ ...x, _uid: ++qSeq, _source: job.mode === 'original' ? 'book' : 'ai', ai_status: 'checking' });
 
   function startJob(image, mode, n) {
-    const job = { id: ++qSeq, image, mode, n, state: 'reading', step: 'şəkil oxunur', t0: Date.now(), times: {}, questions: [], errors: [], warnings: [], sample: null, helper: '' };
+    const job = { id: ++qSeq, model: currentModel(), image, mode, n, state: 'reading', step: 'şəkil oxunur', t0: Date.now(), times: {}, questions: [], errors: [], warnings: [], sample: null, helper: '' };
     let tStep = Date.now();
     const lap = (name) => { job.times[name] = (job.times[name] || 0) + (Date.now() - tStep); tStep = Date.now(); };
     job.lap = lap;
@@ -2225,7 +2225,7 @@ function pdfQuestions(pickerRoot, out) {
             ${j.state === 'reading' || j.state === 'working' ? `<span class="small muted" data-elapsed="${j.t0}">${esc(j.step)} · ${fmtElapsed(j.t0)}</span>`
               : j.total ? `<span class="small muted">${fmtElapsed(Date.now() - j.total)}${Object.keys(j.times).length ? ' · ' + Object.entries(j.times).map(([k, v]) => `${k} ${Math.round(v / 1000)}s`).join(', ') : ''}</span>` : ''}
             <button type="button" class="btn small" data-rmjob="${j.id}" style="margin-left:auto">Sil</button></div>
-          ${j.helper && j.helper !== 'sonnet' ? `<p class="small" style="color:#8A5A00">Claude əlçatan deyil (balans?) — köməkçi işləri ${esc(HELPER_NAME[j.helper] || j.helper)} görür, daha yavaş ola bilər.</p>` : ''}
+          ${j.helper && j.helper !== 'sonnet' && j.helper !== j.model ? `<p class="small" style="color:#8A5A00">Seçilən model cavab vermədi — köməkçi işləri ehtiyat model (${esc(HELPER_NAME[j.helper] || j.helper)}) görür, daha yavaş ola bilər.</p>` : ''}
           ${j.state === 'incomplete' ? '<p class="small" style="color:var(--red)">Kəsik natamamdır: şərt, şəkil və ya variantlar çatışmır. Sualı tam çərçivəyə alıb yenidən seçin.</p>' : ''}
           ${j.warnings.length ? `<ul class="warn-list">${j.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
           ${j.errors.length ? `<p class="small" style="color:var(--red)">${j.errors.map(esc).join('<br>')}</p>` : ''}
