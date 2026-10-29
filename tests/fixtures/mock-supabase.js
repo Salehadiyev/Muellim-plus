@@ -23,6 +23,7 @@ class Query {
   then(res, rej) { try { res(this.exec()); } catch (e) { rej(e); } }
   exec() {
     const db = load();
+    if (this.table === 'mistakes' && !db.mistakes) return { data: null, error: { message: 'relation "public.mistakes" does not exist' } };
     let t = db[this.table] = db[this.table] || [];
     if (this.op === 'insert') {
       const made = this.rows.map((r) => ({ id: uid(), created_at: new Date().toISOString(), teacher_id: 'u1', is_open: true, options: [], ...(this.table === 'students' && !window.NO_CODES ? { access_code: Math.random().toString(36).slice(2, 10).toUpperCase() } : {}), ...r }));
@@ -86,6 +87,32 @@ export function createClient() {
         const overdue = (t) => !!t.due_at && Date.now() > new Date(t.due_at).getTime() + 120000;
         const vis = (t) => t.class_id === st?.class_id && (!t.student_id || t.student_id === st.id);
         const rvOk = (t) => (t.review_mode || 'never') === 'after_submit' || (t.review_mode === 'after_close' && !t.is_open);
+        if (fn === 'student_mistakes' || fn === 'student_answer_mistake') {
+          if (!Array.isArray(db.mistakes)) return { data: null, error: { message: 'Could not find the function public.' + fn } };
+          if (!st) return { data: null, error: { message: 'Link etibarsızdır' } };
+          const now = Date.now(); const due = (m) => m.status === 'open' && new Date(m.due_at).getTime() <= now;
+          const mine2 = db.mistakes.filter((m) => m.student_id === st.id);
+          if (fn === 'student_mistakes') {
+            mine2.filter((m) => due(m) && !m.practice_id).forEach((m) => {
+              const o = db.questions.find((q) => q.id === m.question_id);
+              const c = db.questions.filter((q) => q.id !== o.id && q.qtype === 'mcq' && !m.seen.includes(q.id) && (q.similar_to === o.id || (o.topic && q.topic === o.topic)))
+                .sort((x, y) => (y.similar_to === o.id) - (x.similar_to === o.id))[0];
+              m.practice_id = c ? c.id : o.id;
+            });
+            save(db);
+            const items = mine2.filter(due).slice(0, 10).map((m) => { const q = db.questions.find((x) => x.id === m.practice_id); return { id: m.id, attempts: m.attempts, due_at: m.due_at, question: { id: q.id, body: q.body, qtype: q.qtype, options: q.options, figure: q.figure || null, option_figures: q.option_figures || [], topic: q.topic } }; });
+            const fut = mine2.filter((m) => m.status === 'open' && !due(m)).map((m) => m.due_at).sort();
+            return { data: { name: st.full_name, items, open: mine2.filter((m) => m.status === 'open').length, due: mine2.filter(due).length, next_at: fut[0] || null, cleared: mine2.filter((m) => m.status === 'cleared').length }, error: null };
+          }
+          const m = mine2.find((x) => x.id === a.p_mistake && due(x));
+          if (!m || !m.practice_id) return { data: null, error: { message: 'Bu sual artıq dəftərdə deyil' } };
+          const q = db.questions.find((x) => x.id === m.practice_id);
+          const ok = String(a.p_answer || '').trim().toLowerCase() === q.answer.trim().toLowerCase();
+          m.attempts++; m.seen.push(q.id);
+          if (ok) { m.status = 'cleared'; m.cleared_at = new Date().toISOString(); } else { m.practice_id = null; m.due_at = new Date(now + 2 * 864e5).toISOString(); }
+          save(db);
+          return { data: { correct: ok, answer: q.answer, solution: q.solution || null }, error: null };
+        }
         if (fn === 'student_portal') {
           if (!st) return { data: null, error: null };
           const cls = db.classes.find((c) => c.id === st.class_id);
@@ -123,6 +150,9 @@ export function createClient() {
           let score = 0, total = 0;
           t.question_ids.forEach((id) => { const q = db.questions.find((x) => x.id === id); if (q && q.qtype === 'mcq') { total++; if ((a.p_answers[id] || '').trim().toLowerCase() === q.answer.trim().toLowerCase()) score++; } });
           db.submissions.push({ id: uid(), test_id: t.id, student_id: st.id, student_name: st.full_name, answers: a.p_answers, score, total, late, created_at: new Date().toISOString() });
+          if (window.MISTAKES_ON !== false && Array.isArray(db.mistakes)) t.question_ids.forEach((id) => { const q = db.questions.find((x) => x.id === id); const v = String(a.p_answers[id] || '').trim();
+            if (q && q.qtype === 'mcq' && v && v.toLowerCase() !== q.answer.trim().toLowerCase() && !db.mistakes.some((m) => m.student_id === st.id && m.question_id === id && m.status === 'open'))
+              db.mistakes.push({ id: uid(), teacher_id: 'u1', student_id: st.id, question_id: id, test_id: t.id, status: 'open', attempts: 0, seen: [], practice_id: null, due_at: new Date(Date.now() + 864e5).toISOString(), created_at: new Date().toISOString() }); });
           save(db);
           return { data: { score, total }, error: null };
         }

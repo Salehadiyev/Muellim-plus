@@ -130,4 +130,42 @@ insert into classes (teacher_id, name) values (auth.uid(), 'Təsdiqli müəllimi
 select t_ok((select count(*) from classes) = 2, 'təsdiqli müəllim normal yazır');
 reset role;
 
+-- ---------- 010: səhv dəftəri ----------
+reset role;
+select t_ok((select count(*) from mistakes where student_id = '00000000-0000-4000-8000-0000000000b1' and status = 'open') = 1, 'səhv cavab dəftərə düşdü, boş cavab düşmədi');
+select t_ok((select question_id from mistakes where student_id = '00000000-0000-4000-8000-0000000000b1') = '00000000-0000-4000-8000-0000000000e2', 'düz cavablanan sual dəftərdə deyil');
+select t_ok((select count(*) from mistakes where student_id = '00000000-0000-4000-8000-0000000000b2') = 0, 'boş göndərilən test dəftər yaratmır');
+insert into questions (id, teacher_id, body, options, answer, qtype, similar_to, ai_status) values
+  ('00000000-0000-4000-8000-0000000000e3', '00000000-0000-4000-8000-0000000000a1', '3+3', '["5","6","7","8","9"]', '6', 'mcq', '00000000-0000-4000-8000-0000000000e2', 'passed');
+select id as mid from mistakes where student_id = '00000000-0000-4000-8000-0000000000b1' \gset
+set role anon;
+reset request.jwt.claim.sub;
+select t_ok(jsonb_array_length(student_mistakes('AAAAAAAA') -> 'items') = 0 and (student_mistakes('AAAAAAAA') ->> 'open')::int = 1, 'təkrar bir gün sonra açılır');
+reset role;
+update mistakes set due_at = now() - interval '1 minute' where id = :'mid';
+set role anon;
+select t_ok(student_mistakes('AAAAAAAA') #>> '{items,0,question,id}' = '00000000-0000-4000-8000-0000000000e3', 'əvvəl həmin sualın bənzəri verilir');
+select t_ok(student_mistakes('AAAAAAAA')::text not like '%"answer"%', 'dəftərdə cavab açarı yoxdur');
+select t_ok(student_mistakes('BBBBBBBB') -> 'items' = '[]'::jsonb, 'başqa şagird bu dəftəri görmür');
+select t_err(format('select student_answer_mistake(%L, %L, %L)', 'CCCCCCCC', :'mid', '6'), 'başqa şagird cavab verə bilmir');
+select t_ok(not (student_answer_mistake('AAAAAAAA', :'mid', '5') ->> 'correct')::boolean, 'səhv cavab qəbul olunmur');
+select t_ok(jsonb_array_length(student_mistakes('AAAAAAAA') -> 'items') = 0 and (student_mistakes('AAAAAAAA') ->> 'open')::int = 1, 'səhvdən sonra sual dəftərdə qalır, 2 gün sonra');
+select t_err(format('select student_answer_mistake(%L, %L, %L)', 'AAAAAAAA', :'mid', '6'), 'vaxtı çatmamış suala cavab olmur');
+reset role;
+update mistakes set due_at = now() - interval '1 minute' where id = :'mid';
+set role anon;
+select t_ok(student_mistakes('AAAAAAAA') #>> '{items,0,question,id}' = '00000000-0000-4000-8000-0000000000e2', 'görülən bənzər təkrarlanmır, başqası yoxdursa orijinal');
+select t_ok((student_answer_mistake('AAAAAAAA', :'mid', ' 4 ') ->> 'correct')::boolean, 'düz cavab');
+select t_ok((student_mistakes('AAAAAAAA') ->> 'open')::int = 0 and (student_mistakes('AAAAAAAA') ->> 'cleared')::int = 1, 'düz tapılan sual dəftərdən silindi');
+select t_ok((select count(*) from mistakes) = 0, 'anon dəftər cədvəlini görmür');
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+select t_ok((select count(*) from mistakes) = 0, 'başqa müəllim dəftəri görmür');
+select t_err($q$ insert into mistakes (teacher_id, student_id, question_id) values (auth.uid(), '00000000-0000-4000-8000-0000000000b3', '00000000-0000-4000-8000-0000000000e1') $q$, 'müəllim dəftərə əl ilə yaza bilmir');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+select t_ok((select count(*) from mistakes) = 1, 'müəllim öz şagirdinin dəftərini görür');
+select t_err($q$ update mistakes set status = 'open' $q$, 'müəllim statusu birbaşa dəyişə bilmir');
+select t_ok((select status from mistakes) = 'cleared', 'status dəyişmədi');
+reset role;
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

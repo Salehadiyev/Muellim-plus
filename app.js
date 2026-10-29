@@ -747,6 +747,81 @@ async function classesView() {
 const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => CODE_ABC[b % 31]).join('');
 
+// Sinfin səhv dəftəri (müəllim): kimdə neçə sual, ən çox səhv edilənlər, AI ilə bənzər hazırlamaq
+async function classMistakes(box, students) {
+  if (!students.length) { box.innerHTML = '<div class="empty">Sinifdə şagird yoxdur.</div>'; return; }
+  const { data: rows, error } = await sb.from('mistakes').select('id, student_id, question_id, status, attempts, due_at').in('student_id', students.map((x) => x.id));
+  if (error) {
+    if (/mistakes|schema cache|does not exist/i.test(error.message || '')) {
+      box.innerHTML = '<p class="notice">Səhv dəftəri üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>010_mistakes.sql</strong> → Run.</p>';
+      return;
+    }
+    throw error;
+  }
+  const open = rows.filter((r) => r.status === 'open');
+  const cleared = rows.length - open.length;
+  const per = {};
+  rows.forEach((r) => { const k = per[r.student_id] || (per[r.student_id] = { open: 0, cleared: 0 }); k[r.status === 'open' ? 'open' : 'cleared']++; });
+  const qCount = {};
+  open.forEach((r) => { qCount[r.question_id] = (qCount[r.question_id] || 0) + 1; });
+  const qIds = Object.keys(qCount);
+  const [qs, { data: sims }] = await Promise.all([
+    qIds.length ? fullQuestions(qIds) : [],
+    qIds.length ? sb.from('questions').select('id, similar_to').in('similar_to', qIds) : { data: [] }
+  ]);
+  const hasSim = new Set((sims || []).map((x) => x.similar_to));
+  const top = qs.slice().sort((a, b) => qCount[b.id] - qCount[a.id]);
+  const need = top.filter((q) => !hasSim.has(q.id) && q.qtype === 'mcq');
+  const name = Object.fromEntries(students.map((x) => [x.id, x.full_name]));
+  box.innerHTML = `
+    <p class="small muted" style="margin:0">Şagird testdə səhv etdiyi sual avtomatik dəftərinə düşür. Bir gün sonra öz linkində ona <strong>bənzər sual</strong> çıxır: düz tapsa dəftərdən silinir, səhv etsə 2 gün sonra başqa bənzəri gəlir. Bənzərlər bankdan götürülür: əvvəl AI ilə hazırladığınız bənzərlər, sonra eyni mövzudakı suallar.</p>
+    <div class="grid res-stats">
+      <div class="card stat"><div class="label">Dəftərdə</div><div class="value">${open.length}</div></div>
+      <div class="card stat"><div class="label">Düzəldilib</div><div class="value" style="color:var(--green)">${cleared}</div></div>
+      <div class="card stat"><div class="label">Bənzəri yoxdur</div><div class="value">${need.length}</div></div>
+    </div>
+    ${need.length ? `<div class="nb-gen"><span><strong>${need.length}</strong> sualın hələ AI ilə hazırlanmış bənzəri yoxdur (indi eyni mövzudan və ya sualın özü verilir).</span>
+      <button class="btn primary" id="mkGen">✨ Bənzərləri AI ilə hazırla (${need.length})</button></div><p class="small muted" id="mkProg" role="status" aria-live="polite"></p>` : ''}
+    <h3>Şagirdlər</h3>
+    ${rows.length ? `<div class="slist">${students.filter((x) => per[x.id]).sort((a, b) => per[b.id].open - per[a.id].open).map((x) => `<div class="srow">
+        <a class="s-name" href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a>
+        <span class="row" style="gap:8px">${per[x.id].open ? `<span class="pchip low">${per[x.id].open} dəftərdə</span>` : ''}${per[x.id].cleared ? `<span class="pchip hi">✓ ${per[x.id].cleared}</span>` : ''}</span></div>`).join('')}</div>`
+      : '<div class="empty">Dəftər boşdur: hələ heç kim səhv etməyib (və ya test yazılmayıb).</div>'}
+    ${top.length ? `<h3>Ən çox səhv edilən suallar</h3><div class="qstat-grid">${top.slice(0, 12).map((q, i) => `<button type="button" class="qstat" data-mq="${i}">
+        <span class="qs-head"><strong>${qCount[q.id]} şagird</strong>${hasSim.has(q.id) ? '<span class="qs-p hi">bənzəri var</span>' : '<span class="qs-p mid">bənzəri yoxdur</span>'}</span>
+        <span class="qs-text">${esc(q.body)}</span></button>`).join('')}</div>` : ''}`;
+  $$('[data-mq]', box).forEach((b) => b.onclick = () => {
+    const q = top[+b.dataset.mq];
+    const who = open.filter((r) => r.question_id === q.id).map((r) => esc(name[r.student_id] || '')).join(', ');
+    openDialog('Dəftərdəki sual', `<p class="small muted">Səhv edənlər: ${who}</p>` + questionHtml(q));
+  });
+  const gen = $('#mkGen', box);
+  if (gen) gen.onclick = () => {
+    if (!confirm(`${need.length} sual üçün AI bənzər sual hazırlayacaq (hər biri yoxlanılır). Davam edilsin?`)) return;
+    busy(gen, async () => {
+      let ok = 0, bad = 0, done = 0;
+      const q = makeQueue(3);
+      await Promise.all(need.map((orig) => q(async () => {
+        try {
+          const img = (await renderQuestionImage(orig)).image;
+          const text = orig.body + '\n' + (orig.options || []).map((o, j) => `${'ABCDE'[j]}) ${o}`).join('\n');
+          const r = await callAI('tryos_from_examples', { samples: [{ text, image: img, topic: orig.topic || '', section: orig.section || 'matematik' }], mode: 'benzer', perSample: 1 });
+          const nq = r.questions?.[0];
+          if (!nq) throw new Error('boş cavab');
+          const passed = await checkQuestion(nq, { mode: 'benzer', sample: { text, image: img } });
+          if (!passed) { bad++; return; }
+          await saveQuestions([{ ...nq, topic: nq.topic || orig.topic, subtype: orig.subtype || nq.subtype, difficulty: orig.difficulty || nq.difficulty, similar_to: orig.id }], 'ai');
+          ok++;
+        } catch (err) { if (err.expected) throw err; bad++; }
+        done++;
+        const pr = $('#mkProg'); if (pr) pr.textContent = `Hazırlanır: ${done} / ${need.length}…`;
+      })));
+      toast(`${ok} bənzər sual hazırlanıb banka əlavə olundu${bad ? `, ${bad} alınmadı` : ''}`, !ok && bad > 0);
+      classMistakes(box, students).catch(fail);
+    }).catch(fail);
+  };
+}
+
 async function classView(id) {
   const [{ data: cls, error }, { data: students }, { data: tests }] = await Promise.all([
     sb.from('classes').select('*').eq('id', id).single(),
@@ -786,6 +861,7 @@ async function classView(id) {
     <div class="seg tseg" role="tablist" aria-label="Sinif bölmələri">
       <button type="button" class="seg-b on" data-ctab="st" role="tab">Şagirdlər <span class="seg-c">${students.length}</span></button>
       <button type="button" class="seg-b" data-ctab="ts" role="tab">Testlər <span class="seg-c">${(tests || []).length}</span></button>
+      <button type="button" class="seg-b" data-ctab="mk" role="tab">📒 Səhv dəftəri</button>
     </div>
     <section class="card stack" data-cpane="st">
       ${needsSql ? '<p class="notice">Şəxsi linklər üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>005_student_links.sql</strong> → Run.</p>' : ''}
@@ -811,10 +887,13 @@ async function classView(id) {
           <span class="small muted">${sent} / ${target} göndərib</span><span class="mt-go">›</span></a>`; }).join('')}</div>`
         : '<div class="empty">Hələ test yoxdur.</div>'}
     </section>
+    <section class="card stack" data-cpane="mk" hidden id="mkPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
     <details class="danger-zone"><summary>Sinfi silmək</summary><p class="small muted">Sinif və şagird siyahısı silinir. Testlər və göndərilmiş nəticələr qalır.</p><button class="btn danger" id="delClass">Sinfi sil</button></details>`;
+  let mkLoaded = false;
   $$('[data-ctab]').forEach((b) => b.onclick = () => {
     $$('[data-ctab]').forEach((x) => x.classList.toggle('on', x === b));
     $$('[data-cpane]').forEach((p) => { p.hidden = p.dataset.cpane !== b.dataset.ctab; });
+    if (b.dataset.ctab === 'mk' && !mkLoaded) { mkLoaded = true; classMistakes($('#mkPane'), students).catch((err) => { $('#mkPane').innerHTML = `<p class="notice">${esc(err.message)}</p>`; }); }
   });
   $('#showAdd').onclick = () => { $('#addStudents').hidden = false; $('textarea', $('#addStudents')).focus(); };
   $('#hideAdd') && ($('#hideAdd').onclick = () => { $('#addStudents').hidden = true; });
@@ -1070,6 +1149,7 @@ async function saveQuestions(list, source) {
     if (q.section) row.section = q.section;
     if (q.subtype) row.subtype = q.subtype;
     if (q.model) row.model = q.model;
+    if (q.similar_to) row.similar_to = q.similar_to;
     if (q.ai_status && q.ai_status !== 'checking') {
       row.ai_status = q.ai_status === 'passed' ? 'passed' : q.ai_status === 'draft' ? 'draft' : 'review';
       row.verified = row.ai_status === 'passed';
@@ -3345,6 +3425,62 @@ function studentCodeForm(note = '') {
 
 const reviewNoteOf = (mode) => (mode === 'after_close' ? 'Düzgün cavablar və həllər müəllim testi bağlayanda açılacaq.' : '');
 
+// Şagirdin səhv dəftəri: bənzər suallar bir-bir; düz → dəftərdən silinir, səhv → 2 gün sonra başqa bənzəri
+async function mistakesView(code, home) {
+  const { data: mk, error } = await sb.rpc('student_mistakes', { p_code: code });
+  if (error || !mk) return studentMsg('Səhv dəftəri', 'Hazırda açmaq olmadı.', `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
+  const items = mk.items || [];
+  let i = 0; let right = 0;
+  const show = () => {
+    if (i >= items.length) {
+      $app.innerHTML = `<div class="student"><div class="card stack" style="text-align:center;align-items:center">
+        <div style="font-size:48px">${right === items.length ? '🎉' : '💪'}</div>
+        <h1>Bu günlük bitdi</h1>
+        <p>${items.length} sualdan <strong>${right}</strong>-ni düz tapdın${right ? ' — onlar dəftərdən silindi' : ''}.</p>
+        ${items.length - right ? `<p class="muted">Səhv etdiklərinə 2 gün sonra başqa bənzər sual gələcək.</p>` : ''}
+        <a class="btn primary block" href="${home}">Testlərimə qayıt</a></div></div>`;
+      return;
+    }
+    const it = items[i]; const q = it.question;
+    const figs = hasOptionFigures(q);
+    $app.innerHTML = `<div class="student">
+      <div class="row between"><a class="muted" href="${home}">‹ Testlərim</a><span class="muted">${esc(mk.name || '')}</span></div>
+      <div class="row between"><h1>📒 Səhv dəftəri</h1><span class="tag">${i + 1} / ${items.length}</span></div>
+      <div class="nb-steps" aria-hidden="true">${items.map((_, k) => `<span class="${k < i ? 'done' : k === i ? 'cur' : ''}"></span>`).join('')}</div>
+      <form class="card stack" id="nbForm">
+        ${it.attempts ? `<span class="small muted">Bu mövzuda ${it.attempts + 1}-ci cəhd</span>` : '<span class="small muted">Səhv etdiyin suala bənzər sual</span>'}
+        <div class="q-text pre" style="font-size:17px">${esc(q.body)}</div>
+        ${q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : ''}
+        <div class="${figs ? 'fig-choices' : 'stack'}" style="gap:8px">${(q.options || []).map((o, j) => `<label class="opt-choice"><input type="radio" name="a" value="${esc(o)}"><span>${'ABCDEF'[j]})</span>${figs ? `<span class="opt-fig">${safeSvg(q.option_figures[j])}</span>` : `<span>${esc(o)}</span>`}</label>`).join('')}</div>
+        <div id="nbRes"></div>
+        <button class="btn primary block" type="submit" id="nbBtn">Yoxla</button>
+      </form></div>`;
+    window.scrollTo(0, 0);
+    const form = $('#nbForm');
+    let answered = false;
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      if (answered) { i++; show(); return; }
+      const v = new FormData(form).get('a');
+      if (!v) return toast('Variant seçin', true);
+      busy($('#nbBtn'), async () => {
+        const { data: r, error: err } = await sb.rpc('student_answer_mistake', { p_code: code, p_mistake: it.id, p_answer: v });
+        if (err) throw new Error(err.message);
+        answered = true;
+        if (r.correct) right++;
+        $$('input[name=a]', form).forEach((x) => { x.disabled = true; const l = x.closest('.opt-choice');
+          if (normAns(x.value) === normAns(r.answer)) l.classList.add('right'); else if (x.checked) l.classList.add('wrong'); });
+        $('#nbRes').innerHTML = r.correct
+          ? '<p class="nb-ok">✓ Düzdür! Bu sual dəftərdən silindi.</p>'
+          : `<div class="nb-bad"><strong>Səhvdir.</strong> Düz cavab: <strong>${esc(r.answer)}</strong>.<br><span class="small">Narahat olma: 2 gün sonra bu mövzudan başqa bir bənzər sual gələcək.</span></div>
+            ${r.solution ? `<details class="sol" open><summary>Həlli</summary><div>${esc(r.solution)}</div></details>` : ''}`;
+      }).then(() => { if (answered) $('#nbBtn').textContent = i + 1 < items.length ? 'Növbəti sual ›' : 'Bitir'; }).catch((err2) => toast(err2.message, true));
+    };
+  };
+  if (!items.length) return studentMsg('📒 Səhv dəftəri', +mk.open ? `Hələ təkrar vaxtı deyil. Növbəti: ${esc(fmtDue(mk.next_at))}.` : 'Dəftər boşdur — əla! 🎉', `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
+  show();
+}
+
 async function studentPortal(rawCode, testId, sub) {
   let code = String(rawCode || '').trim().toUpperCase();
   if (!code) {
@@ -3355,6 +3491,8 @@ async function studentPortal(rawCode, testId, sub) {
   $app.innerHTML = '<div class="center-screen"><div class="spinner" aria-label="Yüklənir"></div></div>';
   window.scrollTo(0, 0);
   const home = '#/s/' + code;
+
+  if (testId === 'defter') return mistakesView(code, home);
 
   if (testId && sub === 'review') {
     const { data: rv, error } = await sb.rpc('student_review', { p_code: code, p_test_id: testId });
@@ -3404,7 +3542,10 @@ async function studentPortal(rawCode, testId, sub) {
     return;
   }
 
-  const { data: me, error } = await sb.rpc('student_portal', { p_code: code });
+  const [{ data: me, error }, mk] = await Promise.all([
+    sb.rpc('student_portal', { p_code: code }),
+    Promise.resolve(sb.rpc('student_mistakes', { p_code: code })).then((r) => (r && !r.error ? r.data : null), () => null)
+  ]);
   if (error || !me) {
     try { if (localStorage.getItem(CODE_KEY) === code) localStorage.removeItem(CODE_KEY); } catch (_) { /* */ }
     return studentCodeForm(error ? 'Hazırda açmaq olmadı, bir az sonra yenidən yoxlayın.' : 'Bu link və ya kod etibarsızdır. Müəlliminizdən yeni link istəyin.');
@@ -3424,6 +3565,13 @@ async function studentPortal(rawCode, testId, sub) {
         : '<div class="empty">Hazırda yazılacaq test yoxdur.</div>'}
       ${missed.length ? `<div class="small muted">Vaxtı keçmiş: ${missed.map((t) => esc(t.title)).join(', ')}</div>` : ''}
     </section>
+    ${mk && (+mk.open || +mk.cleared) ? `<section class="card stack notebook">
+      <div class="row between"><h2>📒 Səhv dəftərim</h2>${+mk.cleared ? `<span class="tag ai">✓ ${mk.cleared} düzəldilib</span>` : ''}</div>
+      ${+mk.due ? `<p>Səhv etdiyin suallara bənzər <strong>${mk.due}</strong> sual səni gözləyir. Düz tapsan, dəftərdən silinəcək.</p>
+        <a class="btn primary block" href="${home}/defter">Təkrar et (${mk.due})</a>`
+      : +mk.open ? `<p class="muted">Dəftərdə <strong>${mk.open}</strong> sual var. Növbəti təkrar: <strong>${esc(fmtDue(mk.next_at))}</strong>.</p>`
+      : '<p class="muted">Dəftər boşdur — bütün səhvlərini düzəltmisən! 🎉</p>'}
+    </section>` : ''}
     <section class="card stack"><div class="row between"><h2>Nəticələrim</h2>${avg === null ? '' : `<span class="tag ai">orta ${avg}%</span>`}</div>
       ${done.length ? done.map((t) => `<div class="portal-row">
           <span><strong>${esc(t.title)}</strong><span class="small muted"> · ${fmtDate(t.result.created_at)}</span>
