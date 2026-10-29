@@ -59,6 +59,7 @@ for (const [file, expect] of Object.entries(tests)) {
     if (code !== 0) console.log(`   çıxış kodu: ${code}`);
     missing.forEach((re) => console.log(`   gözlənilən tapılmadı: ${re}`));
     console.log(out.split('\n').slice(-25).map((l) => '   | ' + l).join('\n'));
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=${file}::` + [code !== 0 ? 'kod ' + code : '', ...missing.map(String), ...out.split('\n').slice(-12)].filter(Boolean).join(' ¦ ').replace(/%/g, '%25').replace(/\r?\n/g, ' ').slice(0, 3500));
   }
 }
 console.log(`\n${failed ? '✗ ' + failed + ' sınaq keçmədi' : '✓ hamısı keçdi'} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
