@@ -360,41 +360,27 @@ function forgotView() {
   };
 }
 
+// Yalnız giriş: platforma müəllimin özü üçündür (yeni qeydiyyat yoxdur; tələbələr şəxsi linklə girir)
 function loginView() {
-  let mode = 'login';
-  const render = () => {
-    $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="auth">
-      <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Müəllim+</h1></div>
-      <p class="muted">${mode === 'login' ? 'Hesabınıza daxil olun.' : 'Müəllim hesabı yaradın.'}</p>
-      ${mode === 'signup' ? '<label class="field">Adınız<input type="text" name="name" required autocomplete="name"></label>' : ''}
-      <label class="field">E-poçt<input type="email" name="email" required autocomplete="email"></label>
-      <label class="field">Şifrə${mode === 'signup' ? '<span class="hint">Ən azı 8 simvol</span>' : ''}<input type="password" name="password" required minlength="${mode === 'signup' ? 8 : 6}" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}"></label>
-      <button class="btn primary block" type="submit">${mode === 'login' ? 'Daxil ol' : 'Qeydiyyatdan keç'}</button>
-      <button class="btn block" type="button" id="switch">${mode === 'login' ? 'Hesabım yoxdur, qeydiyyat' : 'Hesabım var, daxil ol'}</button>
-      ${mode === 'login' ? '<button class="btn block" type="button" id="forgot" style="border:0;background:none;color:var(--accent)">Şifrəni unutmusunuz?</button>' : ''}
-      <p class="small muted" style="text-align:center;margin:0"><a href="#/privacy">Məxfilik siyasəti</a></p>
-    </form></div>`;
-    $('#switch').onclick = () => { mode = mode === 'login' ? 'signup' : 'login'; render(); };
-    if ($('#forgot')) $('#forgot').onclick = forgotView;
-    $('#auth').onsubmit = (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      const btn = $('button[type=submit]', e.target);
-      busy(btn, async () => {
-        const email = f.get('email').trim();
-        const password = f.get('password');
-        if (mode === 'login') {
-          const { error } = await sb.auth.signInWithPassword({ email, password });
-          if (error) throw new Error(error.message === 'Invalid login credentials' ? 'E-poçt və ya şifrə yanlışdır' : error.message);
-        } else {
-          const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: f.get('name') } } });
-          if (error) throw error;
-          if (!data.session) toast('Təsdiq məktubu göndərildi. E-poçtunuzu yoxlayın. Hesab admin təsdiqindən sonra aktiv olacaq.');
-        }
-      }).catch(fail);
-    };
+  $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="auth">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Müəllim+</h1></div>
+    <p class="muted">Hesabınıza daxil olun.</p>
+    <label class="field">E-poçt<input type="email" name="email" required autocomplete="email"></label>
+    <label class="field">Şifrə<input type="password" name="password" required minlength="6" autocomplete="current-password"></label>
+    <button class="btn primary block" type="submit">Daxil ol</button>
+    <button class="btn block" type="button" id="forgot" style="border:0;background:none;color:var(--accent)">Şifrəni unutmusunuz?</button>
+    <p class="small muted" style="text-align:center;margin:0">Tələbəsiniz? Müəlliminizin göndərdiyi şəxsi linki açın.</p>
+    <p class="small muted" style="text-align:center;margin:0"><a href="#/privacy">Məxfilik siyasəti</a></p>
+  </form></div>`;
+  $('#forgot').onclick = forgotView;
+  $('#auth').onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    busy($('button[type=submit]', e.target), async () => {
+      const { error } = await sb.auth.signInWithPassword({ email: f.get('email').trim(), password: f.get('password') });
+      if (error) throw new Error(error.message === 'Invalid login credentials' ? 'E-poçt və ya şifrə yanlışdır' : error.message);
+    }).catch(fail);
   };
-  render();
 }
 
 // ================= Giriş icazəsi və limitlər (008) =================
@@ -593,8 +579,7 @@ async function settingsView() {
     <div class="page-head"><div><h1>Ayarlar</h1></div></div>
     <section class="card stack"><h2>AI xərci</h2>${limitLine() || '<p class="muted small">Limitlər üçün bazada 008 yeniləməsi lazımdır.</p>'}</section>
     <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
-    ${access?.is_admin ? `<a class="card action-card" href="#/teachers"><h3>Müəllimlər ›</h3><p class="muted small">Yeni qeydiyyatları təsdiqlə, AI limitlərini dəyiş.</p></a>
-      <section class="card stack" id="errCard"><h2>Səhvlər</h2><p class="muted small">Yüklənir…</p></section>` : ''}
+    ${access?.is_admin ? `<section class="card stack" id="errCard"><h2>Səhvlər</h2><p class="muted small">Yüklənir…</p></section>` : ''}
     <section class="card stack"><h2>Ehtiyat nüsxə</h2>
       <p class="muted small">Bütün sinifləriniz, şagirdləriniz, suallarınız, testləriniz və nəticələriniz bir fayl kimi (JSON) yüklənir. Ayda bir dəfə yükləyib saxlamağınız tövsiyə olunur.</p>
       <div><button class="btn primary" id="exportBtn">Məlumatlarımı yüklə</button></div></section>
@@ -862,6 +847,88 @@ async function classMistakes(box, students, notes = []) {
   };
 }
 
+const daysLeftText = (d) => {
+  const n = Math.round((new Date(d + 'T00:00:00') - new Date(new Date().toDateString())) / 864e5);
+  return n > 0 ? `İmtahana ${n} gün qaldı` : n === 0 ? 'İmtahan bu gündür!' : 'İmtahan tarixi keçib';
+};
+const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
+const noteUrl = (path) => sb.storage.from('notes').getPublicUrl(path).data.publicUrl;
+const NOTE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'];
+
+// Dərs qeydləri (müəllim): sinfə və ya bir tələbəyə mətn + PDF/şəkil
+async function classNotes(box, cls, students) {
+  const ids = students.map((x) => x.id);
+  const [a, b] = await Promise.all([
+    sb.from('lesson_notes').select('*').eq('class_id', cls.id),
+    ids.length ? sb.from('lesson_notes').select('*').in('student_id', ids) : { data: [] }
+  ]);
+  const err = a.error || b.error;
+  if (err) {
+    if (/lesson_notes|schema cache|does not exist/i.test(err.message || '')) { box.innerHTML = '<p class="notice">Dərs qeydləri üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>012_student_insights.sql</strong> → Run.</p>'; return; }
+    throw err;
+  }
+  const seen = new Set();
+  const notes = [...(a.data || []), ...(b.data || [])].filter((n) => !seen.has(n.id) && seen.add(n.id)).sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+  const nameOf = Object.fromEntries(students.map((x) => [x.id, x.full_name]));
+  const allTopics = [...TRYOS_TOPICS.matematik, ...TRYOS_TOPICS.sayisal];
+  box.innerHTML = `
+    <div class="row between"><p class="small muted" style="margin:0">Mövzu izahı, PDF, lövhənin şəkli — tələbə öz səhifəsində <strong>"Dərs qeydlərim"</strong> bölməsində görür.</p>
+      <button class="btn primary" id="ntNew">+ Yeni qeyd</button></div>
+    <form class="stack nt-form" id="ntForm" hidden>
+      <div class="form-grid">
+        <label class="field">Başlıq<input type="text" name="title" required maxlength="200" placeholder="məs. Fonksiyonlar — 1-ci dərs"></label>
+        <label class="field">Mövzu<span class="hint">istəyə bağlı</span><input type="text" name="topic" list="ntTopics" maxlength="120"><datalist id="ntTopics">${allTopics.map((t) => `<option value="${esc(t)}"></option>`).join('')}</datalist></label>
+        <label class="field">Kimə<select name="to"><option value="">Bütün sinif (${esc(cls.name)})</option>${students.map((x) => `<option value="${x.id}">👤 ${esc(x.full_name)}</option>`).join('')}</select></label>
+      </div>
+      <label class="field">Mətn<span class="hint">istəyə bağlı · formul üçün $x^2$</span><textarea name="body" rows="4" maxlength="20000"></textarea></label>
+      <label class="field">Fayl<span class="hint">istəyə bağlı · PDF və ya şəkil, ən çox 15 MB</span><input type="file" name="file" accept="application/pdf,.pdf,image/*"></label>
+      <div class="row"><button class="btn primary" type="submit">Yadda saxla</button><button class="btn" type="button" id="ntCancel">Ləğv et</button></div>
+    </form>
+    ${notes.length ? `<div class="nt-list">${notes.map((n) => `<article class="nt-item">
+        <div class="nt-head"><strong>${esc(n.title)}</strong><span class="small muted">${esc(fmtDue(n.created_at))}</span></div>
+        <div class="nt-meta">${n.topic ? `<span class="tag book">${esc(n.topic)}</span>` : ''}<span class="tag">${n.student_id ? '👤 ' + esc(nameOf[n.student_id] || 'tələbə') : 'Bütün sinif'}</span>
+          ${n.file_path ? `<a class="tag ai" href="${esc(noteUrl(n.file_path))}" target="_blank" rel="noopener">${n.file_type === 'application/pdf' ? '📄' : '🖼'} ${esc(n.file_name || 'fayl')}</a>` : ''}</div>
+        ${n.body ? `<div class="nt-body">${esc(n.body)}</div>` : ''}
+        <div><button class="btn small danger" data-ntdel="${n.id}">Sil</button></div></article>`).join('')}</div>`
+      : '<div class="empty">Hələ qeyd yoxdur.</div>'}`;
+  const form = $('#ntForm', box);
+  $('#ntNew', box).onclick = () => { form.hidden = false; $('input[name=title]', form).focus(); };
+  $('#ntCancel', box).onclick = () => { form.hidden = true; };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const file = f.get('file');
+    const hasFile = file && file.size;
+    if (!String(f.get('body') || '').trim() && !hasFile) return toast('Mətn yazın və ya fayl seçin', true);
+    if (hasFile && file.size > 15 * 1024 * 1024) return toast('Fayl 15 MB-dan böyükdür', true);
+    if (hasFile && !NOTE_TYPES.includes(file.type) && !/\.pdf$/i.test(file.name)) return toast('Yalnız PDF və ya şəkil', true);
+    busy($('button[type=submit]', form), async () => {
+      let path = null;
+      if (hasFile) {
+        const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin';
+        path = `${session.user.id}/${randomId()}.${ext}`;
+        const { error: e1 } = await sb.storage.from('notes').upload(path, file, { contentType: file.type || 'application/pdf', upsert: false });
+        if (e1) throw /bucket|not found|policy|row-level/i.test(e1.message || '') ? new Error('Fayl yüklənmədi: Supabase-də 012_student_insights.sql işə salınıb? (' + e1.message + ')') : e1;
+      }
+      const to = f.get('to');
+      const row = { title: f.get('title').trim(), topic: String(f.get('topic') || '').trim() || null, body: String(f.get('body') || '').trim() || null,
+        class_id: to ? null : cls.id, student_id: to || null, file_path: path, file_name: hasFile ? file.name.slice(0, 200) : null, file_type: hasFile ? (file.type || 'application/pdf') : null };
+      const { error: e2 } = await sb.from('lesson_notes').insert(row);
+      if (e2) { if (path) sb.storage.from('notes').remove([path]).catch(() => {}); throw needSql(e2, '012_student_insights.sql'); }
+      toast('Qeyd əlavə olundu');
+      await classNotes(box, cls, students);
+    }).catch(fail);
+  };
+  $$('[data-ntdel]', box).forEach((btn) => btn.onclick = async () => {
+    const n = notes.find((x) => x.id === btn.dataset.ntdel);
+    if (!confirm(`«${n.title}» silinsin?`)) return;
+    const { error: e3 } = await sb.from('lesson_notes').delete().eq('id', n.id);
+    if (e3) return fail(e3);
+    if (n.file_path) sb.storage.from('notes').remove([n.file_path]).catch(() => {});
+    classNotes(box, cls, students).catch(fail);
+  });
+}
+
 async function classView(id) {
   const [{ data: cls, error }, { data: students }, { data: tests }] = await Promise.all([
     sb.from('classes').select('*').eq('id', id).single(),
@@ -892,6 +959,12 @@ async function classView(id) {
       <div class="card stat"><div class="label">Sinfin ortası</div><div class="value">${classAvg === null ? '—' : classAvg + '%'}</div></div>
       <div class="card stat"><div class="label">Açıq test</div><div class="value">${openTests}</div></div>
     </section>
+    <div class="exam-row card">
+      <span class="exam-ico" aria-hidden="true">🎓</span>
+      <label class="row small" style="gap:8px;flex-wrap:wrap">İmtahan tarixi <input type="date" id="examDate" value="${esc(cls.exam_date || '')}" style="min-height:40px;width:auto"></label>
+      <button class="btn small" id="saveExam">Saxla</button>
+      <span class="small muted" id="examLeft">${cls.exam_date ? daysLeftText(cls.exam_date) : 'Tarixi yazın: tələbələr öz səhifəsində geri sayımı görəcək.'}</span>
+    </div>
     <form id="addStudents" class="card stack" ${students.length ? 'hidden' : ''}>
       <h2>Şagird əlavə et</h2>
       <label class="field">Adlar<span class="hint">Hər sətirdə bir ad. Siyahını Excel və ya qeydlərdən yapışdıra bilərsiniz.</span>
@@ -902,6 +975,7 @@ async function classView(id) {
       <button type="button" class="seg-b on" data-ctab="st" role="tab">Şagirdlər <span class="seg-c">${students.length}</span></button>
       <button type="button" class="seg-b" data-ctab="ts" role="tab">Testlər <span class="seg-c">${(tests || []).length}</span></button>
       <button type="button" class="seg-b" data-ctab="mk" role="tab">📒 Səhv dəftəri</button>
+      <button type="button" class="seg-b" data-ctab="nt" role="tab">📚 Dərs qeydləri</button>
     </div>
     <section class="card stack" data-cpane="st">
       ${needsSql ? '<p class="notice">Şəxsi linklər üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>005_student_links.sql</strong> → Run.</p>' : ''}
@@ -927,12 +1001,21 @@ async function classView(id) {
           <span class="small muted">${sent} / ${target} göndərib</span><span class="mt-go">›</span></a>`; }).join('')}</div>`
         : '<div class="empty">Hələ test yoxdur.</div>'}
     </section>
+    <section class="card stack" data-cpane="nt" hidden id="ntPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
     <section class="card stack" data-cpane="mk" hidden id="mkPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
     <details class="danger-zone"><summary>Sinfi silmək</summary><p class="small muted">Sinif və şagird siyahısı silinir. Testlər və göndərilmiş nəticələr qalır.</p><button class="btn danger" id="delClass">Sinfi sil</button></details>`;
-  let mkLoaded = false;
+  let mkLoaded = false; let ntLoaded = false;
+  $('#saveExam').onclick = () => busy($('#saveExam'), async () => {
+    const v = $('#examDate').value || null;
+    const { error: e2 } = await sb.from('classes').update({ exam_date: v }).eq('id', id);
+    if (e2) throw needSql(e2, '012_student_insights.sql');
+    $('#examLeft').textContent = v ? daysLeftText(v) : 'Tarix silindi.';
+    toast('Yadda saxlandı');
+  }).catch(fail);
   $$('[data-ctab]').forEach((b) => b.onclick = () => {
     $$('[data-ctab]').forEach((x) => x.classList.toggle('on', x === b));
     $$('[data-cpane]').forEach((p) => { p.hidden = p.dataset.cpane !== b.dataset.ctab; });
+    if (b.dataset.ctab === 'nt' && !ntLoaded) { ntLoaded = true; classNotes($('#ntPane'), cls, students).catch((err) => { $('#ntPane').innerHTML = `<p class="notice">${esc(err.message)}</p>`; }); }
     if (b.dataset.ctab === 'mk' && !mkLoaded) { mkLoaded = true; classMistakes($('#mkPane'), students).catch((err) => { $('#mkPane').innerHTML = `<p class="notice">${esc(err.message)}</p>`; }); }
   });
   $('#showAdd').onclick = () => { $('#addStudents').hidden = false; $('textarea', $('#addStudents')).focus(); };
@@ -2427,7 +2510,7 @@ async function testsView() {
     ].filter(Boolean).join('');
     return `<article class="tcard${t.is_open ? ' is-open' : ''}">
       <div class="tc-main">
-        <div class="tc-top"><span class="tc-status">${t.is_open ? 'Açıq' : 'Bağlı'}</span><span class="small muted">${esc(fmtDue(t.created_at))}</span></div>
+        <div class="tc-top"><span class="tc-status">${t.is_open ? 'Açıq' : 'Bağlı'}</span>${t.kind === 'deneme' ? '<span class="tag deneme">🎯 Deneme</span>' : ''}<span class="small muted">${esc(fmtDue(t.created_at))}</span></div>
         <a class="tc-title" href="#/test/${t.id}">${esc(t.title)}</a>
         <div class="tc-chips">${chips}${t.student_id ? `<span class="tag book">fərdi: ${esc(studName[t.student_id] || 'şagird')}</span>` : ''}</div>
         <div class="tc-prog">${target
@@ -2480,6 +2563,7 @@ async function newTestView() {
       <section class="card stack"><h2><span class="step-n">1</span> Əsas məlumat</h2>
         <div class="form-grid">
           <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Kümeler · qısa yoxlama"></label>
+          <label class="field">Növ<select name="kind"><option value="homework">Test / ev tapşırığı</option><option value="deneme">🎯 Deneme (imtahan sınağı)</option></select><span class="hint">Deneme nəticələri tələbənin səhifəsində ayrıca, irəliləyişlə göstərilir.</span></label>
           <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz — ümumi link</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><span class="hint">Sinifsiz testdə şagird adını özü yazır.</span></label>
           <label class="field">Şagirdə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_submit' ? 'selected' : ''}>${v}</option>`).join('')}</select>
             <span class="hint">"Bağlananda" seçsəniz, test açıq olanda cavablar başqalarına ötürülməz.</span></label>
@@ -2594,9 +2678,10 @@ async function newTestView() {
       if (tl > 0) rec.time_limit_min = Math.min(300, tl);
       if (f.get('due_at')) rec.due_at = new Date(f.get('due_at')).toISOString();
       if (f.get('shuffle')) rec.shuffle = true;
+      if (f.get('kind') === 'deneme') rec.kind = 'deneme';
       const needs7 = rec.time_limit_min || rec.due_at || rec.shuffle;
       const { data: row, error: err } = await sb.from('tests').insert(rec).select().single();
-      if (err) throw needSql(err, needs7 ? '007_test_rules.sql' : '006_review.sql');
+      if (err) throw needSql(err, rec.kind ? '012_student_insights.sql' : needs7 ? '007_test_rules.sql' : '006_review.sql');
       toast('Test yaradıldı');
       go('#/test/' + row.id);
     }).catch(fail);
@@ -3200,7 +3285,7 @@ async function testResultsView(id) {
 
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>${esc(test.title)}</h1>
-      <p class="muted">${esc(test.classes?.name || 'Sinifsiz')} · ${questions.length} sual · ${test.is_open ? 'açıq' : 'bağlı'}${rules ? ' · ' + rules : ''}</p></div>
+      <p class="muted">${test.kind === 'deneme' ? '🎯 Deneme · ' : ''}${esc(test.classes?.name || 'Sinifsiz')} · ${questions.length} sual · ${test.is_open ? 'açıq' : 'bağlı'}${rules ? ' · ' + rules : ''}</p></div>
       <div class="row"><button class="btn primary" id="copy">Linki kopyala</button><button class="btn" id="pdf">PDF</button><button class="btn danger" id="del">Testi sil</button></div></div>
     <section class="grid res-stats">
       <div class="card stat"><div class="label">Göndərib</div><div class="value">${subs.length}${(roster || []).length ? `<span class="of"> / ${(roster || []).length}</span>` : ''}</div></div>
@@ -3526,6 +3611,48 @@ async function mistakesView(code, home) {
   show();
 }
 
+const fmtDayAz = (d) => { const x = new Date(d + 'T00:00:00'); return isNaN(x) ? '' : `${x.getDate()} ${AZ_MONTHS[x.getMonth()]} ${x.getFullYear()}`; };
+const pctOf = (r) => (r.total ? Math.round(r.score / r.total * 100) : 0);
+const barCls = (p) => (p >= 75 ? 'hi' : p >= 50 ? 'mid' : 'low');
+
+// Tələbə səhifəsi: deneme nəticələri, mövzu analizi, dərs qeydləri (012 yoxdursa heç biri göstərilmir)
+function studentInsightsHtml(an, notes, home) {
+  const out = [];
+  const res = an?.results || [];
+  const dn = res.filter((r) => r.kind === 'deneme');
+  if (dn.length) {
+    const last = dn[dn.length - 1], prev = dn[dn.length - 2];
+    const diff = prev ? pctOf(last) - pctOf(prev) : null;
+    out.push(`<section class="card stack deneme-card"><div class="row between"><h2>🎯 Deneme nəticələrim</h2>${diff === null ? '' : `<span class="tag ${diff >= 0 ? 'ai' : 'red'}">${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}% son denemedə</span>`}</div>
+      <div class="spark" aria-label="Deneme irəliləyişi">${dn.slice(-12).map((r) => `<span class="spark-b ${barCls(pctOf(r))}" style="height:${Math.max(6, pctOf(r))}%" title="${esc(r.title)}: ${pctOf(r)}%"></span>`).join('')}</div>
+      ${dn.slice().reverse().map((r) => { const wrong = Math.max(0, r.total - r.score - r.empty); return `<div class="dn-row"><span class="d-main"><strong>${esc(r.title)}</strong><span class="small muted">${fmtDate(r.at)}</span></span>
+        <span class="dn-cnt"><span class="c-ok">✓ ${r.score}</span><span class="c-bad">✗ ${wrong}</span><span class="c-empty">— ${r.empty}</span></span>${pctChip(pctOf(r))}</div>`; }).join('')}
+    </section>`);
+  }
+  const topics = (an?.topics || []).filter((t) => t.total > 0);
+  if (topics.length || res.length >= 2) {
+    const tp = topics.map((t) => ({ ...t, p: Math.round(t.right / t.total * 100) }));
+    const weak = tp.filter((t) => t.total >= 2 && t.p < 75).sort((a, b) => a.p - b.p).slice(0, 3);
+    const noteFor = (topic) => (notes || []).find((n) => n.topic && n.topic.toLocaleLowerCase('az') === topic.toLocaleLowerCase('az'));
+    out.push(`<section class="card stack"><h2>📊 Mənim analizim</h2>
+      ${res.length >= 2 ? `<div><div class="small muted">Son testlərim</div><div class="spark">${res.slice(-12).map((r) => `<span class="spark-b ${barCls(pctOf(r))}" style="height:${Math.max(6, pctOf(r))}%" title="${esc(r.title)}: ${pctOf(r)}%"></span>`).join('')}</div></div>` : ''}
+      ${weak.length ? `<div class="weak-box"><strong>Üzərində işlə:</strong>${weak.map((t) => { const n = noteFor(t.topic); return `<div class="weak-row"><span>${esc(t.topic)} — <strong>${t.p}%</strong></span>${n ? `<a class="small" href="#nt-${n.id}" data-nt="${n.id}">📚 Dərs qeydinə bax</a>` : ''}</div>`; }).join('')}</div>` : ''}
+      ${tp.length ? `<div class="small muted">Mövzular üzrə (cavabları açılmış testlərdən)</div><div class="sbars">${tp.slice().sort((a, b) => b.p - a.p).map((t) => `<div class="sbar"><span class="sbar-l">${esc(t.topic)}</span><span class="sbar-t"><span class="${barCls(t.p)}" style="width:${t.p}%"></span></span><span class="sbar-v">${t.p}% <small>${t.right}/${t.total}</small></span></div>`).join('')}</div>` : ''}
+    </section>`);
+  }
+  if (notes && notes.length) {
+    out.push(`<section class="card stack"><h2>📚 Dərs qeydlərim</h2>${notes.map((n) => {
+      const url = n.file_path ? noteUrl(n.file_path) : '';
+      const isImg = /^image\//.test(n.file_type || '');
+      return `<details class="nt-item" id="nt-${n.id}"><summary><span class="nt-head"><strong>${esc(n.title)}</strong><span class="small muted">${esc(fmtDue(n.created_at))}</span></span>
+          <span class="nt-meta">${n.topic ? `<span class="tag book">${esc(n.topic)}</span>` : ''}${n.personal ? '<span class="tag deneme">sənin üçün</span>' : ''}${n.file_path ? `<span class="tag">${n.file_type === 'application/pdf' ? '📄 PDF' : '🖼 şəkil'}</span>` : ''}</span></summary>
+        ${n.body ? `<div class="nt-body">${esc(n.body)}</div>` : ''}
+        ${url ? (isImg ? `<a href="${esc(url)}" target="_blank" rel="noopener"><img class="nt-img" src="${esc(url)}" alt="${esc(n.file_name || n.title)}" loading="lazy"></a>` : `<a class="btn block" href="${esc(url)}" target="_blank" rel="noopener">📄 ${esc(n.file_name || 'Faylı aç')}</a>`) : ''}
+      </details>`; }).join('')}</section>`);
+  }
+  return out.join('');
+}
+
 async function studentPortal(rawCode, testId, sub) {
   let code = String(rawCode || '').trim().toUpperCase();
   if (!code) {
@@ -3587,9 +3714,9 @@ async function studentPortal(rawCode, testId, sub) {
     return;
   }
 
-  const [{ data: me, error }, mk] = await Promise.all([
-    sb.rpc('student_portal', { p_code: code }),
-    Promise.resolve(sb.rpc('student_mistakes', { p_code: code })).then((r) => (r && !r.error ? r.data : null), () => null)
+  const soft = (fn) => Promise.resolve(sb.rpc(fn, { p_code: code })).then((r) => (r && !r.error ? r.data : null), () => null);
+  const [{ data: me, error }, mk, an, notes] = await Promise.all([
+    sb.rpc('student_portal', { p_code: code }), soft('student_mistakes'), soft('student_analysis'), soft('student_notes')
   ]);
   if (error || !me) {
     try { if (localStorage.getItem(CODE_KEY) === code) localStorage.removeItem(CODE_KEY); } catch (_) { /* */ }
@@ -3603,6 +3730,7 @@ async function studentPortal(rawCode, testId, sub) {
   $app.innerHTML = `<div class="student">
     <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
     <div><h1>Salam, ${esc(me.name)}</h1><p class="muted">${esc(me.class || '')}</p></div>
+    ${an?.exam_date ? `<div class="exam-chip">🎓 <span>${esc(daysLeftText(an.exam_date))}</span><small>${esc(fmtDayAz(an.exam_date))}</small></div>` : ''}
     <section class="card stack"><h2>Yazılacaq testlər${todo.length ? ` (${todo.length})` : ''}</h2>
       ${todo.length ? todo.map((t) => `<a class="portal-row" href="${home}/${t.id}">
           <span><strong>${esc(t.title)}</strong>${t.personal ? ' <span class="tag book">sənin üçün</span>' : ''}<span class="small muted"> · ${t.count} sual${t.time_limit_min ? ` · ⏱ ${t.time_limit_min} dəq` : ''}</span>
@@ -3617,6 +3745,7 @@ async function studentPortal(rawCode, testId, sub) {
       : +mk.open ? `<p class="muted">Dəftərdə <strong>${mk.open}</strong> sual var. Növbəti təkrar: <strong>${esc(fmtDue(mk.next_at))}</strong>.</p>`
       : '<p class="muted">Dəftər boşdur — bütün səhvlərini düzəltmisən! 🎉</p>'}
     </section>` : ''}
+${studentInsightsHtml(an, notes, home)}
     <section class="card stack"><div class="row between"><h2>Nəticələrim</h2>${avg === null ? '' : `<span class="tag ai">orta ${avg}%</span>`}</div>
       ${done.length ? done.map((t) => `<div class="portal-row">
           <span><strong>${esc(t.title)}</strong><span class="small muted"> · ${fmtDate(t.result.created_at)}</span>
@@ -3626,6 +3755,12 @@ async function studentPortal(rawCode, testId, sub) {
     </section>
     <p class="small muted" style="text-align:center"><a href="#/privacy">Məxfilik siyasəti</a></p>
   </div>`;
+  // "Dərs qeydinə bax": səhifə daxilində aç (hash marşrutu dəyişməsin)
+  $$('[data-nt]').forEach((l) => l.onclick = (e) => {
+    e.preventDefault();
+    const d = document.getElementById('nt-' + l.dataset.nt);
+    if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  });
 }
 
 function loadScript(src) {

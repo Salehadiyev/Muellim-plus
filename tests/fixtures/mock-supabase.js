@@ -23,6 +23,7 @@ class Query {
   then(res, rej) { try { res(this.exec()); } catch (e) { rej(e); } }
   exec() {
     const db = load();
+    if (this.table === 'lesson_notes' && !db.lesson_notes) return { data: null, error: { message: 'relation "public.lesson_notes" does not exist' } };
     if (this.table === 'mistakes' && !db.mistakes) return { data: null, error: { message: 'relation "public.mistakes" does not exist' } };
     let t = db[this.table] = db[this.table] || [];
     if (this.op === 'insert') {
@@ -70,6 +71,11 @@ export function createClient() {
       signOut: async () => { localStorage.removeItem('mocksession'); fire('SIGNED_OUT', null); return {}; }
     },
     from: (t) => new Query(t),
+    storage: { from: (bucket) => ({
+      upload: async (path, file, o) => { const db = load(); if (!db.lesson_notes) return { data: null, error: { message: 'Bucket not found' } }; db._files = db._files || []; db._files.push({ bucket, path, type: o?.contentType, size: file?.size }); save(db); return { data: { path }, error: null }; },
+      remove: async (paths) => { const db = load(); db._files = (db._files || []).filter((f) => !paths.includes(f.path)); save(db); return { data: null, error: null }; },
+      getPublicUrl: (path) => ({ data: { publicUrl: 'https://files.test/storage/v1/object/public/' + bucket + '/' + path } })
+    }) },
     rpc: async (fn, a) => {
       const db = load();
       if (fn === 'ai_gate') {
@@ -87,6 +93,22 @@ export function createClient() {
         const overdue = (t) => !!t.due_at && Date.now() > new Date(t.due_at).getTime() + 120000;
         const vis = (t) => t.class_id === st?.class_id && (!t.student_id || t.student_id === st.id);
         const rvOk = (t) => (t.review_mode || 'never') === 'after_submit' || (t.review_mode === 'after_close' && !t.is_open);
+        if (fn === 'student_analysis' || fn === 'student_notes') {
+          if (!Array.isArray(db.lesson_notes)) return { data: null, error: { message: 'Could not find the function public.' + fn } };
+          if (!st) return { data: null, error: { message: 'Link etibarsızdır' } };
+          if (fn === 'student_notes') return { data: db.lesson_notes.filter((n) => n.student_id === st.id || (!n.student_id && n.class_id === st.class_id)).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))
+            .map((n) => ({ id: n.id, title: n.title, topic: n.topic, body: n.body, file_path: n.file_path, file_name: n.file_name, file_type: n.file_type, personal: !!n.student_id, created_at: n.created_at })), error: null };
+          const cls = db.classes.find((c) => c.id === st.class_id);
+          const subs = db.submissions.filter((x) => x.student_id === st.id).sort((x, y) => (x.created_at > y.created_at ? 1 : -1));
+          const rv = (t) => (t.review_mode || 'never') === 'after_submit' || (t.review_mode === 'after_close' && !t.is_open);
+          const tp = {}; const results = [];
+          subs.forEach((x) => { const t = db.tests.find((y) => y.id === x.test_id); if (!t) return;
+            const qs = t.question_ids.map((id) => db.questions.find((q) => q.id === id)).filter((q) => q && q.qtype === 'mcq');
+            results.push({ title: t.title, kind: t.kind || 'homework', score: x.score, total: x.total, empty: qs.filter((q) => !String(x.answers[q.id] || '').trim()).length, at: x.created_at });
+            if (rv(t)) qs.forEach((q) => { const k = (q.topic || '').trim() || 'Digər'; const o = tp[k] || (tp[k] = { topic: k, right: 0, total: 0 }); o.total++; if (String(x.answers[q.id] || '').trim().toLowerCase() === q.answer.trim().toLowerCase()) o.right++; }); });
+          const ex = cls?.exam_date || null;
+          return { data: { exam_date: ex, days_left: ex ? Math.round((new Date(ex + 'T00:00:00') - new Date(new Date().toDateString())) / 864e5) : null, topics: Object.values(tp), results }, error: null };
+        }
         if (fn === 'student_mistakes' || fn === 'student_answer_mistake') {
           if (!Array.isArray(db.mistakes)) return { data: null, error: { message: 'Could not find the function public.' + fn } };
           if (!st) return { data: null, error: { message: 'Link etibarsızdır' } };

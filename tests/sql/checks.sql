@@ -185,4 +185,43 @@ set role anon;
 select t_ok(student_mistakes('AAAAAAAA') #>> '{items,0,question,id}' = '00000000-0000-4000-8000-0000000000e1', 'test bağlanandan sonra təkrara verilir');
 reset role;
 
+-- ---------- 012: deneme, analiz, dərs qeydləri ----------
+reset role;
+update tests set is_open = true, kind = 'deneme' where id = '00000000-0000-4000-8000-0000000000f1';
+update classes set exam_date = current_date + 30 where id = '00000000-0000-4000-8000-0000000000c1';
+update questions set topic = 'Fonksiyonlar' where id = '00000000-0000-4000-8000-0000000000e2';
+set role anon;
+select t_ok((student_analysis('AAAAAAAA') ->> 'days_left')::int = 30, 'imtahana qalan gün');
+select t_ok(exists (select 1 from jsonb_array_elements(student_analysis('AAAAAAAA') -> 'results') r where r ->> 'kind' = 'deneme' and (r ->> 'score')::int = 1 and (r ->> 'empty')::int = 0), 'deneme nəticəsi: bal və boş sayı');
+select t_ok(exists (select 1 from jsonb_array_elements(student_analysis('AAAAAAAA') -> 'topics') r where r ->> 'topic' = 'Fonksiyonlar' and (r ->> 'right')::int = 0 and (r ->> 'total')::int = 1), 'mövzu analizi (açıq, göndərən kimi göstər testi)');
+select t_ok(not exists (select 1 from jsonb_array_elements(student_analysis('BBBBBBBB') -> 'topics') r where (r ->> 'total')::int > 0 and r ->> 'topic' = 'Fonksiyonlar'), 'başqa tələbənin analizi qarışmır');
+reset role;
+update tests set review_mode = 'after_close' where id = '00000000-0000-4000-8000-0000000000f1';
+set role anon;
+select t_ok(not exists (select 1 from jsonb_array_elements(student_analysis('AAAAAAAA') -> 'topics') r where r ->> 'topic' = 'Fonksiyonlar'), 'açıq "bağlananda" testi mövzu analizinə düşmür (cavab sızmır)');
+reset role;
+update tests set review_mode = 'after_submit' where id = '00000000-0000-4000-8000-0000000000f1';
+-- dərs qeydləri: müəllim yazır, öz tələbəsi görür
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+insert into lesson_notes (class_id, title, topic, body) values ('00000000-0000-4000-8000-0000000000c1', 'Fonksiyonlar 1', 'Fonksiyonlar', 'f(x) tərifi');
+insert into lesson_notes (student_id, title, body) values ('00000000-0000-4000-8000-0000000000b2', 'Nərgiz üçün', 'fərdi');
+select t_err($q$ insert into lesson_notes (class_id, title) values ('00000000-0000-4000-8000-0000000000c2', 'başqasının sinfi') $q$, 'başqasının sinfinə qeyd yazmaq olmur');
+select t_err($q$ insert into lesson_notes (title) values ('heç kimə') $q$, 'qeyd sinfə və ya tələbəyə bağlı olmalıdır');
+insert into storage.objects (bucket_id, name) values ('notes', auth.uid()::text || '/a.pdf');
+select t_err($q$ insert into storage.objects (bucket_id, name) values ('notes', '00000000-0000-4000-8000-0000000000a2/x.pdf') $q$, 'başqasının qovluğuna fayl yazmaq olmur');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+select t_ok((select count(*) from lesson_notes) = 0, 'başqa müəllim qeydləri görmür');
+delete from storage.objects where bucket_id = 'notes';
+set role anon;
+reset request.jwt.claim.sub;
+select t_ok((select count(*) from lesson_notes) = 0, 'anon qeyd cədvəlini görmür');
+select t_err($q$ insert into storage.objects (bucket_id, name) values ('notes', 'x/y.pdf') $q$, 'anon fayl yükləyə bilmir');
+select t_ok(jsonb_array_length(student_notes('AAAAAAAA')) = 1, 'Əli yalnız sinif qeydini görür');
+select t_ok(jsonb_array_length(student_notes('BBBBBBBB')) = 2, 'Nərgiz sinif + fərdi qeydi görür');
+select t_ok(jsonb_array_length(student_notes('CCCCCCCC')) = 0, 'başqa sinif görmür');
+reset role;
+select t_ok((select count(*) from storage.objects) = 1, 'başqa müəllim faylı silə bilmədi');
+select t_ok((select public from storage.buckets where id = 'notes'), 'qeyd qovluğu yaradıldı');
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

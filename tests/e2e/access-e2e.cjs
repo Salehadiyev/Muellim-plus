@@ -23,8 +23,8 @@ const errs = []; const ok = (m) => console.log('✓', m); const fail = (m) => { 
   await a.reload(); await a.waitForSelector('text=Açıq testlər');
   console.log('  dashboard warning:', await a.$eval('.hero + p', (e) => e.textContent.replace(/\s+/g, ' ').trim()));
   console.log('  nav:', await a.$$eval('nav .item', (x) => x.map((e) => e.textContent.trim()).join(' | ')));
-  await a.click('nav >> text=Ayarlar'); await a.waitForSelector('text=Müəllimlər ›'); await a.screenshot({ path: path.join(T, 'set1.png'), fullPage: true });
-  await a.click('text=Müəllimlər ›'); await a.waitForSelector('[data-save]'); ok('admin: settings → teachers');
+  await a.click('nav >> text=Ayarlar'); await a.waitForSelector('#errCard'); await a.screenshot({ path: path.join(T, 'set1.png'), fullPage: true });
+  await a.goto('http://app.test/#/teachers'); await a.waitForSelector('[data-save]'); ok('admin: settings → teachers');
   console.log('  rows:', await a.$$eval('tbody tr', (x) => x.map((e) => e.textContent.replace(/\s+/g, ' ').trim())), '| notice:', await a.$eval('.notice', (e) => e.textContent));
   await a.screenshot({ path: path.join(T, 'ac1.png') });
   const r2 = 'tr[data-uid=u2]'; await a.check(`${r2} [data-f=approved]`); await a.fill(`${r2} [data-f=daily_limit_usd]`, '1'); await a.fill(`${r2} [data-f=monthly_limit_usd]`, '10'); await a.click(`${r2} [data-save]`);
@@ -38,7 +38,7 @@ const errs = []; const ok = (m) => console.log('✓', m); const fail = (m) => { 
   await p.reload(); await p.waitForSelector('text=Təsdiq gözlənilir'); await p.screenshot({ path: path.join(T, 'ac2.png') });
   await p.goto('http://app.test/#/bank'); await p.waitForSelector('text=Təsdiq gözlənilir'); ok('unapproved: waiting screen on every page');
   await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.teacher_access[1].approved = true; localStorage.setItem('mockdb', JSON.stringify(d)); });
-  await p.click('#recheck'); await p.waitForSelector('nav'); await p.click('nav >> text=Ayarlar'); await p.waitForSelector('text=Hesab'); if (await p.isVisible('text=Müəllimlər ›')) fail('non-admin sees admin'); ok('after approval: app opens, no admin menu');
+  await p.click('#recheck'); await p.waitForSelector('nav'); await p.click('nav >> text=Ayarlar'); await p.waitForSelector('text=Hesab'); if (await p.isVisible('#errCard')) fail('non-admin sees admin'); ok('after approval: app opens, no admin menu');
   // student pages unaffected
   await p.goto('http://app.test/#/s'); await p.waitForSelector('#codeForm'); ok('student pages not gated');
   // without 008

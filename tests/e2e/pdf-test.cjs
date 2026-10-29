@@ -30,7 +30,7 @@ const reply = (b) => {
   await p.goto('http://app.test/'); await p.evaluate((db) => { localStorage.setItem('mockdb', JSON.stringify(db)); localStorage.setItem('mocksession', JSON.stringify({ access_token: 'tok', user: { id: 'u1', email: 'a@b.az' } })); }, DB);
   await p.goto('http://app.test/#/newtest'); await p.reload(); await p.waitForSelector('#tqPicker input[type=file]', { state: 'attached' }); await p.click('[data-tab=pdf]');
   await p.setInputFiles('#tqPicker input[type=file]', path.join(FX, 'page.jpg')); await p.waitForSelector('#tqPicker canvas');
-  const crop = async (y1, y2) => { const bx = await (await p.$('#tqPicker canvas')).boundingBox(); await p.mouse.move(bx.x + 30, bx.y + y1); await p.mouse.down(); await p.mouse.move(bx.x + bx.width - 30, bx.y + y2, { steps: 4 }); await p.mouse.up(); await p.waitForSelector('.crop-choice:not([hidden])'); };
+  const crop = async (y1, y2) => { await (await p.$('#tqPicker canvas')).scrollIntoViewIfNeeded(); const bx = await (await p.$('#tqPicker canvas')).boundingBox(); await p.mouse.move(bx.x + 30, bx.y + y1); await p.mouse.down(); await p.mouse.move(bx.x + bx.width - 30, bx.y + y2, { steps: 4 }); await p.mouse.up(); await p.waitForSelector('.crop-choice:not([hidden])'); };
   await crop(60, 260); await p.screenshot({ path: path.join(T, 'pdf1-choice.png') });
   await p.click('text=Orijinalı təmiz çıxart');
   await crop(280, 480); await p.click('.crop-choice >> text=AI ilə yarat'); await p.selectOption('.crop-choice [data-n]', '3'); await p.click('.crop-choice >> text=Yeni quruluş');
