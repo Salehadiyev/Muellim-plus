@@ -355,3 +355,12 @@ body.capturing .sheet { box-shadow: none; }
 .rv-mark { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; text-align: left; }
 #rvList > [hidden] { display: none; }
+
+/* Yeni test */
+.step-n { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; margin-right: 6px; vertical-align: 2px; }
+.seg { display: flex; gap: 4px; padding: 4px; background: #EEF1F5; border-radius: 12px; }
+.seg-b { flex: 1; min-height: 44px; border: 0; border-radius: 9px; background: transparent; font: inherit; font-weight: 600; color: #5B6577; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.seg-b.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(20, 32, 48, .12); }
+.seg-c { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--accent-soft); color: var(--accent-dark); font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+[data-pane][hidden] { display: none; }
+.sticky-bar { position: sticky; bottom: 12px; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: #fff; border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: 0 8px 24px rgba(20, 32, 48, .14); }

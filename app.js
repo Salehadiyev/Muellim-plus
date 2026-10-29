@@ -232,10 +232,10 @@ function route() {
 
   const views = {
     '': dashboard, classes: classesView, class: classView, bank: bankView,
-    ai: aiView, book: bookView, tests: testsView, test: testResultsView, student: studentWorkView
+    ai: aiView, book: bookView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView
   };
   const view = views[page] || dashboard;
-  const navKey = page === 'class' || page === 'student' ? 'classes' : page === 'test' ? 'tests' : (views[page] ? page : '');
+  const navKey = page === 'class' || page === 'student' ? 'classes' : page === 'test' || page === 'newtest' ? 'tests' : (views[page] ? page : '');
   shell(navKey);
   window.scrollTo(0, 0);
   view(id).catch(fail);
@@ -543,7 +543,7 @@ async function bankView() {
   $('#fText').oninput = (e) => { filter.text = e.target.value; renderList(); };
   $('#fSource').onchange = (e) => { filter.source = e.target.value; renderList(); };
   $('#fDiff').onchange = (e) => { filter.difficulty = e.target.value; renderList(); };
-  $('#makeTest').onclick = () => { pendingTestIds = [...selected]; go('#/tests'); };
+  $('#makeTest').onclick = () => { pendingTestIds = [...selected]; go('#/newtest'); };
   $('#fExam').onchange = (e) => { filter.exam = e.target.value; renderList(); };
   $('#fStatus').onchange = (e) => { filter.status = e.target.value; renderList(); };
   $('#selAll').onclick = () => { visible.forEach((q) => selected.add(q.id)); updateBtn(); renderList(); };
@@ -1594,78 +1594,138 @@ async function bookView() {
 
 // ================= Testlər =================
 
+const testLink = (id) => appBase() + '#/t/' + id;
+
 async function testsView() {
-  const [{ data: tests, error }, { data: classes }, { data: questions }, { data: subs }] = await Promise.all([
+  const [{ data: tests, error }, { data: subs }] = await Promise.all([
     sb.from('tests').select('id, title, is_open, class_id, question_ids, created_at, classes(name)').order('created_at', { ascending: false }),
-    sb.from('classes').select('id, name').order('name'),
-    sb.from('questions').select('*').order('created_at', { ascending: false }).limit(500),
     sb.from('submissions').select('test_id')
   ]);
   if (error) throw error;
   const subCount = {};
   (subs || []).forEach((s) => { subCount[s.test_id] = (subCount[s.test_id] || 0) + 1; });
-  const preset = new Set(pendingTestIds);
-  pendingTestIds = [];
-  const link = (id) => location.origin + location.pathname + '#/t/' + id;
 
   view().innerHTML = `
-    <div class="page-head"><div><h1>Testlər</h1><p class="muted">Test yaradın. Sinfə bağlı test şagirdlərin şəxsi linkində avtomatik görünür. Ümumi linki də göndərmək olar.</p></div></div>
-    <form class="card stack" id="newTest"><h2>Yeni test</h2>
-      <div class="form-grid">
-        <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Tənliklər · qısa yoxlama"></label>
-        <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz (şagird adını özü yazır)</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
-        <label class="field">Şagirdə düzgün cavabları və həlli<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_close' ? 'selected' : ''}>${v}</option>`).join('')}</select>
-          <span class="hint">Şəxsi linklə yazan şagird öz səhvlərini görür. "Bağlananda" — test bağlanana qədər cavablar başqalarına ötürülməsin.</span></label>
-      </div>
-      <div class="row between"><strong>Suallar · <span id="selCount">${preset.size}</span> seçilib · bankda ${(questions || []).length}</strong>${questions?.length ? '' : '<a href="#/ai">Əvvəlcə sual yaradın</a>'}</div>
-      <div class="pdf-box stack">
-        <div class="row between"><strong>Kitabdan / PDF-dən sual</strong>${modelPicker()}</div>
-        <p class="muted small">PDF və ya şəkil aç, sualı barmaqla çərçivəyə al: təmiz orijinalını çıxart və ya AI ilə yenisini yarat. Hazır suallar testə əlavə olunur.</p>
-        <div id="tqPicker" class="stack"></div>
-        <div id="tqPdf"></div>
-      </div>
-      ${questions?.length ? `<div class="row"><input type="search" id="tqFind" placeholder="Axtar: mətn və ya mövzu" style="flex:1;min-width:180px">
-        <button type="button" class="btn small" id="tqAll">Görünənləri seç</button><button type="button" class="btn small" id="tqNone">Seçimi sil</button></div>
-        <p class="muted small">Suala basanda tam halı açılır.</p>` : ''}
-      <div class="mini-grid" id="tqList">
-        ${(questions || []).map((q) => `<div class="mini" data-find="${esc(((q.body || '') + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az'))}">${miniQ(q, q.id, preset.has(q.id))}</div>`).join('') || '<div class="empty">Sual bankı boşdur.</div>'}
-      </div>
-      <div><button class="btn primary" type="submit">Testi yarat</button></div>
-    </form>
-    <section class="card stack"><h2>Mövcud testlər</h2>
-      ${tests.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sinif</th><th>Sual</th><th>Nəticə</th><th>Status</th><th></th></tr></thead><tbody>
+    <div class="page-head"><div><h1>Testlər</h1><p class="muted">Sinfə bağlı test şagirdlərin şəxsi linkində avtomatik görünür.</p></div>
+      <a class="btn primary" href="#/newtest">+ Yeni test</a></div>
+    <section class="card stack">
+      ${tests.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sinif</th><th>Sual</th><th>Göndərən</th><th>Status</th><th></th></tr></thead><tbody>
         ${tests.map((t) => `<tr>
           <td><a href="#/test/${t.id}"><strong>${esc(t.title)}</strong></a><div class="small muted">${fmtDate(t.created_at)}</div></td>
           <td>${esc(t.classes?.name || '—')}</td><td>${t.question_ids.length}</td><td>${subCount[t.id] || 0}</td>
           <td><button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}">${t.is_open ? 'Açıq · bağla' : 'Bağlı · aç'}</button></td>
-          <td><button class="btn small primary" data-copy="${t.id}">Linki kopyala</button></td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">Hələ test yoxdur.</div>'}
+          <td><a class="btn small" href="#/test/${t.id}">Nəticələr</a></td></tr>`).join('')}
+      </tbody></table></div>` : `<div class="empty">Hələ test yoxdur. <a href="#/newtest">İlk testi yaradın</a>.</div>`}
     </section>`;
+  $$('[data-toggle]').forEach((b) => b.onclick = async () => {
+    const { error: err } = await sb.from('tests').update({ is_open: b.dataset.open !== 'true' }).eq('id', b.dataset.toggle);
+    if (err) return fail(err);
+    route();
+  });
+}
+
+// Yeni test: 1) əsas məlumat 2) suallar (bankdan və ya PDF-dən) 3) yarat
+async function newTestView() {
+  const [{ data: classes }, { data: questions, error }] = await Promise.all([
+    sb.from('classes').select('id, name').order('name'),
+    sb.from('questions').select('*').order('created_at', { ascending: false }).limit(500)
+  ]);
+  if (error) throw error;
+  const preset = new Set(pendingTestIds);
+  pendingTestIds = [];
+  const qs = questions || [];
+  const topics = [...new Set(qs.map((q) => q.topic).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'az'));
+
+  view().innerHTML = `
+    <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>Yeni test</h1></div></div>
+    <form id="newTest" class="stack">
+      <section class="card stack"><h2><span class="step-n">1</span> Əsas məlumat</h2>
+        <div class="form-grid">
+          <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Kümeler · qısa yoxlama"></label>
+          <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz (ümumi link, şagird adını yazır)</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="field">Şagirdə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_close' ? 'selected' : ''}>${v}</option>`).join('')}</select>
+            <span class="hint">"Bağlananda" — test açıq olanda cavablar başqalarına ötürülməsin.</span></label>
+        </div>
+      </section>
+
+      <section class="card stack"><h2><span class="step-n">2</span> Suallar</h2>
+        <div class="seg" role="tablist">
+          <button type="button" class="seg-b on" data-tab="bank" role="tab">Sual bankından <span class="seg-c" id="cBank">0</span></button>
+          <button type="button" class="seg-b" data-tab="pdf" role="tab">Kitabdan / PDF-dən <span class="seg-c" id="cPdf">0</span></button>
+        </div>
+
+        <div data-pane="bank" class="stack">
+          ${qs.length ? `<div class="row">
+              <input type="search" id="tqFind" placeholder="Axtar: mətn və ya mövzu" style="flex:1;min-width:180px">
+              ${topics.length ? `<select id="tqTopic" style="min-height:44px;max-width:220px"><option value="">Bütün mövzular</option>${topics.map((t) => `<option>${esc(t)}</option>`).join('')}</select>` : ''}
+              <label class="row small" style="gap:6px"><input type="checkbox" id="tqOnly"> Yalnız seçilənlər</label>
+            </div>
+            <div class="row between"><span class="small muted">Suala basanda tam halı açılır.</span>
+              <span class="row"><button type="button" class="btn small" id="tqAll">Görünənləri seç</button><button type="button" class="btn small" id="tqNone">Seçimi sil</button></span></div>
+            <div class="mini-grid" id="tqList">
+              ${qs.map((q) => `<div class="mini" data-topic="${esc(q.topic || '')}" data-find="${esc(((q.body || '') + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az'))}">${miniQ(q, q.id, preset.has(q.id))}</div>`).join('')}
+            </div>` : '<div class="empty">Sual bankı boşdur. "Kitabdan / PDF-dən" bölməsindən sual əlavə edin və ya <a href="#/ai">AI ilə yaradın</a>.</div>'}
+        </div>
+
+        <div data-pane="pdf" class="stack" hidden>
+          <div class="row between"><p class="muted small" style="margin:0">PDF və ya şəkil aç, sualı barmaqla çərçivəyə al. Aşağıda seçim çıxacaq: təmiz orijinal və ya AI ilə yeni sual.</p>${modelPicker()}</div>
+          <div id="tqPicker" class="stack"></div>
+          <div id="tqPdf"></div>
+        </div>
+      </section>
+
+      <div class="sticky-bar">
+        <span><strong id="selCount">0</strong> sual seçilib<span class="small muted" id="selSplit"></span></span>
+        <button class="btn primary" type="submit">Testi yarat</button>
+      </div>
+    </form>`;
 
   const form = $('#newTest');
-  const countSel = () => { $('#selCount').textContent = $$('.check:checked', form).length; };
+  const pdf = pdfQuestions($('#tqPicker'), $('#tqPdf'));
+  const countSel = () => {
+    const nb = $$('#tqList .check:checked', form).length;
+    const np = pdf.selected().length;
+    $('#selCount').textContent = nb + np;
+    $('#cBank').textContent = nb;
+    $('#cPdf').textContent = np;
+    $('#selSplit').textContent = nb && np ? ` · bankdan ${nb}, PDF-dən ${np}` : '';
+  };
   form.addEventListener('pdfchange', countSel);
-  form.addEventListener('change', (e) => { if (e.target.classList.contains('check')) countSel(); });
-  const qById = Object.fromEntries((questions || []).map((q) => [q.id, q]));
+  form.addEventListener('change', (e) => { if (e.target.classList.contains('check')) { countSel(); filter(); } });
+  $$('[data-tab]').forEach((b) => b.onclick = () => {
+    $$('[data-tab]').forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== b.dataset.tab; });
+  });
+  const qById = Object.fromEntries(qs.map((q) => [q.id, q]));
   bindMini(form, (id) => ({ q: qById[id] }));
+  const filter = () => {
+    if (!$('#tqFind')) return;
+    const t = $('#tqFind').value.trim().toLocaleLowerCase('az');
+    const tp = $('#tqTopic')?.value || '';
+    const only = $('#tqOnly').checked;
+    $$('#tqList .mini').forEach((m) => {
+      m.hidden = (t && !m.dataset.find.includes(t)) || (tp && m.dataset.topic !== tp) || (only && !$('.check', m).checked);
+    });
+  };
   if ($('#tqFind')) {
-    $('#tqFind').oninput = (e) => {
-      const t = e.target.value.trim().toLocaleLowerCase('az');
-      $$('#tqList .mini').forEach((m) => { m.hidden = !!t && !m.dataset.find.includes(t); });
-    };
+    $('#tqFind').oninput = filter;
     $('#tqFind').onkeydown = (e) => { if (e.key === 'Enter') e.preventDefault(); };
+    if ($('#tqTopic')) $('#tqTopic').onchange = filter;
+    $('#tqOnly').onchange = filter;
     $('#tqAll').onclick = () => { $$('#tqList .mini:not([hidden]) .check').forEach((c) => { c.checked = true; }); countSel(); };
-    $('#tqNone').onclick = () => { $$('#tqList .check').forEach((c) => { c.checked = false; }); countSel(); };
+    $('#tqNone').onclick = () => { $$('#tqList .check').forEach((c) => { c.checked = false; }); countSel(); filter(); };
   }
   bindModelPicker(form);
-  const pdf = pdfQuestions($('#tqPicker'), $('#tqPdf'));
+  countSel();
+
   form.onsubmit = (e) => {
     e.preventDefault();
+    const f = new FormData(form);
+    if (!String(f.get('title') || '').trim()) { $('input[name=title]', form).focus(); return toast('Testin adını yazın', true); }
     if (pdf.busy()) return toast('PDF sualları hələ hazırlanır, bir az gözləyin', true);
     const ids = $$('#tqList .check:checked', form).map((c) => c.dataset.id);
     const extra = pdf.selected();
     if (!ids.length && !extra.length) return toast('Ən azı bir sual seçin', true);
-    const f = new FormData(form);
     busy($('button[type=submit]', form), async () => {
       for (const src of ['book', 'ai']) {
         const list = extra.filter((q) => q._source === src);
@@ -1675,16 +1735,10 @@ async function testsView() {
       if (f.get('review_mode') && f.get('review_mode') !== 'never') rec.review_mode = f.get('review_mode');
       const { data: row, error: err } = await sb.from('tests').insert(rec).select().single();
       if (err) throw needSql(err, '006_review.sql');
-      await copyText(link(row.id));
-      route();
+      toast('Test yaradıldı');
+      go('#/test/' + row.id);
     }).catch(fail);
   };
-  $$('[data-copy]').forEach((b) => b.onclick = () => copyText(link(b.dataset.copy)));
-  $$('[data-toggle]').forEach((b) => b.onclick = async () => {
-    const { error: err } = await sb.from('tests').update({ is_open: b.dataset.open !== 'true' }).eq('id', b.dataset.toggle);
-    if (err) return fail(err);
-    route();
-  });
 }
 
 // ================= Şagird işinin baxışı (müəllim və şagird üçün ortaq) =================
