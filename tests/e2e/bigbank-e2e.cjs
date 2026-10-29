@@ -1,0 +1,32 @@
+const { chromium } = require(process.env.PW || 'playwright');
+const path = require('path'); const fs = require('fs');
+const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
+const ROOT = path.join(__dirname, '..', '..');
+const fig = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="5" y="5" width="90" height="90" fill="none" stroke="#000"/></svg>';
+const N = 2300;
+const DB = { classes: [], students: [], tests: [], submissions: [], ai_usage: [],
+  questions: Array.from({ length: N }, (_, i) => ({ id: 'q' + i, teacher_id: 'u1', body: `Sual nömrə ${i}` + (i % 100 === 7 ? ' kümeler' : ''), topic: i % 2 ? 'Kümeler' : 'Fonksiyon', qtype: 'mcq', options: ['1', '2', '3', '4', '5'], answer: '2', option_figures: [], figure: i < 3 ? fig : null, source: 'ai', difficulty: 'orta', exam: 'tryos', created_at: new Date(Date.now() - i * 1000).toISOString() })) };
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1024, height: 1000 } }); const errs = [];
+  await ctx.route('**/*', (route) => { const u = new URL(route.request().url());
+    if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : '' });
+    if (u.hostname !== 'app.test') return route.abort();
+    if (u.pathname === '/api/config') return route.fulfill({ json: { supabaseUrl: 'x', supabaseAnonKey: 'k', models: [] } });
+    const f = path.join(ROOT, u.pathname === '/' ? 'index.html' : u.pathname); route.fulfill({ contentType: f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html', body: fs.readFileSync(f) }); });
+  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept());
+  await p.goto('http://app.test/'); await p.evaluate((d) => { localStorage.setItem('mockdb', JSON.stringify(d)); localStorage.setItem('mocksession', JSON.stringify({ access_token: 'tok', user: { id: 'u1', email: 'a@b.az' } })); }, DB);
+  const t0 = Date.now(); await p.goto('http://app.test/#/bank'); await p.reload(); await p.waitForSelector('#list .q');
+  console.log('head:', await p.textContent('.page-head p'), '| rendered:', await p.$$eval('#list .q', (x) => x.length), '| figs:', await p.$$eval('#list .q-fig svg', (x) => x.length), '| ms:', Date.now() - t0);
+  await p.click('#moreBtn'); await p.waitForFunction(() => document.querySelectorAll('#list .q').length === 100);
+  console.log('after more:', await p.$$eval('#list .q', (x) => x.length), '|', await p.textContent('#more'));
+  await p.fill('#fText', 'kümeler sual'); await p.fill('#fText', 'nömrə 2299'); await p.waitForFunction(() => document.querySelectorAll('#list .q').length === 1);
+  console.log('search one:', await p.textContent('#list .q .q-text'));
+  await p.fill('#fText', ''); await p.click('#selAll'); console.log('select all visible:', await p.textContent('#makeTest'));
+  console.log('✓ big bank paged');
+  await p.goto('http://app.test/#/newtest'); await p.waitForSelector('#tqList .mini');
+  console.log('newtest cards:', await p.$$eval('#tqList .mini', (x) => x.length));
+  await p.click('#tqList .mini >> nth=1500 >> .mini-open'); await p.waitForSelector('#qDialog[open]');
+  console.log('dialog full question:', (await p.textContent('#qDialog .q-text')).trim()); await p.click('#qDialog [data-close]');
+  console.log('✓ new test with big bank');
+  console.log(errs.length ? errs : 'NO ERRORS'); await b.close();
+})().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

@@ -20,6 +20,11 @@ const tests = {
   'e2e/flow3.cjs': [OK, /bank approve badge: true/],
   'e2e/tryos-e2e.cjs': [OK, /student figs: 4 opt figs: 10/],
   'e2e/usage-ui.cjs': [OK, /Cəmi \| 16 \| 3 \| 13/],
+  'e2e/account-e2e.cjs': [OK, /forgot password sends link/, /recovery link → new password → app/, /expired session → back to login/],
+  'e2e/csp-e2e.cjs': [OK, /pdf rendered: true/, /csp violations: \[\]/],
+  'e2e/data-e2e.cjs': [OK, /privacy page public/, /export all data \(paged\)/, /csp: \[\]/],
+  'e2e/bigbank-e2e.cjs': [OK, /head: 2300 sual/, /rendered: 50/, /after more: 100/, /search one: Sual nömrə 2299/, /Seçilənlərdən test \(2300\)/, /✓ new test with big bank/],
+  'e2e/errors-e2e.cjs': [OK, /network error → clear internet message/, /only unexpected errors logged/, /admin sees and clears errors/],
   // server (api/ai.js, saxta provayderlər)
   'server/srv2.mjs': [/verify disagree -> false/, /no render -> false/, /izomorf omits dup rule: true/],
   'server/clean.mjs': [/4-option clean copy: 200 4 4/, /no image: 400/],

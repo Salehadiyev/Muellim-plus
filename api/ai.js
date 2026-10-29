@@ -114,8 +114,25 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error(err);
-    return res.status(err.status || 500).json({ error: err.publicMessage || 'AI xətası. Bir az sonra yenidən yoxlayın.' });
+    const status = err.status || 500;
+    if (status >= 500) await logServerError(req, err);
+    return res.status(status).json({ error: err.publicMessage || 'AI xətası. Bir az sonra yenidən yoxlayın.' });
   }
+}
+
+// Server səhvini jurnala yaz (009). Açarlar və gizli məlumat yazılmır: yalnız ictimai mesaj və əməliyyat.
+async function logServerError(req, err) {
+  try {
+    const url = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+    let action = '';
+    try { action = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}).action || ''; } catch (_) { /* */ }
+    const message = String(err.publicMessage || err.message || 'server xətası').replace(/sk-[A-Za-z0-9_-]{8,}/g, '[gizli]').slice(0, 1000);
+    await fetch(url + '/rest/v1/app_errors', {
+      method: 'POST',
+      headers: { apikey: process.env.SUPABASE_ANON_KEY, authorization: req.headers['authorization'] || 'Bearer ' + process.env.SUPABASE_ANON_KEY, 'content-type': 'application/json', prefer: 'return=minimal' },
+      body: JSON.stringify({ source: 'server', message, url: '/api/ai ' + String(action).slice(0, 40) })
+    });
+  } catch (_) { /* jurnal yazılmasa da cavab qayıtsın */ }
 }
 
 // ---------- Əməliyyatlar ----------

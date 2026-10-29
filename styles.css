@@ -397,3 +397,5 @@ body.capturing .sheet { box-shadow: none; }
 .sub-seg { margin-bottom: 4px; }
 a.seg-b { text-decoration: none; }
 .sticky-bar[hidden] { display: none; }
+.privacy ul { padding-left: 20px; margin: 0; display: grid; gap: 6px; }
+.privacy h2 { margin-top: 8px; }

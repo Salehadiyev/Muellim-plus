@@ -58,6 +58,8 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - **004_status.sql** — AI yoxlama statusları (keçib / yoxlama tələb edir / qaralama) və müəllim təsdiqi.
 - **005_student_links.sql** — hər şagirdə şəxsi link (8 simvollu kod), şagird kabineti, bir şagird bir testi bir dəfə göndərir.
 - **006_review.sql** — testdən sonra şagird öz səhvlərini görür (müəllim seçir: göstərmə / göndərən kimi / test bağlananda).
+- **009_hardening.sql** — indekslər, ölçü limitləri, ümumi linkdə eyni adla təkrar göndərmənin və axının qarşısı, səhv jurnalı (`app_errors`), mənfi AI xərcinin qadağası, yalnız təsdiqlənmiş müəllim yaza bilir. 008-dən sonra işlədilməlidir.
+- **full_schema.sql** — yeni Supabase layihəsi üçün hamısı bir faylda (`supabase/build-full.sh` ilə yaradılır, əl ilə dəyişməyin).
 - **008_access.sql** — müəllim təsdiqi (yeni qeydiyyat admin təsdiqləyənə qədər işləmir), gündəlik/aylıq AI xərc limiti, admin üçün "Müəllimlər" səhifəsi. Mövcud hesablar təsdiqlənir, ən birinci hesab admin olur.
 - **007_test_rules.sql** — vaxt limiti (başlama anı serverdə), son tarix, sual/variant qarışdırma, fərdi (bir şagirdə) test, gecikmiş iş qeydi.
 - **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
@@ -116,3 +118,17 @@ Yeni dəyişən əlavə edəndən sonra Vercel-də **Redeploy** lazımdır.
 - Model `ANTHROPIC_MODEL` dəyişəni ilə dəyişdirilə bilər (standart: `claude-opus-5-5`; daha ucuz variant: `claude-sonnet-5-5`).
 - AI istifadəsi hər sorğuya görə ödənişlidir; Anthropic Console-da xərc limiti qoymaq tövsiyə olunur.
 - Şagirdlər test linkini açanda cavablar onlara görünmür, bal serverdə hesablanır.
+
+## Sınaqlar (avtomatik)
+- Hər `git push`-da GitHub Actions (`.github/workflows/tests.yml`) işləyir: təmiz Postgres-də bütün miqrasiyalar iki dəfə + təhlükəsizlik yoxlamaları (`tests/sql`), sonra brauzer (Playwright) və server sınaqları (`tests/run.mjs`).
+- Lokal: `npm install --prefix tests && npx --prefix tests playwright install chromium && node tests/run.mjs`; baza: `PGHOST=... PGUSER=... tests/sql/run.sh`.
+- Yeni miqrasiya əlavə edəndə: `supabase/build-full.sh` (yoxsa CI xəta verir).
+- Sınaq faylları sayta yüklənmir (`.vercelignore`).
+
+## Möhkəmləndirmə
+- **Səhv izləmə**: brauzer və server səhvləri `app_errors`-a yazılır (şagird kodları və açarlar yazılmır), admin Ayarlar → Səhvlər.
+- **Təhlükəsizlik başlıqları**: CSP (`index.html`), `X-Frame-Options`, `nosniff`, HSTS və s. (`vercel.json`).
+- **Hesab**: şifrə bərpası (e-poçt linki → yeni şifrə), sessiya bitəndə girişə qaytarma, internet yoxdursa aydın mesaj.
+- **Ehtiyat nüsxə**: Ayarlar → Məlumatlarımı yüklə (JSON). Real backup üçün Supabase Pro (gündəlik backup) tövsiyə olunur.
+- **Məxfilik**: `#/privacy` (girişsiz açılır). Hüquqşünas baxışı tövsiyə olunur.
+- **Böyük bank**: yüngül indeks + görünən suallar üçün tam sətir, 50-50 göstərilir.

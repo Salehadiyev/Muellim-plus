@@ -1,0 +1,33 @@
+const { chromium } = require(process.env.PW || 'playwright');
+const path = require('path'); const fs = require('fs');
+const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
+const ROOT = path.join(__dirname, '..', '..');
+const DB = { classes: [], students: [], questions: [], tests: [], submissions: [], ai_usage: [] };
+const ok = (m) => console.log('✓', m); const fail = (m) => { throw new Error(m); };
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1024, height: 900 } }); const errs = [];
+  await ctx.route('**/*', (route) => { const u = new URL(route.request().url());
+    if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : '' });
+    if (u.hostname !== 'app.test') return route.abort();
+    if (u.pathname === '/api/config') return route.fulfill({ json: { supabaseUrl: 'x', supabaseAnonKey: 'k', models: [{ key: 'opus', label: 'Opus', ready: true }] } });
+    if (u.pathname === '/api/ai') return route.fulfill({ status: 401, json: { error: 'Əvvəlcə daxil olun' } });
+    const f = path.join(ROOT, u.pathname === '/' ? 'index.html' : u.pathname); route.fulfill({ contentType: f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html', body: fs.readFileSync(f) }); });
+  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept());
+  await p.goto('http://app.test/'); await p.evaluate((d) => localStorage.setItem('mockdb', JSON.stringify(d)), DB); await p.reload();
+  await p.waitForSelector('#auth'); await p.click('#forgot'); await p.fill('#forgotForm input[name=email]', 'mel@x.az'); await p.click('#forgotForm button[type=submit]');
+  await p.waitForSelector('text=Poçtu yoxlayın');
+  const r = await p.evaluate(() => window.__reset); console.log('  reset:', JSON.stringify(r)); if (r.email !== 'mel@x.az' || !r.redirectTo.startsWith('http://app.test/')) fail('reset call');
+  ok('forgot password sends link, does not reveal account existence');
+  // recovery link
+  await p.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ access_token: 'tok', user: { id: 'u1', email: 'mel@x.az' } })));
+  await p.goto('http://app.test/#access_token=abc&type=recovery'); await p.reload(); await p.waitForSelector('#newPw');
+  if (p.url().includes('access_token')) fail('token left in URL');
+  await p.fill('#newPw [name=p1]', 'yenisifre1'); await p.fill('#newPw [name=p2]', 'basqa1234'); await p.click('#newPw button'); await p.waitForSelector('text=Şifrələr eyni deyil');
+  await p.fill('#newPw [name=p2]', 'yenisifre1'); await p.click('#newPw button'); await p.waitForSelector('text=Açıq testlər');
+  console.log('  new password set:', await p.evaluate(() => window.__pw)); ok('recovery link → new password → app');
+  // expired session on AI call
+  await p.goto('http://app.test/#/ai'); await p.waitForSelector('[data-tab=topic]'); await p.click('[data-tab=topic]'); await p.waitForTimeout(300);
+  await p.evaluate(() => document.querySelector('#tabBody form button[type=submit], #tabBody button.primary').click());
+  await p.waitForSelector('#auth'); ok('expired session → back to login');
+  console.log(errs.length ? errs : 'NO ERRORS'); await b.close();
+})().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

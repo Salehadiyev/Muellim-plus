@@ -14,3 +14,11 @@ for round in 1 2; do
 done
 echo "miqrasiyalar iki dəfə xətasız işlədi: $(echo $MIG | wc -w) fayl"
 $PSQL -t -A -o /dev/null -f checks.sql
+
+# Tam sxem faylı miqrasiyalarla eyni olmalıdır və təmiz bazada tək başına işləməlidir
+../../supabase/build-full.sh --check
+psql -v ON_ERROR_STOP=1 -q -d postgres -c "drop database if exists ${DB}_full" -c "create database ${DB}_full"
+psql -v ON_ERROR_STOP=1 -q -d ${DB}_full -f setup.sql
+psql -v ON_ERROR_STOP=1 -q -d ${DB}_full -f ../../supabase/full_schema.sql > /dev/null
+psql -v ON_ERROR_STOP=1 -q -d ${DB}_full -t -A -o /dev/null -f checks.sql
+echo "full_schema.sql: təmiz bazada keçdi"

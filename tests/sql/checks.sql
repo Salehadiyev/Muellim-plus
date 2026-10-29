@@ -97,4 +97,37 @@ select t_ok(jsonb_array_length(admin_teachers()) = 3, 'admin hamını görür');
 reset role;
 select t_ok((select approved from teacher_access where email = 'yeni@x.az'), 'admin təsdiqlədi');
 
+-- ---------- 009: göndərmə qoruması, ölçü, səhv jurnalı ----------
+set role anon;
+reset request.jwt.claim.sub;
+select t_err($q$ select submit_test('00000000-0000-4000-8000-0000000000f1', ' qonaq ', '{}') $q$, 'ümumi linkdə eyni adla ikinci göndərmə');
+select t_err($q$ select student_submit_test('BBBBBBBB', '00000000-0000-4000-8000-0000000000f1', jsonb_build_object('x', repeat('a', 70000))) $q$, 'həddən böyük cavab qəbul edilmir');
+insert into app_errors (source, message, url) values ('student', 'sınaq xətası', '/t/x');
+select t_ok((select count(*) from app_errors) = 0, 'anon jurnalı oxuya bilmir');
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+insert into app_errors (message) values ('müəllim xətası');
+select t_ok((select count(*) from app_errors) = 0, 'adi müəllim jurnalı oxuya bilmir');
+select t_err($q$ insert into app_errors (message, user_id) values ('saxta', '00000000-0000-4000-8000-0000000000a1') $q$, 'başqasının adından jurnal yazısı');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+select t_ok((select count(*) from app_errors) = 2, 'admin jurnalı görür');
+reset role;
+insert into app_errors (message) select 'axın ' || g from generate_series(1, 60) g;
+select t_ok((select count(*) from app_errors) <= 32, 'dəqiqədə 30-dan çox jurnal yazısı atılır');
+select t_err($q$ insert into questions (teacher_id, body, answer) values ('00000000-0000-4000-8000-0000000000a1', repeat('x', 20001), '1') $q$, 'həddən uzun sual mətni');
+
+-- ---------- 009: təsdiqsiz yazı, mənfi xərc ----------
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-4000-8000-0000000000a4', 'spam@x.az');
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a4';
+select t_err($q$ insert into classes (teacher_id, name) values (auth.uid(), 'spam') $q$, 'təsdiqsiz hesab sinif yarada bilmir');
+select t_err($q$ insert into questions (teacher_id, body, answer) values (auth.uid(), 'spam', '1') $q$, 'təsdiqsiz hesab sual yaza bilmir');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+select t_err($q$ insert into ai_usage (teacher_id, action, model, cost_usd) values (auth.uid(), 'x', 'opus', -100) $q$, 'mənfi xərc yazmaq olmur');
+insert into ai_usage (teacher_id, action, model, cost_usd) values (auth.uid(), 'x', 'opus', 0.5);
+insert into classes (teacher_id, name) values (auth.uid(), 'Təsdiqli müəllimin sinfi');
+select t_ok((select count(*) from classes) = 2, 'təsdiqli müəllim normal yazır');
+reset role;
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

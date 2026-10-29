@@ -24,10 +24,33 @@ function toast(msg, isError = false) {
   toast._t = setTimeout(() => { t.className = ''; }, 3200);
 }
 
+const NET_ERR = /Failed to fetch|Load failed|NetworkError|network error|fetch failed/i;
 function fail(err) {
   console.error(err);
-  toast(err?.message || 'Xəta baş verdi', true);
+  const msg = err?.message || String(err || '') || 'Xəta baş verdi';
+  if (NET_ERR.test(msg)) return toast('İnternet bağlantısı yoxdur və ya zəifdir. Bir az sonra yenidən yoxlayın.', true);
+  toast(msg, true);
+  if (!err?.expected) reportError(err);
 }
+
+// ---- Səhv jurnalı (009): gözlənilməz səhvlər bazaya yazılır, admin Ayarlar-da görür ----
+const reported = new Set();
+function reportError(err, source) {
+  try {
+    if (!sb) return;
+    const message = String(err?.message || err || '').slice(0, 1000);
+    if (!message || NET_ERR.test(message) || reported.has(message) || reported.size >= 8) return;
+    reported.add(message);
+    const page = location.hash.split('/').slice(0, 2).join('/'); // kod/ID-lər jurnala düşməsin
+    sb.from('app_errors').insert({
+      source: source || (/^#\/(s|t)\b/.test(location.hash) ? 'student' : 'client'),
+      message, stack: String(err?.stack || '').slice(0, 4000) || null,
+      url: (location.pathname + page).slice(0, 500), agent: navigator.userAgent.slice(0, 300)
+    }).then(() => {}, () => {});
+  } catch (_) { /* jurnal yazılmasa da tətbiq işləsin */ }
+}
+window.addEventListener('error', (e) => { if (e.error || e.message) reportError(e.error || { message: e.message }); });
+window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
 
 async function busy(btn, fn) {
   const label = btn.innerHTML;
@@ -72,7 +95,17 @@ async function callAI(action, payload) {
     body: JSON.stringify({ action, model: currentModel(), ...payload })
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || (r.status === 504 ? 'AI 5 dəqiqə ərzində cavab vermədi. Yenidən yoxlayın.' : 'AI xətası (' + r.status + ')'));
+  if (r.status === 401) {
+    const e = new Error('Sessiyanın vaxtı bitib. Yenidən daxil olun.');
+    e.expected = true;
+    sb.auth.signOut().catch(() => {});
+    throw e;
+  }
+  if (!r.ok) {
+    const e = new Error(data.error || (r.status === 504 ? 'AI 5 dəqiqə ərzində cavab vermədi. Yenidən yoxlayın.' : 'AI xətası (' + r.status + ')'));
+    e.expected = [400, 401, 403, 429].includes(r.status); // limit, təsdiq, giriş — səhv deyil
+    throw e;
+  }
   if (data._helper) lastHelper = data._helper;
   return data;
 }
@@ -198,7 +231,9 @@ function questionHtml(q, { selectable = false, checked = false, showAnswer = tru
 
 // ================= Başlanğıc və marşrutlar =================
 
+let recoveryMode = false; // e-poçtdakı "şifrəni bərpa et" linki ilə gəlib
 async function boot() {
+  recoveryMode = /type=recovery/.test(location.hash);
   try {
     const r = await fetch('/api/config');
     const cfg = await r.json();
@@ -217,10 +252,36 @@ async function boot() {
   sb.auth.onAuthStateChange((event, s) => {
     const wasIn = !!session;
     session = s;
+    if (event === 'PASSWORD_RECOVERY') { recoveryMode = true; return newPasswordView(); }
     if (event === 'SIGNED_OUT' || (event === 'SIGNED_IN' && !wasIn)) { access = null; route(); }
   });
   window.addEventListener('hashchange', route);
+  if (recoveryMode) { history.replaceState(null, '', location.pathname); if (session) return newPasswordView(); }
   route();
+}
+
+// Şifrə bərpası: e-poçtdakı linkdən gələndə yeni şifrə
+function newPasswordView() {
+  $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="newPw">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Yeni şifrə</h1></div>
+    <label class="field">Yeni şifrə<span class="hint">Ən azı 8 simvol</span><input type="password" name="p1" required minlength="8" autocomplete="new-password"></label>
+    <label class="field">Təkrar<input type="password" name="p2" required minlength="8" autocomplete="new-password"></label>
+    <button class="btn primary block" type="submit">Şifrəni dəyiş</button>
+  </form></div>`;
+  $('#newPw').onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    if (f.get('p1') !== f.get('p2')) return toast('Şifrələr eyni deyil', true);
+    busy($('button', e.target), async () => {
+      const { error } = await sb.auth.updateUser({ password: f.get('p1') });
+      if (error) throw error;
+      recoveryMode = false;
+      toast('Şifrə dəyişdirildi');
+      access = null;
+      go('#/');
+      route();
+    }).catch(fail);
+  };
 }
 
 function route() {
@@ -228,6 +289,7 @@ function route() {
   const [page, id] = parts;
   if (page === 't' && id) return studentTest(id);
   if (page === 's') return studentPortal(id, parts[2], parts[3]);
+  if (page === 'privacy') return privacyView();
   if (!session) { access = null; return loginView(); }
   if (!access) {
     loadAccess().then(route).catch(() => { access = { approved: true, missing: true }; route(); });
@@ -273,6 +335,31 @@ const view = () => document.getElementById('view');
 
 // ================= Giriş =================
 
+function forgotView() {
+  $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="forgotForm">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Şifrə bərpası</h1></div>
+    <p class="muted">E-poçtunuzu yazın, şifrəni yeniləmək üçün link göndərəcəyik.</p>
+    <label class="field">E-poçt<input type="email" name="email" required autocomplete="email"></label>
+    <button class="btn primary block" type="submit">Link göndər</button>
+    <button class="btn block" type="button" id="back">‹ Girişə qayıt</button>
+  </form></div>`;
+  $('#back').onclick = loginView;
+  $('#forgotForm').onsubmit = (e) => {
+    e.preventDefault();
+    const email = String(new FormData(e.target).get('email') || '').trim();
+    busy($('button[type=submit]', e.target), async () => {
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBase() });
+      if (error && !/rate|limit/i.test(error.message)) throw error;
+      // e-poçtun qeydiyyatda olub-olmadığını açıqlamırıq
+      $('#forgotForm').innerHTML = `<div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Poçtu yoxlayın</h1></div>
+        <p>Bu ünvanla hesab varsa, bir neçə dəqiqəyə şifrə bərpası linki gələcək. Spam qovluğuna da baxın.</p>
+        ${error ? '<p class="notice">Çox tez-tez sorğu göndərildi. Bir saat sonra yenidən yoxlayın.</p>' : ''}
+        <button class="btn block" type="button" id="back2">‹ Girişə qayıt</button>`;
+      $('#back2').onclick = loginView;
+    }).catch(fail);
+  };
+}
+
 function loginView() {
   let mode = 'login';
   const render = () => {
@@ -281,11 +368,14 @@ function loginView() {
       <p class="muted">${mode === 'login' ? 'Hesabınıza daxil olun.' : 'Müəllim hesabı yaradın.'}</p>
       ${mode === 'signup' ? '<label class="field">Adınız<input type="text" name="name" required autocomplete="name"></label>' : ''}
       <label class="field">E-poçt<input type="email" name="email" required autocomplete="email"></label>
-      <label class="field">Şifrə<span class="hint">Ən azı 6 simvol</span><input type="password" name="password" required minlength="6" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}"></label>
+      <label class="field">Şifrə${mode === 'signup' ? '<span class="hint">Ən azı 8 simvol</span>' : ''}<input type="password" name="password" required minlength="${mode === 'signup' ? 8 : 6}" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}"></label>
       <button class="btn primary block" type="submit">${mode === 'login' ? 'Daxil ol' : 'Qeydiyyatdan keç'}</button>
       <button class="btn block" type="button" id="switch">${mode === 'login' ? 'Hesabım yoxdur, qeydiyyat' : 'Hesabım var, daxil ol'}</button>
+      ${mode === 'login' ? '<button class="btn block" type="button" id="forgot" style="border:0;background:none;color:var(--accent)">Şifrəni unutmusunuz?</button>' : ''}
+      <p class="small muted" style="text-align:center;margin:0"><a href="#/privacy">Məxfilik siyasəti</a></p>
     </form></div>`;
     $('#switch').onclick = () => { mode = mode === 'login' ? 'signup' : 'login'; render(); };
+    if ($('#forgot')) $('#forgot').onclick = forgotView;
     $('#auth').onsubmit = (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -476,10 +566,105 @@ async function settingsView() {
     <div class="page-head"><div><h1>Ayarlar</h1></div></div>
     <section class="card stack"><h2>AI xərci</h2>${limitLine() || '<p class="muted small">Limitlər üçün bazada 008 yeniləməsi lazımdır.</p>'}</section>
     <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
-    ${access?.is_admin ? `<a class="card action-card" href="#/teachers"><h3>Müəllimlər ›</h3><p class="muted small">Yeni qeydiyyatları təsdiqlə, AI limitlərini dəyiş.</p></a>` : ''}
-    <section class="card stack"><h2>Hesab</h2><p>${esc(session?.user?.email || '')}</p><div><button class="btn" id="logout3">Çıxış</button></div></section>`;
+    ${access?.is_admin ? `<a class="card action-card" href="#/teachers"><h3>Müəllimlər ›</h3><p class="muted small">Yeni qeydiyyatları təsdiqlə, AI limitlərini dəyiş.</p></a>
+      <section class="card stack" id="errCard"><h2>Səhvlər</h2><p class="muted small">Yüklənir…</p></section>` : ''}
+    <section class="card stack"><h2>Ehtiyat nüsxə</h2>
+      <p class="muted small">Bütün sinifləriniz, şagirdləriniz, suallarınız, testləriniz və nəticələriniz bir fayl kimi (JSON) yüklənir. Ayda bir dəfə yükləyib saxlamağınız tövsiyə olunur.</p>
+      <div><button class="btn primary" id="exportBtn">Məlumatlarımı yüklə</button></div></section>
+    <section class="card stack"><h2>Hesab</h2><p>${esc(session?.user?.email || '')}</p>
+      <div class="row"><button class="btn" id="logout3">Çıxış</button><a class="btn" href="#/privacy">Məxfilik siyasəti</a></div></section>`;
+  $('#exportBtn').onclick = () => busy($('#exportBtn'), exportMyData).catch(fail);
   $('#logout3').onclick = async () => { await sb.auth.signOut(); go('#/'); };
   renderUsage().catch(fail);
+  if (access?.is_admin) renderErrors().catch(() => { const c = $('#errCard'); if (c) c.hidden = true; });
+}
+
+// Ehtiyat nüsxə: müəllimin bütün məlumatı (RLS yalnız öz məlumatını qaytarır), 1000-lik hissələrlə
+async function fetchAll(table, cols = '*') {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from(table).select(cols).order('created_at').range(from, from + 999);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+async function exportMyData() {
+  const [classes, students, questions, tests, submissions] = await Promise.all(
+    ['classes', 'students', 'questions', 'tests', 'submissions'].map((t) => fetchAll(t)));
+  const dump = { app: 'Müəllim+', version: 1, exported_at: new Date().toISOString(), teacher: session?.user?.email || '',
+    counts: { classes: classes.length, students: students.length, questions: questions.length, tests: tests.length, submissions: submissions.length },
+    classes, students, questions, tests, submissions };
+  const blob = new Blob([JSON.stringify(dump, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  const d = new Date();
+  a.href = URL.createObjectURL(blob);
+  a.download = `muellim-plus-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast(`Yükləndi: ${questions.length} sual, ${students.length} şagird, ${submissions.length} nəticə`);
+}
+
+// Məxfilik siyasəti (girişsiz açılır)
+function privacyView() {
+  $app.innerHTML = `<div class="student privacy">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
+    <h1>Məxfilik siyasəti</h1>
+    <p class="muted small">Son yenilənmə: 29 oktyabr 2026</p>
+    <section class="card stack">
+      <h2>Hansı məlumatları saxlayırıq</h2>
+      <ul>
+        <li><strong>Müəllim:</strong> e-poçt, ad, yaratdığı siniflər, suallar, testlər və AI istifadəsinin xərc qeydləri.</li>
+        <li><strong>Şagird:</strong> müəllimin daxil etdiyi ad və soyad, şəxsi giriş kodu, testlərdəki cavablar, ballar və göndərmə vaxtı. Şagirddən e-poçt, telefon və ya şifrə istənilmir.</li>
+        <li><strong>Texniki:</strong> səhv baş verəndə səhvin mətni, səhifənin ünvanı (şəxsi kodlar olmadan) və brauzer növü.</li>
+      </ul>
+      <h2>Nə üçün istifadə edirik</h2>
+      <p>Yalnız platformanın işləməsi üçün: testlərin keçirilməsi, balların hesablanması, müəllimə nəticə və analizlərin göstərilməsi, səhvlərin düzəldilməsi. Məlumat satılmır və reklam üçün istifadə edilmir.</p>
+      <h2>Kim görür</h2>
+      <p>Hər müəllim yalnız öz siniflərinin və şagirdlərinin məlumatını görür. Şagird yalnız öz testlərini və nəticələrini görür. Bu qayda verilənlər bazasının özündə tətbiq olunur.</p>
+      <h2>Süni intellekt</h2>
+      <p>Müəllim sual yaradanda və ya yoxlayanda sualın mətni və şəkli AI xidmətlərinə (Anthropic, OpenAI, Google) göndərilir. Şagird adları və cavabları AI-a göndərilmir.</p>
+      <h2>Harada saxlanılır</h2>
+      <p>Məlumat Supabase (Avropa serveri) bazasında, sayt isə Vercel-də yerləşir. Bağlantılar şifrələnir (HTTPS).</p>
+      <h2>Saxlama müddəti və silmə</h2>
+      <p>Məlumat müəllim hesabı aktiv olduğu müddətdə saxlanılır. Müəllim sinfi, şagirdi, testi və nəticəni istənilən vaxt silə bilər. Şagird və ya valideyn məlumatların silinməsini müəllimdən istəyə bilər. Hesabın tam silinməsi üçün platformanın admininə müraciət edin. Səhv qeydləri 30 gündən sonra avtomatik silinir.</p>
+      <h2>Uşaqlar</h2>
+      <p>Şagird məlumatlarını müəllim daxil edir və onların istifadəsinə görə məktəb və müəllim məsuliyyət daşıyır. Müəllim şagirdlərin ad-soyadından başqa şəxsi məlumat daxil etməməlidir.</p>
+    </section>
+    <button class="btn block" type="button" id="pvBack">‹ Geri</button>
+  </div>`;
+  $('#pvBack').onclick = () => { if (history.length > 1) history.back(); else go('#/'); };
+}
+
+// Admin: son səhvlər (eyni mesajlar qruplaşdırılır)
+async function renderErrors() {
+  const box = $('#errCard');
+  if (!box) return;
+  const { data, error } = await sb.from('app_errors').select('*').order('created_at', { ascending: false }).limit(200);
+  if (error) { box.innerHTML = '<h2>Səhvlər</h2><p class="muted small">Səhv jurnalı üçün bazaya 009 yeniləməsi lazımdır.</p>'; return; }
+  const groups = {};
+  (data || []).forEach((e) => {
+    const k = e.source + '|' + e.message;
+    const g = groups[k] = groups[k] || { ...e, n: 0, last: e.created_at };
+    g.n++;
+  });
+  const list = Object.values(groups).sort((a, b) => (a.last < b.last ? 1 : -1));
+  const SRC = { client: 'müəllim', student: 'şagird', server: 'server' };
+  box.innerHTML = `<div class="row between"><h2>Səhvlər</h2>${list.length ? '<button class="btn small" id="errClear">Hamısını sil</button>' : ''}</div>
+    ${list.length ? `<p class="muted small">Son 30 gün. Eyni səhv bir sətirdə, sayı ilə. Yeni çıxanları mənə (və ya proqramçıya) göstərin.</p>
+      <div class="table-wrap"><table><thead><tr><th>Səhv</th><th>Harada</th><th>Say</th><th>Son dəfə</th></tr></thead><tbody>
+      ${list.slice(0, 40).map((e) => `<tr><td><details><summary>${esc(e.message.slice(0, 140))}</summary><pre class="small" style="white-space:pre-wrap">${esc(e.stack || '')}
+${esc(e.url || '')}
+${esc(e.agent || '')}</pre></details></td>
+        <td><span class="tag">${SRC[e.source] || e.source}</span></td><td>${e.n}</td><td class="small muted">${fmtDate(e.last)}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">Səhv qeydə alınmayıb.</div>'}`;
+  const c = $('#errClear', box);
+  if (c) c.onclick = () => busy(c, async () => {
+    const { error: err } = await sb.from('app_errors').delete().not('id', 'is', null);
+    if (err) throw err;
+    renderErrors();
+  }).catch(fail);
 }
 
 // ================= Siniflər =================
@@ -590,11 +775,35 @@ async function classView(id) {
 
 // ================= Sual bankı =================
 
+// ---- Böyük bank üçün: əvvəl yüngül indeks (şəkilsiz), görünən suallar üçün tam sətir ----
+const Q_LIGHT = 'id, body, topic, subtype, source, difficulty, exam, qtype, options, answer, ai_status, verified, teacher_approved, created_at';
+async function loadQuestionIndex() {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from('questions').select(Q_LIGHT).order('created_at', { ascending: false }).range(from, from + 999);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+const fullCache = new Map();
+async function fullQuestions(ids) {
+  const need = ids.filter((id) => !fullCache.has(id));
+  for (let i = 0; i < need.length; i += 150) {
+    const { data, error } = await sb.from('questions').select('*').in('id', need.slice(i, i + 150));
+    if (error) throw error;
+    (data || []).forEach((q) => fullCache.set(q.id, q));
+  }
+  return ids.map((id) => fullCache.get(id)).filter(Boolean);
+}
+const PAGE = 50;
+
 async function bankView() {
-  const { data, error } = await sb.from('questions').select('*').order('created_at', { ascending: false }).limit(500);
-  if (error) throw error;
+  const data = await loadQuestionIndex();
   let filter = { text: '', source: '', difficulty: '', exam: '', status: '' };
   let visible = [];
+  let shown = PAGE;
   const selected = new Set();
 
   view().innerHTML = `
@@ -609,19 +818,31 @@ async function bankView() {
         <label class="field">Format<select id="fExam"><option value="">Hamısı</option><option value="tryos">TR-YÖS</option><option value="general">Ümumi</option></select></label>
         <label class="field">Status<select id="fStatus"><option value="">Hamısı</option><option value="approved">Müəllim təsdiqləyib</option><option value="passed">AI keçib, təsdiq gözləyir</option><option value="review">Yoxlama tələb edir / qaralama</option></select></label>
       </div>
+      <p class="small muted" id="shownInfo"></p>
       <div id="list"></div>
+      <div id="more"></div>
     </div>`;
 
-  const renderList = () => {
+  let renderSeq = 0;
+  const renderList = async () => {
+    const seq = ++renderSeq;
     const t = filter.text.toLocaleLowerCase('az');
     const rows = data.filter((q) => (!filter.source || q.source === filter.source) && (!filter.difficulty || q.difficulty === filter.difficulty)
       && (!filter.exam || (q.exam || 'general') === filter.exam)
       && (!filter.status || (filter.status === 'approved' ? q.teacher_approved : filter.status === 'passed' ? (!q.teacher_approved && (q.ai_status === 'passed' || (!q.ai_status && q.verified === true))) : (!q.teacher_approved && (q.ai_status === 'review' || q.ai_status === 'draft' || (!q.ai_status && q.verified === false)))))
       && (!t || (q.body + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az').includes(t)));
     visible = rows;
+    const page = rows.slice(0, shown);
+    let full;
+    try { full = await fullQuestions(page.map((q) => q.id)); } catch (err) { return fail(err); }
+    if (seq !== renderSeq) return; // daha yeni axtarış başlayıb
+    const byId = Object.fromEntries(full.map((q) => [q.id, { ...q, teacher_approved: data.find((d) => d.id === q.id)?.teacher_approved }]));
+    $('#shownInfo').textContent = rows.length > page.length ? `${rows.length} uyğun sualdan ${page.length} göstərilir` : (rows.length && rows.length !== data.length ? `${rows.length} uyğun sual` : '');
     $('#list').innerHTML = rows.length
-      ? rows.map((q) => questionHtml(q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small" data-approve="${q.id}">${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button><button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
+      ? page.map((q) => questionHtml(byId[q.id] || q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small" data-approve="${q.id}">${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button><button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
       : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/pdf">Kitabdan</a> və ya <a href="#/ai">AI ilə</a> sual əlavə edin.'}</div>`;
+    $('#more').innerHTML = rows.length > page.length ? `<button class="btn block" id="moreBtn">Daha çox göstər (${rows.length - page.length} qalıb)</button>` : '';
+    if ($('#moreBtn')) $('#moreBtn').onclick = () => { shown += PAGE; renderList(); };
     $$('#list .check').forEach((c) => c.onchange = () => { c.checked ? selected.add(c.dataset.id) : selected.delete(c.dataset.id); updateBtn(); });
     $$('#list [data-approve]').forEach((b) => b.onclick = async () => {
       const q = data.find((x) => x.id === b.dataset.approve);
@@ -643,20 +864,20 @@ async function bankView() {
     const b = $('#makeTest'); b.disabled = !selected.size; b.textContent = `Seçilənlərdən test (${selected.size})`;
     const pdf = $('#makePdf'); pdf.disabled = !selected.size; pdf.textContent = `PDF (${selected.size})`;
   };
-
-  $('#fText').oninput = (e) => { filter.text = e.target.value; renderList(); };
-  $('#fSource').onchange = (e) => { filter.source = e.target.value; renderList(); };
-  $('#fDiff').onchange = (e) => { filter.difficulty = e.target.value; renderList(); };
+  const refilter = () => { shown = PAGE; renderList(); };
+  $('#fText').oninput = (e) => { filter.text = e.target.value; refilter(); };
+  $('#fSource').onchange = (e) => { filter.source = e.target.value; refilter(); };
+  $('#fDiff').onchange = (e) => { filter.difficulty = e.target.value; refilter(); };
   $('#makeTest').onclick = () => { pendingTestIds = [...selected]; go('#/newtest'); };
-  $('#fExam').onchange = (e) => { filter.exam = e.target.value; renderList(); };
-  $('#fStatus').onchange = (e) => { filter.status = e.target.value; renderList(); };
+  $('#fExam').onchange = (e) => { filter.exam = e.target.value; refilter(); };
+  $('#fStatus').onchange = (e) => { filter.status = e.target.value; refilter(); };
   $('#selAll').onclick = () => { visible.forEach((q) => selected.add(q.id)); updateBtn(); renderList(); };
-  $('#makePdf').onclick = () => {
-    // Bankdakı sıra ilə (ən yenisi yuxarıda) yox, seçilmə sırası ilə də ola bilər; burada görünən sıra saxlanılır
-    const qs = data.filter((q) => selected.has(q.id)).reverse();
-    pendingPrint = { questions: qs, title: '', back: '#/bank' };
+  $('#makePdf').onclick = () => busy($('#makePdf'), async () => {
+    // görünən sıra saxlanılır (köhnədən yeniyə)
+    const ids = data.filter((q) => selected.has(q.id)).map((q) => q.id).reverse();
+    pendingPrint = { questions: await fullQuestions(ids), title: '', back: '#/bank' };
     go('#/print');
-  };
+  }).catch(fail);
   $('#toggleManual').onclick = () => { const m = $('#manual'); m.hidden = !m.hidden; if (!m.hidden) manualForm(m); };
   renderList();
 }
@@ -803,7 +1024,7 @@ function createPicker(root, { hint = '', label = 'Şəkil və ya PDF seç', acti
     area().innerHTML = '<div class="row"><span class="spinner sm" aria-hidden="true"></span> PDF açılır…</div>';
     const pdfjs = await import(PDFJS_URL);
     pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-    st.pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    st.pdf = await pdfjs.getDocument({ data: await file.arrayBuffer(), isEvalSupported: false }).promise;
     st.page = 1;
     await showPage();
   }
@@ -1652,11 +1873,10 @@ async function testsView() {
 
 // Yeni test: 1) əsas məlumat 2) suallar (bankdan və ya PDF-dən) 3) yarat
 async function newTestView() {
-  const [{ data: classes }, { data: questions, error }] = await Promise.all([
+  const [{ data: classes }, questions] = await Promise.all([
     sb.from('classes').select('id, name').order('name'),
-    sb.from('questions').select('*').order('created_at', { ascending: false }).limit(500)
+    loadQuestionIndex()
   ]);
-  if (error) throw error;
   const preset = new Set(pendingTestIds);
   pendingTestIds = [];
   const qs = questions || [];
@@ -1732,7 +1952,16 @@ async function newTestView() {
     $$('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== b.dataset.tab; });
   });
   const qById = Object.fromEntries(qs.map((q) => [q.id, q]));
-  bindMini(form, (id) => ({ q: qById[id] }));
+  // sual açılanda tam halı (şəkillərlə) yüklənir
+  fullQuestions(qs.slice(0, 60).map((q) => q.id)).then((full) => full.forEach((q) => { qById[q.id] = q; })).catch(() => {});
+  bindMini(form, (id) => ({ q: fullCache.get(id) || qById[id] }));
+  form.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-open]');
+    if (b && !fullCache.has(b.dataset.open) && qById[b.dataset.open]) {
+      e.stopPropagation(); // əvvəl tam halı gəlsin, sonra pəncərə açılsın
+      fullQuestions([b.dataset.open]).then(() => b.click()).catch(fail);
+    }
+  }, true);
   const filter = () => {
     if (!$('#tqFind')) return;
     const t = $('#tqFind').value.trim().toLocaleLowerCase('az');
@@ -2718,6 +2947,7 @@ async function studentPortal(rawCode, testId, sub) {
           <span class="row" style="flex-wrap:nowrap;gap:8px"><span class="bar" style="width:70px"><i style="width:${pct(t.result)}%"></i></span><strong>${t.result.score}/${t.result.total}</strong></span></div>`).join('')
         : '<div class="empty">Hələ test yazmamısınız.</div>'}
     </section>
+    <p class="small muted" style="text-align:center"><a href="#/privacy">Məxfilik siyasəti</a></p>
   </div>`;
 }
 

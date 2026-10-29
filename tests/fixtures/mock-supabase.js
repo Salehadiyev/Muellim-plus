@@ -14,14 +14,16 @@ class Query {
   eq(c, v) { this.filters.push((r) => r[c] == v); return this; }
   in(c, arr) { this.filters.push((r) => arr.includes(r[c])); return this; }
   gte(c, v) { this.filters.push((r) => r[c] >= v); return this; }
+  gt(c, v) { this.filters.push((r) => r[c] > v); return this; }
   not(c, op, v) { this.filters.push((r) => r[c] !== null && r[c] !== undefined); return this; }
   order(c, o = {}) { this.ord = [c, o.ascending !== false]; return this; }
   limit(n) { this.lim = n; return this; }
+  range(a, b) { this.rng = [a, b]; return this; }
   single() { this.isSingle = true; return this; }
   then(res, rej) { try { res(this.exec()); } catch (e) { rej(e); } }
   exec() {
     const db = load();
-    let t = db[this.table];
+    let t = db[this.table] = db[this.table] || [];
     if (this.op === 'insert') {
       const made = this.rows.map((r) => ({ id: uid(), created_at: new Date().toISOString(), teacher_id: 'u1', is_open: true, options: [], ...(this.table === 'students' && !window.NO_CODES ? { access_code: Math.random().toString(36).slice(2, 10).toUpperCase() } : {}), ...r }));
       t.push(...made); save(db);
@@ -37,6 +39,7 @@ class Query {
     if (this.head) return { data: null, count: rows.length, error: null };
     if (this.ord) { const [c, asc] = this.ord; rows = [...rows].sort((a, b) => (a[c] > b[c] ? 1 : -1) * (asc ? 1 : -1)); }
     if (this.lim) rows = rows.slice(0, this.lim);
+    if (this.rng) rows = rows.slice(this.rng[0], this.rng[1] + 1);
     const nested = [...this.cols.matchAll(/(\w+)\(([^)]*)\)/g)];
     rows = rows.map((r) => {
       const o = { ...r };
@@ -61,6 +64,8 @@ export function createClient() {
       onAuthStateChange: (cb) => { listeners.push(cb); return { data: { subscription: { unsubscribe() {} } } }; },
       signInWithPassword: async ({ email }) => { const s = { access_token: 'tok', user: { id: 'u1', email, user_metadata: { full_name: 'Aynur' } } }; localStorage.setItem('mocksession', JSON.stringify(s)); fire('SIGNED_IN', s); return { data: { session: s }, error: null }; },
       signUp: async ({ email }) => { const s = { access_token: 'tok', user: { id: 'u1', email, user_metadata: { full_name: 'Aynur' } } }; localStorage.setItem('mocksession', JSON.stringify(s)); fire('SIGNED_IN', s); return { data: { session: s }, error: null }; },
+      resetPasswordForEmail: async (email, o) => { window.__reset = { email, redirectTo: o?.redirectTo }; return { error: null }; },
+      updateUser: async (u) => { window.__pw = u.password; return { data: {}, error: null }; },
       signOut: async () => { localStorage.removeItem('mocksession'); fire('SIGNED_OUT', null); return {}; }
     },
     from: (t) => new Query(t),
