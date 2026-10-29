@@ -51,6 +51,7 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - **004_status.sql** — AI yoxlama statusları (keçib / yoxlama tələb edir / qaralama) və müəllim təsdiqi.
 - **005_student_links.sql** — hər şagirdə şəxsi link (8 simvollu kod), şagird kabineti, bir şagird bir testi bir dəfə göndərir.
 - **006_review.sql** — testdən sonra şagird öz səhvlərini görür (müəllim seçir: göstərmə / göndərən kimi / test bağlananda).
+- **008_access.sql** — müəllim təsdiqi (yeni qeydiyyat admin təsdiqləyənə qədər işləmir), gündəlik/aylıq AI xərc limiti, admin üçün "Müəllimlər" səhifəsi. Mövcud hesablar təsdiqlənir, ən birinci hesab admin olur.
 - **007_test_rules.sql** — vaxt limiti (başlama anı serverdə), son tarix, sual/variant qarışdırma, fərdi (bir şagirdə) test, gecikmiş iş qeydi.
 - **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
 

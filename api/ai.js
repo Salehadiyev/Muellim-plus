@@ -71,6 +71,8 @@ export default async function handler(req, res) {
   try {
     const user = await verifyTeacher(req);
     if (!user) return res.status(401).json({ error: 'Əvvəlcə daxil olun' });
+    const gate = await checkGate(req);
+    if (gate) return res.status(gate.status).json({ error: gate.error });
 
     if (!Object.values(PROVIDER_KEY).some((k) => process.env[k])) {
       return res.status(500).json({ error: 'Heç bir AI açarı qurulmayıb' });
@@ -601,6 +603,35 @@ async function verifyTeacher(req) {
   if (!r.ok) return null;
   const user = await r.json();
   return user && user.id ? user : null;
+}
+
+// Təsdiq və xərc limiti (008_access.sql). Funksiya yoxdursa (baza yenilənməyib) — keçir.
+async function checkGate(req) {
+  const url = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  let g;
+  try {
+    const r = await fetch(url + '/rest/v1/rpc/ai_gate', {
+      method: 'POST',
+      headers: { apikey: process.env.SUPABASE_ANON_KEY, authorization: req.headers['authorization'], 'content-type': 'application/json' },
+      body: '{}'
+    });
+    if (r.status === 404) return null;
+    if (!r.ok) {
+      const t = await r.text();
+      if (/PGRST202|Could not find the function/i.test(t)) return null;
+      console.error('ai_gate', r.status, t.slice(0, 300));
+      return { status: 503, error: 'Limit yoxlanıla bilmədi, bir az sonra yenidən yoxlayın' };
+    }
+    g = await r.json();
+  } catch (err) {
+    console.error('ai_gate', err);
+    return { status: 503, error: 'Limit yoxlanıla bilmədi, bir az sonra yenidən yoxlayın' };
+  }
+  if (!g || !g.approved) return { status: 403, error: 'Hesabınız hələ təsdiqlənməyib. Admin təsdiq edəndən sonra AI işləyəcək.' };
+  const usd = (v) => '$' + Number(v || 0).toFixed(2);
+  if (Number(g.today) >= Number(g.daily_limit)) return { status: 429, error: `Bu günkü AI limiti doldu (${usd(g.today)} / ${usd(g.daily_limit)}). Sabah yenilənəcək və ya admin limiti artırsın.` };
+  if (Number(g.month) >= Number(g.monthly_limit)) return { status: 429, error: `Bu ayın AI limiti doldu (${usd(g.month)} / ${usd(g.monthly_limit)}). Admin limiti artıra bilər.` };
+  return null;
 }
 
 const HELPER = { key: 'sonnet', provider: 'anthropic', id: HELPER_MODEL, label: 'Claude Sonnet', helper: true };

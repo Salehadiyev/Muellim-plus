@@ -6,6 +6,7 @@ let sb = null;
 let session = null;
 let aiModels = []; // /api/config-dan: hansı modellər qoşulub
 let pendingTestIds = []; // sual bankından testə keçəndə seçilən suallar
+let access = null;       // ai_gate(): təsdiq, admin, limitlər (008); undefined = hələ yüklənməyib
 let pendingPrint = null;  // PDF üçün seçilən suallar { questions, title, back }
 
 // ================= Köməkçilər =================
@@ -216,7 +217,7 @@ async function boot() {
   sb.auth.onAuthStateChange((event, s) => {
     const wasIn = !!session;
     session = s;
-    if (event === 'SIGNED_OUT' || (event === 'SIGNED_IN' && !wasIn)) route();
+    if (event === 'SIGNED_OUT' || (event === 'SIGNED_IN' && !wasIn)) { access = null; route(); }
   });
   window.addEventListener('hashchange', route);
   route();
@@ -227,12 +228,19 @@ function route() {
   const [page, id] = parts;
   if (page === 't' && id) return studentTest(id);
   if (page === 's') return studentPortal(id, parts[2], parts[3]);
-  if (!session) return loginView();
+  if (!session) { access = null; return loginView(); }
+  if (!access) {
+    loadAccess().then(route).catch(() => { access = { approved: true, missing: true }; route(); });
+    $app.innerHTML = '<div class="center-screen"><div class="spinner" aria-label="Yüklənir"></div></div>';
+    return;
+  }
+  if (!access.approved) return pendingView();
   if (page === 'print') return printView();
 
   const views = {
     '': dashboard, classes: classesView, class: classView, bank: bankView,
-    ai: aiView, book: bookView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView
+    ai: aiView, book: bookView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView,
+    ...(access.is_admin ? { teachers: teachersView } : {})
   };
   const view = views[page] || dashboard;
   const navKey = page === 'class' || page === 'student' || page === 'analysis' ? 'classes' : page === 'test' || page === 'newtest' ? 'tests' : (views[page] ? page : '');
@@ -244,7 +252,7 @@ function route() {
 function shell(active) {
   const items = [
     ['', 'Panel'], ['classes', 'Siniflər'], ['bank', 'Sual bankı'], ['ai', 'TR-YÖS / AI'],
-    ['book', 'Kitabdan sual'], ['tests', 'Testlər']
+    ['book', 'Kitabdan sual'], ['tests', 'Testlər'], ...(access?.is_admin ? [['teachers', 'Müəllimlər']] : [])
   ];
   const email = session?.user?.email || '';
   $app.innerHTML = `<div class="shell">
@@ -289,12 +297,82 @@ function loginView() {
         } else {
           const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: f.get('name') } } });
           if (error) throw error;
-          if (!data.session) toast('Təsdiq məktubu göndərildi. E-poçtunuzu yoxlayın.');
+          if (!data.session) toast('Təsdiq məktubu göndərildi. E-poçtunuzu yoxlayın. Hesab admin təsdiqindən sonra aktiv olacaq.');
         }
       }).catch(fail);
     };
   };
   render();
+}
+
+// ================= Giriş icazəsi və limitlər (008) =================
+async function loadAccess() {
+  const { data, error } = await sb.rpc('ai_gate');
+  if (error) {
+    // baza yenilənməyibsə (funksiya yoxdur) əvvəlki kimi işləsin
+    if (/function|could not find|PGRST202|404/i.test((error.message || '') + (error.code || ''))) { access = { approved: true, missing: true }; return; }
+    throw error;
+  }
+  access = data || { approved: false };
+}
+
+const usd = (v) => '$' + Number(v || 0).toFixed(2);
+function limitLine() {
+  if (!access || access.missing || access.daily_limit === undefined) return '';
+  const d = Number(access.today) / Number(access.daily_limit || 1), m = Number(access.month) / Number(access.monthly_limit || 1);
+  const warn = d >= 0.8 || m >= 0.8;
+  return `<p class="${warn ? 'notice' : 'muted small'}" style="margin:0">AI xərci — bu gün: <strong>${usd(access.today)}</strong> / ${usd(access.daily_limit)} · bu ay: <strong>${usd(access.month)}</strong> / ${usd(access.monthly_limit)}${warn ? ' · limitə yaxınsınız' : ''}</p>`;
+}
+
+function pendingView() {
+  const email = session?.user?.email || '';
+  $app.innerHTML = `<div class="center-screen"><div class="card auth-card stack">
+    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Təsdiq gözlənilir</h1></div>
+    <p>Hesabınız (<strong>${esc(email)}</strong>) yaradıldı, amma hələ təsdiqlənməyib.</p>
+    <p class="muted">Platformanın admini hesabınızı təsdiq edəndən sonra daxil ola biləcəksiniz. Təsdiqdən sonra bu səhifəni yeniləyin.</p>
+    <div class="row"><button class="btn primary" id="recheck">Yenidən yoxla</button><button class="btn" id="logout2">Çıxış</button></div>
+  </div></div>`;
+  $('#recheck').onclick = () => { access = null; route(); };
+  $('#logout2').onclick = async () => { await sb.auth.signOut(); };
+}
+
+// Admin: müəllimlərin təsdiqi və limitləri
+async function teachersView() {
+  const { data, error } = await sb.rpc('admin_teachers');
+  if (error) throw error;
+  const list = data || [];
+  const pending = list.filter((t) => !t.approved);
+  const row = (t) => `<tr data-uid="${t.user_id}">
+      <td><strong>${esc(t.email || '—')}</strong>${t.is_admin ? ' <span class="tag book">admin</span>' : ''}<div class="small muted">${fmtDate(t.created_at)} · ${t.questions} sual · ${t.students} şagird</div></td>
+      <td><label class="row small" style="gap:6px"><input type="checkbox" data-f="approved" ${t.approved ? 'checked' : ''} ${t.is_admin ? 'disabled' : ''} style="width:22px;height:22px"> ${t.approved ? 'təsdiqlənib' : 'gözləyir'}</label></td>
+      <td><input type="number" data-f="daily_limit_usd" min="0" step="0.5" value="${Number(t.daily_limit)}" style="width:84px;min-height:40px"></td>
+      <td><input type="number" data-f="monthly_limit_usd" min="0" step="1" value="${Number(t.monthly_limit)}" style="width:84px;min-height:40px"></td>
+      <td><strong>${usd(t.month)}</strong></td>
+      <td><button class="btn small primary" data-save>Saxla</button></td></tr>`;
+  view().innerHTML = `
+    <div class="page-head"><div><h1>Müəllimlər</h1><p class="muted">Yeni qeydiyyatdan keçən müəllim siz təsdiqləyənə qədər platformadan istifadə edə bilmir. AI xərci gündəlik və aylıq limitlə məhdudlaşır.</p></div></div>
+    ${pending.length ? `<p class="notice">${pending.length} müəllim təsdiq gözləyir.</p>` : ''}
+    <section class="card stack">
+      <div class="table-wrap"><table><thead><tr><th>Müəllim</th><th>Giriş</th><th>Gündəlik $</th><th>Aylıq $</th><th>Bu ay</th><th></th></tr></thead>
+        <tbody>${list.map(row).join('')}</tbody></table></div>
+      <p class="small muted">Limitlər Bakı vaxtı ilə hesablanır: gündəlik limit hər gecə, aylıq limit ayın 1-də sıfırlanır. Limit dolanda müəllim AI-dan istifadə edə bilmir, qalan funksiyalar işləyir.</p>
+    </section>`;
+  $$('[data-save]').forEach((b) => b.onclick = () => {
+    const tr = b.closest('tr');
+    const val = (f) => $(`[data-f="${f}"]`, tr);
+    const upd = {
+      daily_limit_usd: Math.max(0, Number(val('daily_limit_usd').value) || 0),
+      monthly_limit_usd: Math.max(0, Number(val('monthly_limit_usd').value) || 0)
+    };
+    if (!val('approved').disabled) upd.approved = val('approved').checked;
+    busy(b, async () => {
+      const { error: err } = await sb.from('teacher_access').update(upd).eq('user_id', tr.dataset.uid);
+      if (err) throw err;
+      toast('Yadda saxlandı');
+      if (tr.dataset.uid === session.user.id) access = null;
+      route();
+    }).catch(fail);
+  });
 }
 
 // ================= Panel =================
@@ -346,6 +424,7 @@ async function renderUsage(period = 'month') {
 }
 
 async function dashboard() {
+  await loadAccess().catch(() => {}); // xərc göstəricisi təzə olsun
   const name = session.user.user_metadata?.full_name || '';
   const [c, s, q, sub, recent] = await Promise.all([
     sb.from('classes').select('id', { count: 'exact', head: true }),
@@ -359,7 +438,8 @@ async function dashboard() {
     <div class="page-head"><div>
       <div class="crumb">${new Date().toLocaleDateString('az-AZ', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       <h1>Salam${name ? ', ' + esc(name) : ''}</h1>
-    </div><a class="btn primary" href="#/tests">+ Yeni test</a></div>
+    </div><a class="btn primary" href="#/newtest">+ Yeni test</a></div>
+    ${limitLine()}
     <section class="grid" aria-label="Göstəricilər">
       ${stat('Siniflər', c.count)}${stat('Şagirdlər', s.count)}${stat('Sual bankı', q.count)}${stat('Test nəticələri', sub.count)}
     </section>
