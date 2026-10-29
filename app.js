@@ -611,10 +611,11 @@ async function saveQuestions(list, source) {
       row.fit_ok = typeof q.fit_ok === 'boolean' ? q.fit_ok : null;
       row.fit_note = q.fit_note || null;
     } else if (typeof q.verified === 'boolean') { row.verified = q.verified; row.verify_note = q.verify_note || null; }
+    if (q.teacher_approved) row.teacher_approved = true;
     return row;
   });
   // Toplu yazılışda bütün sətirlər eyni sütunlara malik olmalıdır, çatışmayanlar standart dəyərlə doldurulur
-  const DEFAULTS = { exam: 'general', figure: null, option_figures: [], section: null, subtype: null, model: null, verified: null, verify_note: null, ai_status: null, fit_ok: null, fit_note: null };
+  const DEFAULTS = { exam: 'general', figure: null, option_figures: [], section: null, subtype: null, model: null, verified: null, verify_note: null, ai_status: null, fit_ok: null, fit_note: null, teacher_approved: false };
   const keys = new Set(rows.flatMap((r) => Object.keys(r)));
   rows.forEach((r) => keys.forEach((k) => { if (!(k in r)) r[k] = k in DEFAULTS ? DEFAULTS[k] : null; }));
   const { data: saved, error } = await sb.from('questions').insert(rows).select('id');
@@ -1040,7 +1041,8 @@ async function renderQuestionImage(q) {
   }
   const opts = await Promise.all(figs.map((f) => svgToCanvas(f, 200)));
   if (figs.length) {
-    if (figs.length !== 5) problems.push(`variant şəkilləri natamamdır (${figs.length}/5)`);
+    const nOpt = (q.options || []).length || 5;
+    if (figs.length !== nOpt) problems.push(`variant şəkilləri natamamdır (${figs.length}/${nOpt})`);
     opts.forEach((c, i) => {
       if (!c) problems.push(`variant ${'ABCDE'[i]} göstərilə bilmir`);
       else if (inkRatio(c) < 0.003) problems.push(`variant ${'ABCDE'[i]} boş görünür`);
@@ -1250,7 +1252,13 @@ function renderGroups() {
       ${g.questions.map((q) => { const key = String(q._uid); return miniQ(q, key, key in tyState.sel ? tyState.sel[key] : defaultChecked(q)); }).join('')}
     </div>`).join('')}</div>
   </div>`;
-  bindMini(box, (key) => { for (const g of groups) { const q = g.questions.find((x) => String(x._uid) === key); if (q) return { q, sample: g.sample }; } return {}; });
+  bindMini(box, (key) => {
+    for (const g of groups) {
+      const q = g.questions.find((x) => String(x._uid) === key);
+      if (q) return { q, sample: g.sample, onApprove: q.ai_status === 'checking' ? null : (on) => { if (on) tyState.sel[key] = true; renderGroups(); } };
+    }
+    return {};
+  });
   $$('[data-fill]', box).forEach((b) => b.onclick = () => tyState.fillMissing && tyState.fillMissing(+b.dataset.fill));
   $$('#exResults .check').forEach((c) => c.onchange = () => { tyState.sel[c.dataset.id] = c.checked; });
   const chosen = () => {
@@ -1286,12 +1294,16 @@ function renderGroups() {
 function miniQ(q, key, checked) {
   const letter = 'ABCDE'[(q.options || []).indexOf(q.answer)] || '—';
   const st = STATUS_BADGE[q.ai_status] || (q.verified === true ? STATUS_BADGE.passed : q.verified === false ? STATUS_BADGE.review : null);
-  const ver = st ? `<span class="tag ${st[0]}" title="${esc(st[2])}">${esc(st[1])}</span>` : '';
+  const ver = (st ? `<span class="tag ${st[0]}" title="${esc(st[2])}">${esc(st[1])}</span>` : '')
+    + (q.teacher_approved ? '<span class="tag ai">✔ təsdiqlədiniz</span>' : '');
+  const why = (q.ai_status === 'draft' || q.ai_status === 'review') && !q.teacher_approved
+    ? [q.verify_note, q.fit_note].filter(Boolean).join('; ') : '';
   return `<div class="mini-q">
     <input type="checkbox" class="check" data-id="${esc(key)}" ${checked ? 'checked' : ''} aria-label="Sualı seç">
     <button type="button" class="mini-open" data-open="${esc(key)}">
       <span class="mini-text">${esc(q.body)}</span>
       <span class="mini-meta">${q.figure || hasOptionFigures(q) ? '<span class="tag">şəkil</span>' : ''}<span class="tag">${esc(q.difficulty || '')}</span><span class="tag ai">Cavab: ${letter}</span>${ver}</span>
+      ${why ? `<span class="mini-why">Səbəb: ${esc(why)}</span>` : ''}
     </button>
   </div>`;
 }
@@ -1308,13 +1320,20 @@ function bindMini(root, getItem) {
       $app.appendChild(dlg);
       dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
     }
+    const item = getItem(b.dataset.open);
+    const canApprove = typeof item.onApprove === 'function';
     dlg.innerHTML = `<div class="q-dialog-in">
-      <div class="row between"><h2>Sual</h2><button type="button" class="btn small" data-close aria-label="Bağla">✕ Bağla</button></div>
+      <div class="row between"><h2>Sual</h2><div class="row">
+        ${canApprove ? `<button type="button" class="btn small ${q.teacher_approved ? '' : 'primary'}" data-approve>${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə — yoxladım, düzgündür'}</button>` : ''}
+        <button type="button" class="btn small" data-close aria-label="Bağla">✕ Bağla</button></div></div>
+      ${canApprove && !q.teacher_approved && (q.ai_status === 'draft' || q.ai_status === 'review') ? '<p class="notice">AI yoxlaması keçməyib. Sualı, cavabı və həlli özünüz yoxlayın; düzgündürsə təsdiqləyin.</p>' : ''}
       <div class="${sample ? 'dlg-pair' : ''}">
         ${sample ? `<div class="dlg-src"><div class="muted small">Nümunə</div>${sample.image ? `<img src="${sample.image}" alt="Nümunə">` : `<div class="small pre">${esc(sample.text)}</div>`}</div>` : ''}
         <div>${sample ? '<div class="muted small">Yeni sual</div>' : ''}${questionHtml(sample || !q.source ? { ...q, source: 'ai' } : q)}</div>
       </div></div>`;
     $('[data-close]', dlg).onclick = () => dlg.close();
+    const ap = $('[data-approve]', dlg);
+    if (ap) ap.onclick = () => { q.teacher_approved = !q.teacher_approved; dlg.close(); item.onApprove(q.teacher_approved); };
     dlg.showModal();
   });
 }
@@ -1773,7 +1792,7 @@ function pdfQuestions(pickerRoot, out) {
   }
 
   const allQs = () => jobs.flatMap((j) => j.questions);
-  const isSel = (q) => (q._sel === undefined ? defaultChecked(q) : q._sel);
+  const isSel = (q) => (q._sel === undefined ? defaultChecked(q) || !!q.teacher_approved : q._sel);
 
   function render() {
     if (!out.isConnected) return;
@@ -1792,7 +1811,10 @@ function pdfQuestions(pickerRoot, out) {
           <div class="mini-grid">${j.questions.map((q) => `<div class="mini">${miniQ(q, 'p' + q._uid, isSel(q))}</div>`).join('')}</div>
         </div></div>`;
     }).join('')}</div>`;
-    const byKey = Object.fromEntries(jobs.flatMap((j) => j.questions.map((q) => ['p' + q._uid, { q, sample: j.sample || { image: j.image } }])));
+    const byKey = Object.fromEntries(jobs.flatMap((j) => j.questions.map((q) => ['p' + q._uid, {
+      q, sample: j.sample || { image: j.image },
+      onApprove: q.ai_status === 'checking' ? null : (on) => { if (on) q._sel = true; render(); }
+    }])));
     bindMini(out, (k) => byKey[k] || {});
     $$('.check', out).forEach((c) => c.onchange = () => { const it = byKey[c.dataset.id]; if (it) it.q._sel = c.checked; out.dispatchEvent(new Event('pdfchange', { bubbles: true })); });
     $$('[data-rmjob]', out).forEach((b) => b.onclick = () => {
