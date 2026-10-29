@@ -21,7 +21,7 @@ const errs = []; const ok = (m) => console.log('✓', m); const fail = (m) => { 
   const a = await mk(); await a.goto('http://app.test/');
   await a.evaluate(([d, s]) => { localStorage.setItem('mockdb', JSON.stringify(d)); localStorage.setItem('mocksession', s); }, [DB, sess('u1', 'saleh@x.az')]);
   await a.reload(); await a.waitForSelector('text=Açıq testlər');
-  console.log('  dashboard warning:', await a.$eval('.page-head + p', (e) => e.textContent.replace(/\s+/g, ' ').trim()));
+  console.log('  dashboard warning:', await a.$eval('.hero + p', (e) => e.textContent.replace(/\s+/g, ' ').trim()));
   console.log('  nav:', await a.$$eval('nav .item', (x) => x.map((e) => e.textContent.trim()).join(' | ')));
   await a.click('nav >> text=Ayarlar'); await a.waitForSelector('text=Müəllimlər ›'); await a.screenshot({ path: path.join(T, 'set1.png'), fullPage: true });
   await a.click('text=Müəllimlər ›'); await a.waitForSelector('[data-save]'); ok('admin: settings → teachers');
