@@ -1311,7 +1311,7 @@ function bindMini(root, getItem) {
       <div class="row between"><h2>Sual</h2><button type="button" class="btn small" data-close aria-label="Bağla">✕ Bağla</button></div>
       <div class="${sample ? 'dlg-pair' : ''}">
         ${sample ? `<div class="dlg-src"><div class="muted small">Nümunə</div>${sample.image ? `<img src="${sample.image}" alt="Nümunə">` : `<div class="small pre">${esc(sample.text)}</div>`}</div>` : ''}
-        <div>${sample ? '<div class="muted small">Yeni sual</div>' : ''}${questionHtml({ ...q, source: 'ai' })}</div>
+        <div>${sample ? '<div class="muted small">Yeni sual</div>' : ''}${questionHtml(sample || !q.source ? { ...q, source: 'ai' } : q)}</div>
       </div></div>`;
     $('[data-close]', dlg).onclick = () => dlg.close();
     dlg.showModal();
@@ -1588,9 +1588,12 @@ async function testsView() {
         <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Tənliklər · qısa yoxlama"></label>
         <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz (şagird adını özü yazır)</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
       </div>
-      <div class="row between"><strong>Suallar · <span id="selCount">${preset.size}</span> seçilib</strong>${questions?.length ? '' : '<a href="#/ai">Əvvəlcə sual yaradın</a>'}</div>
-      <div style="max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:0 14px">
-        ${(questions || []).map((q) => questionHtml(q, { selectable: true, checked: preset.has(q.id), showAnswer: false })).join('') || '<div class="empty" style="margin:14px 0">Sual bankı boşdur.</div>'}
+      <div class="row between"><strong>Suallar · <span id="selCount">${preset.size}</span> seçilib · bankda ${(questions || []).length}</strong>${questions?.length ? '' : '<a href="#/ai">Əvvəlcə sual yaradın</a>'}</div>
+      ${questions?.length ? `<div class="row"><input type="search" id="tqFind" placeholder="Axtar: mətn və ya mövzu" style="flex:1;min-width:180px">
+        <button type="button" class="btn small" id="tqAll">Görünənləri seç</button><button type="button" class="btn small" id="tqNone">Seçimi sil</button></div>
+        <p class="muted small">Suala basanda tam halı açılır.</p>` : ''}
+      <div class="mini-grid" id="tqList">
+        ${(questions || []).map((q) => `<div class="mini" data-find="${esc(((q.body || '') + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az'))}">${miniQ(q, q.id, preset.has(q.id))}</div>`).join('') || '<div class="empty">Sual bankı boşdur.</div>'}
       </div>
       <div><button class="btn primary" type="submit">Testi yarat</button></div>
     </form>
@@ -1605,7 +1608,19 @@ async function testsView() {
     </section>`;
 
   const form = $('#newTest');
-  form.addEventListener('change', (e) => { if (e.target.classList.contains('check')) $('#selCount').textContent = $$('.check:checked', form).length; });
+  const countSel = () => { $('#selCount').textContent = $$('.check:checked', form).length; };
+  form.addEventListener('change', (e) => { if (e.target.classList.contains('check')) countSel(); });
+  const qById = Object.fromEntries((questions || []).map((q) => [q.id, q]));
+  bindMini(form, (id) => ({ q: qById[id] }));
+  if ($('#tqFind')) {
+    $('#tqFind').oninput = (e) => {
+      const t = e.target.value.trim().toLocaleLowerCase('az');
+      $$('#tqList .mini').forEach((m) => { m.hidden = !!t && !m.dataset.find.includes(t); });
+    };
+    $('#tqFind').onkeydown = (e) => { if (e.key === 'Enter') e.preventDefault(); };
+    $('#tqAll').onclick = () => { $$('#tqList .mini:not([hidden]) .check').forEach((c) => { c.checked = true; }); countSel(); };
+    $('#tqNone').onclick = () => { $$('#tqList .check').forEach((c) => { c.checked = false; }); countSel(); };
+  }
   form.onsubmit = (e) => {
     e.preventDefault();
     const ids = $$('.check:checked', form).map((c) => c.dataset.id);

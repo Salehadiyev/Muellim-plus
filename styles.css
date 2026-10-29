@@ -331,3 +331,4 @@ body.capturing .sheet { box-shadow: none; }
 .portal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #EEF1F5; color: inherit; text-decoration: none; min-height: 48px; }
 .portal-row:last-child { border-bottom: 0; }
 .missing-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.mini[hidden] { display: none; }
