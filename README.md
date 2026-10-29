@@ -2,6 +2,13 @@
 
 Riyaziyyat müəllimləri üçün platforma: siniflər, şagirdlər, AI ilə sual yaratma, kitabdan sual kəsib orijinala çevirmə, sual bankı və şagirdlər üçün onlayn test.
 
+## Menyu (sadələşdirilmiş)
+- **Ana səhifə** — 3 böyük düymə (Sual yarat, Test yarat, Siniflər), açıq testlər (kim neçə yazıb), son nəticələr.
+- **Siniflər** — şagirdlər, şəxsi linklər, Analiz, şagird səhifəsi (fərdi tapşırıq, valideyn hesabatı).
+- **Suallar** — üç bölmə: Sual bankı · Kitabdan / PDF (`#/pdf`) · AI ilə yarat (`#/ai`).
+- **Testlər** — siyahı və + Yeni test.
+- **Ayarlar** — AI xərci və limit, AI sayğacı, Müəllimlər (admin), hesab.
+
 ## Nə var
 
 | Hissə | Nə edir |

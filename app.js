@@ -237,29 +237,31 @@ function route() {
   if (!access.approved) return pendingView();
   if (page === 'print') return printView();
 
+  if (page === 'book' || page === 'questions') return go(page === 'book' ? '#/pdf' : '#/bank');
   const views = {
-    '': dashboard, classes: classesView, class: classView, bank: bankView,
-    ai: aiView, book: bookView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView,
-    ...(access.is_admin ? { teachers: teachersView } : {})
+    '': dashboard, classes: classesView, class: classView, bank: bankView, pdf: pdfView,
+    ai: aiView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView,
+    settings: settingsView, ...(access.is_admin ? { teachers: teachersView } : {})
   };
   const view = views[page] || dashboard;
-  const navKey = page === 'class' || page === 'student' || page === 'analysis' ? 'classes' : page === 'test' || page === 'newtest' ? 'tests' : (views[page] ? page : '');
+  const NAV = { class: 'classes', student: 'classes', analysis: 'classes', bank: 'questions', pdf: 'questions', ai: 'questions', test: 'tests', newtest: 'tests', teachers: 'settings' };
+  const navKey = NAV[page] || (views[page] ? page : '');
   shell(navKey);
   window.scrollTo(0, 0);
-  view(id).catch(fail);
+  view(id).then(() => {
+    if (['bank', 'pdf', 'ai'].includes(page) && document.getElementById('view')) $('#view').insertAdjacentHTML('afterbegin', qSubnav(page));
+  }).catch(fail);
 }
 
 function shell(active) {
-  const items = [
-    ['', 'Panel'], ['classes', 'Siniflər'], ['bank', 'Sual bankı'], ['ai', 'TR-YÖS / AI'],
-    ['book', 'Kitabdan sual'], ['tests', 'Testlər'], ...(access?.is_admin ? [['teachers', 'Müəllimlər']] : [])
-  ];
+  const items = [['', 'Ana səhifə'], ['classes', 'Siniflər'], ['questions', 'Suallar'], ['tests', 'Testlər']];
   const email = session?.user?.email || '';
   $app.innerHTML = `<div class="shell">
     <nav class="nav" aria-label="Əsas menyu">
       <a class="brand" href="#/"><span class="brand-mark">M+</span><span class="brand-name">Müəllim+</span></a>
       ${items.map(([k, label]) => `<a class="item ${k === active ? 'active' : ''}" href="#/${k}">${label}</a>`).join('')}
       <div class="spacer"></div>
+      <a class="item ${active === 'settings' ? 'active' : ''}" href="#/settings">Ayarlar</a>
       <div class="who"><span>${esc(email)}</span><button type="button" class="btn small" id="logout">Çıxış</button></div>
     </nav>
     <main class="main" id="view"><div class="spinner" aria-label="Yüklənir"></div></main>
@@ -350,7 +352,7 @@ async function teachersView() {
       <td><strong>${usd(t.month)}</strong></td>
       <td><button class="btn small primary" data-save>Saxla</button></td></tr>`;
   view().innerHTML = `
-    <div class="page-head"><div><h1>Müəllimlər</h1><p class="muted">Yeni qeydiyyatdan keçən müəllim siz təsdiqləyənə qədər platformadan istifadə edə bilmir. AI xərci gündəlik və aylıq limitlə məhdudlaşır.</p></div></div>
+    <div class="page-head"><div><div class="crumb"><a href="#/settings">Ayarlar</a> /</div><h1>Müəllimlər</h1><p class="muted">Yeni qeydiyyatdan keçən müəllim siz təsdiqləyənə qədər platformadan istifadə edə bilmir. AI xərci gündəlik və aylıq limitlə məhdudlaşır.</p></div></div>
     ${pending.length ? `<p class="notice">${pending.length} müəllim təsdiq gözləyir.</p>` : ''}
     <section class="card stack">
       <div class="table-wrap"><table><thead><tr><th>Müəllim</th><th>Giriş</th><th>Gündəlik $</th><th>Aylıq $</th><th>Bu ay</th><th></th></tr></thead>
@@ -423,38 +425,60 @@ async function renderUsage(period = 'month') {
   $$('[data-period]', box).forEach((b) => b.onclick = () => renderUsage(b.dataset.period));
 }
 
+const AZ_MONTHS_FULL = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avqust', 'sentyabr', 'oktyabr', 'noyabr', 'dekabr'];
+const AZ_DAYS = ['bazar', 'bazar ertəsi', 'çərşənbə axşamı', 'çərşənbə', 'cümə axşamı', 'cümə', 'şənbə'];
+const todayAz = () => { const d = new Date(); return `${d.getDate()} ${AZ_MONTHS_FULL[d.getMonth()]}, ${AZ_DAYS[d.getDay()]}`; };
+
 async function dashboard() {
-  await loadAccess().catch(() => {}); // xərc göstəricisi təzə olsun
+  await loadAccess().catch(() => {}); // xərc xəbərdarlığı təzə olsun
   const name = session.user.user_metadata?.full_name || '';
-  const [c, s, q, sub, recent] = await Promise.all([
-    sb.from('classes').select('id', { count: 'exact', head: true }),
-    sb.from('students').select('id', { count: 'exact', head: true }),
-    sb.from('questions').select('id', { count: 'exact', head: true }),
-    sb.from('submissions').select('id', { count: 'exact', head: true }),
-    sb.from('submissions').select('student_name, score, total, created_at, tests(title)').order('created_at', { ascending: false }).limit(6)
+  const [{ data: tests }, { data: subs }, { data: studs }, { count: qCount }] = await Promise.all([
+    sb.from('tests').select('*, classes(name)').eq('is_open', true).order('created_at', { ascending: false }).limit(20),
+    sb.from('submissions').select('test_id, student_id, student_name, score, total, created_at, tests(title)').order('created_at', { ascending: false }).limit(300),
+    sb.from('students').select('id, class_id'),
+    sb.from('questions').select('id', { count: 'exact', head: true })
   ]);
-  const stat = (label, v) => `<div class="card stat"><div class="label">${label}</div><div class="value">${v ?? 0}</div></div>`;
+  const perClass = {};
+  (studs || []).forEach((x) => { perClass[x.class_id] = (perClass[x.class_id] || 0) + 1; });
+  const sentBy = {};
+  (subs || []).forEach((x) => { sentBy[x.test_id] = (sentBy[x.test_id] || 0) + 1; });
+  const recent = (subs || []).slice(0, 6);
+  const warn = access && access.daily_limit !== undefined && (Number(access.today) >= 0.8 * Number(access.daily_limit) || Number(access.month) >= 0.8 * Number(access.monthly_limit));
   view().innerHTML = `
     <div class="page-head"><div>
-      <div class="crumb">${new Date().toLocaleDateString('az-AZ', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-      <h1>Salam${name ? ', ' + esc(name) : ''}</h1>
-    </div><a class="btn primary" href="#/newtest">+ Yeni test</a></div>
-    ${limitLine()}
-    <section class="grid" aria-label="Göstəricilər">
-      ${stat('Siniflər', c.count)}${stat('Şagirdlər', s.count)}${stat('Sual bankı', q.count)}${stat('Test nəticələri', sub.count)}
+      <div class="crumb">${todayAz()}</div>
+      <h1>Salam${name ? ', ' + esc(name) : ''}</h1></div></div>
+    ${warn ? limitLine() : ''}
+    <section class="big-actions">
+      <a class="card big-action" href="#/pdf"><span class="icon-box">${icons.cut}</span><strong>Sual yarat</strong><span class="muted small">Kitabdan, PDF-dən və ya AI ilə · bankda ${qCount ?? 0} sual</span></a>
+      <a class="card big-action" href="#/newtest"><span class="icon-box">${icons.test}</span><strong>Test yarat</strong><span class="muted small">Sualları seç, sinfə göndər</span></a>
+      <a class="card big-action" href="#/classes"><span class="icon-box">${icons.users}</span><strong>Siniflər və nəticələr</strong><span class="muted small">Şagirdlər, analiz, hesabat</span></a>
     </section>
-    <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
-    <section class="stack"><h2>Sürətli başla</h2><div class="grid">
-      <a class="card action-card" href="#/ai"><span class="icon-box">${icons.spark}</span><h3>AI ilə sual yarat</h3><p class="muted small">Mövzu, sinif və çətinliyi seç, suallar həlli ilə hazır olsun.</p></a>
-      <a class="card action-card accent" href="#/book"><span class="icon-box" style="background:var(--accent)">${icons.cut.replace('aria-hidden', 'style="stroke:#fff" aria-hidden')}</span><h3>Kitabdan sual kəs</h3><p class="muted small">Səhifənin şəklini çək, sualı seç, AI onu orijinal suala çevirsin.</p></a>
-      <a class="card action-card" href="#/tests"><span class="icon-box">${icons.test}</span><h3>Test yığ</h3><p class="muted small">Sual bankından seç, linki şagirdlərə göndər.</p></a>
-      <a class="card action-card" href="#/classes"><span class="icon-box">${icons.users}</span><h3>Siniflər</h3><p class="muted small">Sinif yarat, şagird siyahısını əlavə et.</p></a>
-    </div></section>
+    <section class="card stack"><h2>Açıq testlər</h2>
+      ${tests?.length ? tests.map((t) => {
+        const total = t.student_id ? 1 : (t.class_id ? perClass[t.class_id] || 0 : 0);
+        const done = sentBy[t.id] || 0;
+        return `<a class="portal-row" href="#/test/${t.id}"><span><strong>${esc(t.title)}</strong><span class="small muted"> · ${esc(t.classes?.name || 'sinifsiz')}${t.due_at ? ' · son tarix ' + esc(fmtDue(t.due_at)) : ''}</span></span>
+          <span class="row" style="gap:8px;flex-wrap:nowrap">${total ? `<span class="small ${done < total ? '' : 'muted'}">${done} / ${total} yazıb</span>` : `<span class="small muted">${done} iş</span>`}<span class="muted">›</span></span></a>`;
+      }).join('') : '<div class="empty">Açıq test yoxdur. <a href="#/newtest">Test yaradın</a>.</div>'}
+    </section>
     <section class="card stack"><h2>Son nəticələr</h2>
-      ${recent.data?.length ? `<div class="table-wrap"><table><thead><tr><th>Şagird</th><th>Test</th><th>Bal</th><th>Vaxt</th></tr></thead><tbody>
-        ${recent.data.map((r) => `<tr><td>${esc(r.student_name)}</td><td>${esc(r.tests?.title)}</td><td><strong>${r.score}/${r.total}</strong></td><td class="muted">${fmtDate(r.created_at)}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">Hələ nəticə yoxdur. Test yaradıb linki şagirdlərə göndərin.</div>'}
+      ${recent.length ? `<div class="table-wrap"><table><thead><tr><th>Şagird</th><th>Test</th><th>Bal</th><th>Vaxt</th></tr></thead><tbody>
+        ${recent.map((r) => `<tr><td>${esc(r.student_name)}</td><td><a href="#/test/${r.test_id}">${esc(r.tests?.title || '')}</a></td><td><strong>${r.score}/${r.total}</strong></td><td class="muted small">${fmtDate(r.created_at)}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">Hələ nəticə yoxdur.</div>'}
     </section>`;
+}
+
+// Ayarlar: AI xərci və limit, müəllimlər (admin), hesab
+async function settingsView() {
+  await loadAccess().catch(() => {});
+  view().innerHTML = `
+    <div class="page-head"><div><h1>Ayarlar</h1></div></div>
+    <section class="card stack"><h2>AI xərci</h2>${limitLine() || '<p class="muted small">Limitlər üçün bazada 008 yeniləməsi lazımdır.</p>'}</section>
+    <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
+    ${access?.is_admin ? `<a class="card action-card" href="#/teachers"><h3>Müəllimlər ›</h3><p class="muted small">Yeni qeydiyyatları təsdiqlə, AI limitlərini dəyiş.</p></a>` : ''}
+    <section class="card stack"><h2>Hesab</h2><p>${esc(session?.user?.email || '')}</p><div><button class="btn" id="logout3">Çıxış</button></div></section>`;
+  $('#logout3').onclick = async () => { await sb.auth.signOut(); go('#/'); };
   renderUsage().catch(fail);
 }
 
@@ -597,7 +621,7 @@ async function bankView() {
     visible = rows;
     $('#list').innerHTML = rows.length
       ? rows.map((q) => questionHtml(q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small" data-approve="${q.id}">${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button><button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
-      : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/ai">AI ilə</a> və ya <a href="#/book">kitabdan</a> sual əlavə edin.'}</div>`;
+      : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/pdf">Kitabdan</a> və ya <a href="#/ai">AI ilə</a> sual əlavə edin.'}</div>`;
     $$('#list .check').forEach((c) => c.onchange = () => { c.checked ? selected.add(c.dataset.id) : selected.delete(c.dataset.id); updateBtn(); });
     $$('#list [data-approve]').forEach((b) => b.onclick = async () => {
       const q = data.find((x) => x.id === b.dataset.approve);
@@ -887,7 +911,7 @@ const extractQueue = makeQueue(3);
 
 async function aiView() {
   view().innerHTML = `
-    <div class="page-head"><div><h1>TR-YÖS sual yaradıcı</h1><p class="muted">Nümunə sualları seçin, hər birinin yanında yeni sual yaradılsın.</p></div>${modelPicker()}</div>
+    <div class="page-head"><div><h1>AI ilə sual yarat</h1><p class="muted">Nümunə suallardan, mövzudan və ya məktəb proqramından.</p></div>${modelPicker()}</div>
     <div class="tabs" role="tablist" aria-label="Rejim">
       <button type="button" role="tab" data-tab="examples">Nümunədən yarat</button>
       <button type="button" role="tab" data-tab="topic">Mövzudan yarat</button>
@@ -1551,126 +1575,45 @@ function generalTab() {
   };
 }
 
-// ================= Kitabdan sual =================
+// ================= Kitabdan / PDF-dən sual (banka) =================
 
-async function bookView() {
-  const state = { extracted: null, level: 'orta', result: null };
-  const LEVELS = [
-    ['yungul', 'Yüngül', 'Adlar və rəqəmlər dəyişir'],
-    ['orta', 'Orta', 'Yeni kontekst, eyni quruluş'],
-    ['tam', 'Tam yeni', 'Eyni bilik, fərqli qurulma']
-  ];
-
+async function pdfView() {
   view().innerHTML = `
-    <div class="page-head"><div><h1>Kitabdan sual kəs</h1><p class="muted">Səhifənin şəklini çəkin və ya dərsliyin PDF-ini seçin, sualı barmaqla çərçivəyə alın, AI onu orijinal suala çevirsin.</p></div></div>
-    <p class="notice info">Kitabın şəkli saxlanılmır. Banka yalnız AI-ın yaratdığı yeni sual yazılır.</p>
-    <div class="split">
-      <section class="card stack">
-        <h2>1. Səhifə</h2>
-        <div id="bookPicker" class="stack"></div>
-      </section>
-      <section class="stack" id="right">
-        <div class="card stack" id="step2"><h2>2. Tanınmış mətn</h2><div class="empty">Əvvəlcə şəkil seçin və “Sualı oxu” düyməsini basın.</div></div>
-      </section>
+    <div class="page-head"><div><h1>Kitabdan / PDF-dən sual</h1>
+      <p class="muted">PDF və ya şəkil aç, sualı barmaqla çərçivəyə al. Aşağıda seçim çıxacaq: təmiz orijinalını çıxart və ya AI ilə bənzərini yarat.</p></div>${modelPicker()}</div>
+    <section class="card stack"><div id="pdfPicker" class="stack"></div><div id="pdfOut"></div></section>
+    <div class="sticky-bar" id="pdfBar" hidden>
+      <span><strong id="pdfCount">0</strong> sual seçilib</span>
+      <span class="row"><button class="btn" id="pdfToTest">Testə əlavə et</button><button class="btn primary" id="pdfSave">Banka əlavə et</button></span>
     </div>`;
-
-  createPicker($('#bookPicker'), {
-    hint: 'Şəkil seçildikdən sonra sualın üstündən barmağınızı çəkərək çərçivə çəkin. Çərçivə çəkməsəniz, bütün səhifə oxunur.',
-    actions: (row, picker) => {
-      row.insertAdjacentHTML('afterbegin', '<button class="btn primary" id="read">Sualı oxu</button>');
-      $('#read').onclick = (e) => busy(e.currentTarget, () => readQuestion(picker)).catch(fail);
+  bindModelPicker(view());
+  const pdf = pdfQuestions($('#pdfPicker'), $('#pdfOut'));
+  const update = () => {
+    const n = pdf.selected().length;
+    $('#pdfCount').textContent = n;
+    $('#pdfBar').hidden = !pdf.count();
+    $('#pdfSave').disabled = !n || pdf.busy();
+    $('#pdfToTest').disabled = !n || pdf.busy();
+  };
+  view().addEventListener('pdfchange', update);
+  const save = async () => {
+    const list = pdf.selected();
+    const ids = [];
+    for (const src of ['book', 'ai']) {
+      const part = list.filter((q) => q._source === src);
+      if (part.length) ids.push(...await saveQuestions(part, src));
     }
-  });
-
-  async function readQuestion(picker) {
-    const data = await callAI('extract', { image: picker.dataUrl() });
-    state.extracted = data;
-    state.result = null;
-    renderStep2();
-    if (window.innerWidth < 900) $('#step2').scrollIntoView({ behavior: 'smooth' });
-  }
-
-  function renderStep2() {
-    const x = state.extracted;
-    $('#step2').innerHTML = `<h2>2. Tanınmış mətn</h2>
-      <label class="field">Yoxlayın, səhv varsa düzəldin<textarea id="ocr" rows="4">${esc(x.text)}</textarea></label>
-      <div class="row">
-        ${x.topic ? `<span class="tag">Mövzu: ${esc(x.topic)}</span>` : ''}
-        <span class="tag">Sinif: ${esc(x.grade)}</span><span class="tag amber">${esc(x.difficulty)}</span>
-        ${x.answer ? `<span class="tag ai">Orijinalın cavabı: ${esc(x.answer)}</span>` : ''}
-      </div>
-      <h2 style="margin-top:6px">3. Nə qədər dəyişsin?</h2>
-      <div class="pills" role="radiogroup" aria-label="Dəyişiklik dərəcəsi">
-        ${LEVELS.map(([k, n, d]) => `<button type="button" class="pill-opt" role="radio" aria-checked="${state.level === k}" data-level="${k}"><strong>${n}</strong><span>${d}</span></button>`).join('')}
-      </div>
-      <label class="field">Sual növü<select id="qtype"><option value="mcq">Çoxseçimli</option><option value="open">Açıq sual</option></select></label>
-      <button class="btn primary" id="convert">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Orijinala çevir</button>
-      <div id="result"></div>
-      <div class="stack" style="border-top:1px solid var(--line);padding-top:14px;gap:10px">
-        <h2>Və ya: bu nümunəyə bənzər suallar</h2>
-        <p class="muted small">Eyni bacarığı yoxlayan, amma tamamilə yeni bir neçə sual yaradılır.</p>
-        <div class="row">
-          <label class="row small" style="gap:6px">Say <select id="simCount" style="width:auto">${[3, 5, 8, 10].map((n) => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-          <button class="btn" id="similar">Bənzər suallar yarat</button>
-        </div>
-        <div id="simResults"></div>
-      </div>`;
-    $$('[data-level]').forEach((b) => b.onclick = () => {
-      state.level = b.dataset.level;
-      $$('[data-level]').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
-    });
-    $('#convert').onclick = (e) => busy(e.currentTarget, convert).catch(fail);
-    $('#similar').onclick = (e) => busy(e.currentTarget, similar).catch(fail);
-  }
-
-  async function similar() {
-    const x = state.extracted;
-    const data = await callAI('generate', {
-      example: $('#ocr').value, topic: x.topic, grade: x.grade, difficulty: x.difficulty,
-      qtype: $('#qtype').value, count: $('#simCount').value
-    });
-    const list = data.questions;
-    $('#simResults').innerHTML = `<div class="card stack">
-      <div class="row between"><h3>${list.length} bənzər sual</h3><button class="btn dark" id="saveSim">Seçilənləri banka əlavə et</button></div>
-      <div>${list.map((q, i) => questionHtml({ ...q, id: i, source: 'book' }, { selectable: true, checked: true })).join('')}</div>
-    </div>`;
-    $('#saveSim').onclick = (e) => {
-      const btn = e.currentTarget;
-      const chosen = $$('#simResults .check').filter((c) => c.checked).map((c) => list[+c.dataset.id]);
-      if (!chosen.length) return toast('Heç bir sual seçilməyib', true);
-      busy(btn, () => saveQuestions(chosen, 'book')).then(() => {
-        toast(chosen.length + ' sual banka əlavə olundu');
-        btn.textContent = 'Əlavə olundu ✓';
-        btn.disabled = true;
-      }).catch(fail);
-    };
-  }
-
-  async function convert() {
-    const x = state.extracted;
-    const data = await callAI('transform', {
-      text: $('#ocr').value, level: state.level, qtype: $('#qtype').value,
-      grade: x.grade, difficulty: x.difficulty, topic: x.topic
-    });
-    state.result = data;
-    const q = { ...data.question, source: 'book' };
-    $('#result').innerHTML = `<div class="card accent stack">
-      <div class="row between"><h3 style="color:var(--accent)">Yeni orijinal sual</h3><span class="tag book">${esc(LEVELS.find((l) => l[0] === state.level)[1])}</span></div>
-      ${questionHtml(q)}
-      ${data.changes?.length ? `<div class="small"><strong>Nə dəyişdi:</strong><ul style="margin:6px 0 0;padding-left:20px">${data.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''}
-      <div class="row"><button class="btn dark" id="saveBook">Sual bankına əlavə et</button><button class="btn" id="again">Yenidən yarat</button></div>
-    </div>`;
-    $('#saveBook').onclick = (e) => {
-      const btn = e.currentTarget;
-      busy(btn, () => saveQuestions([data.question], 'book')).then(() => {
-        toast('Sual banka əlavə olundu');
-        btn.textContent = 'Əlavə olundu ✓';
-        btn.disabled = true;
-      }).catch(fail);
-    };
-    $('#again').onclick = (e) => busy(e.currentTarget, convert).catch(fail);
-  }
+    pdf.remove(list);
+    return ids;
+  };
+  $('#pdfSave').onclick = () => busy($('#pdfSave'), async () => { const ids = await save(); toast(ids.length + ' sual banka əlavə olundu'); update(); }).catch(fail);
+  $('#pdfToTest').onclick = () => busy($('#pdfToTest'), async () => { pendingTestIds = await save(); go('#/newtest'); }).catch(fail);
+  update();
 }
+
+// Suallar bölməsinin daxili menyusu (bank / kitab / AI)
+const Q_TABS = [['bank', 'Sual bankı'], ['pdf', 'Kitabdan / PDF'], ['ai', 'AI ilə yarat']];
+const qSubnav = (active) => `<nav class="seg sub-seg" aria-label="Suallar">${Q_TABS.map(([k, l]) => `<a class="seg-b ${k === active ? 'on' : ''}" href="#/${k}">${l}</a>`).join('')}</nav>`;
 
 // ================= Testlər =================
 
@@ -1726,8 +1669,8 @@ async function newTestView() {
         <div class="form-grid">
           <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Kümeler · qısa yoxlama"></label>
           <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz (ümumi link, şagird adını yazır)</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
-          <label class="field">Şagirdə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_close' ? 'selected' : ''}>${v}</option>`).join('')}</select>
-            <span class="hint">"Bağlananda" — test açıq olanda cavablar başqalarına ötürülməsin.</span></label>
+          <label class="field">Şagirdə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_submit' ? 'selected' : ''}>${v}</option>`).join('')}</select>
+            <span class="hint">"Bağlananda" seçsəniz, test açıq olanda cavablar başqalarına ötürülməz.</span></label>
         </div>
         <details class="more-opts"><summary>Vaxt, son tarix, qarışdırma</summary>
           <div class="form-grid" style="margin-top:10px">
@@ -2075,7 +2018,15 @@ function pdfQuestions(pickerRoot, out) {
 
   return {
     busy: () => jobs.some((j) => j.state === 'reading' || j.state === 'working'),
-    selected: () => allQs().filter((q) => q.ai_status !== 'checking' && isSel(q))
+    selected: () => allQs().filter((q) => q.ai_status !== 'checking' && isSel(q)),
+    count: () => jobs.length,
+    // saxlanılan sualları siyahıdan çıxar; boş qalan bitmiş işləri də
+    remove(list) {
+      const set = new Set(list);
+      jobs.forEach((j) => { j.questions = j.questions.filter((q) => !set.has(q)); });
+      for (let i = jobs.length - 1; i >= 0; i--) if (jobs[i].state === 'done' && !jobs[i].questions.length) jobs.splice(i, 1);
+      render();
+    }
   };
 }
 

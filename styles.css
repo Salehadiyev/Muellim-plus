@@ -388,3 +388,12 @@ body.capturing .sheet { box-shadow: none; }
 .hard-q:hover { border-color: var(--accent); }
 .hard-t { font-size: 14px; }
 @media (max-width: 600px) { .tbar { grid-template-columns: 1fr auto; } .tbar-b { grid-column: 1 / -1; order: 3; } }
+
+/* Sadələşdirmə */
+.big-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.big-action { display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: inherit; min-height: 120px; }
+.big-action strong { font-size: 18px; }
+.big-action:hover { border-color: var(--accent); }
+.sub-seg { margin-bottom: 4px; }
+a.seg-b { text-decoration: none; }
+.sticky-bar[hidden] { display: none; }
