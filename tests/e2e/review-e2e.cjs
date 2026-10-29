@@ -53,6 +53,7 @@ const errs = []; const ok = (m) => console.log('✓', m); const fail = (m) => { 
   await te.click('[data-sub] >> text=Əli Həsənov'); await te.waitForSelector('#rvDialog[open] .rv-q');
   console.log('  dialog:', await te.$eval('#rvDialog p.muted', (e) => e.textContent.replace(/\s+/g, ' ').trim()));
   await te.screenshot({ path: path.join(T, 'rv3-dialog.png') }); await te.click('#rvDialog [data-close]'); ok('teacher: matrix + student detail');
+  await te.click('.qstat >> nth=0'); await te.waitForSelector('#rvDialog[open] .q'); console.log('  qstat dialog:', await te.textContent('#rvDialog h2')); await te.click('#rvDialog [data-close]');
   await te.selectOption('#rvMode', 'never'); await te.waitForSelector('text=Yadda saxlandı');
   const d2 = await te.evaluate(() => JSON.parse(localStorage.getItem('mockdb'))); console.log('  mode saved:', d2.tests.find((t) => t.id === 'tA').review_mode);
   // teacher student page

@@ -1896,31 +1896,64 @@ async function testsView() {
   const [{ data: tests, error }, { data: subs }, { data: studs }] = await Promise.all([
     sb.from('tests').select('*, classes(name)').order('created_at', { ascending: false }),
     sb.from('submissions').select('test_id'),
-    sb.from('students').select('id, full_name')
+    sb.from('students').select('id, full_name, class_id')
   ]);
   if (error) throw error;
   const studName = Object.fromEntries((studs || []).map((x) => [x.id, x.full_name]));
+  const classSize = {};
+  (studs || []).forEach((x) => { if (x.class_id) classSize[x.class_id] = (classSize[x.class_id] || 0) + 1; });
   const subCount = {};
   (subs || []).forEach((s) => { subCount[s.test_id] = (subCount[s.test_id] || 0) + 1; });
+  const nOpen = tests.filter((t) => t.is_open).length;
+  let tab = nOpen ? 'open' : 'all';
+
+  const card = (t) => {
+    const sent = subCount[t.id] || 0;
+    const target = t.student_id ? 1 : t.class_id ? classSize[t.class_id] || 0 : 0;
+    const pct = target ? Math.min(100, Math.round(sent / target * 100)) : 0;
+    const overdue = t.due_at && new Date(t.due_at) < new Date();
+    const chips = [
+      `<span>${esc(t.classes?.name || 'Sinifsiz')}</span>`,
+      `<span>${t.question_ids.length} sual</span>`,
+      t.time_limit_min ? `<span>⏱ ${t.time_limit_min} dəq</span>` : '',
+      t.due_at ? `<span class="${overdue ? 'tc-late' : ''}">son: ${esc(fmtDue(t.due_at))}${overdue ? ' · keçib' : ''}</span>` : ''
+    ].filter(Boolean).join('');
+    return `<article class="tcard${t.is_open ? ' is-open' : ''}">
+      <div class="tc-main">
+        <div class="tc-top"><span class="tc-status">${t.is_open ? 'Açıq' : 'Bağlı'}</span><span class="small muted">${esc(fmtDue(t.created_at))}</span></div>
+        <a class="tc-title" href="#/test/${t.id}">${esc(t.title)}</a>
+        <div class="tc-chips">${chips}${t.student_id ? `<span class="tag book">fərdi: ${esc(studName[t.student_id] || 'şagird')}</span>` : ''}</div>
+        <div class="tc-prog">${target
+          ? `<span class="tc-bar" aria-hidden="true"><span style="width:${pct}%"></span></span><span class="small"><strong>${sent} / ${target}</strong> şagird göndərib</span>`
+          : `<span class="small"><strong>${sent}</strong> iş göndərilib</span>`}</div>
+      </div>
+      <div class="tc-act">
+        <a class="btn small primary" href="#/test/${t.id}">Nəticələr ›</a>
+        <button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}" title="${t.is_open ? 'Şagirdlər artıq yaza bilməyəcək' : 'Şagirdlər yenə yaza biləcək'}">${t.is_open ? 'Bağla' : 'Yenidən aç'}</button>
+      </div>
+    </article>`;
+  };
 
   view().innerHTML = `
     <div class="page-head"><div><h1>Testlər</h1><p class="muted">Sinfə bağlı test şagirdlərin şəxsi linkində avtomatik görünür.</p></div>
       <a class="btn primary" href="#/newtest">+ Yeni test</a></div>
-    <section class="card stack">
-      ${tests.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sinif</th><th>Sual</th><th>Göndərən</th><th>Status</th><th></th></tr></thead><tbody>
-        ${tests.map((t) => `<tr>
-          <td><a href="#/test/${t.id}"><strong>${esc(t.title)}</strong></a><div class="small muted">${fmtDate(t.created_at)}${t.time_limit_min ? ` · ⏱ ${t.time_limit_min} dəq` : ''}${t.due_at ? ` · son: ${esc(fmtDue(t.due_at))}` : ''}</div>
-            ${t.student_id ? `<span class="tag book">fərdi: ${esc(studName[t.student_id] || 'şagird')}</span>` : ''}</td>
-          <td>${esc(t.classes?.name || '—')}</td><td>${t.question_ids.length}</td><td>${subCount[t.id] || 0}</td>
-          <td><button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}">${t.is_open ? 'Açıq · bağla' : 'Bağlı · aç'}</button></td>
-          <td><a class="btn small" href="#/test/${t.id}">Nəticələr</a></td></tr>`).join('')}
-      </tbody></table></div>` : `<div class="empty">Hələ test yoxdur. <a href="#/newtest">İlk testi yaradın</a>.</div>`}
-    </section>`;
-  $$('[data-toggle]').forEach((b) => b.onclick = async () => {
-    const { error: err } = await sb.from('tests').update({ is_open: b.dataset.open !== 'true' }).eq('id', b.dataset.toggle);
-    if (err) return fail(err);
-    route();
-  });
+    ${tests.length ? `<div class="seg tseg" role="tablist" aria-label="Testləri süz">
+        <button type="button" class="seg-b" data-f="open" role="tab">Açıq <span class="seg-c">${nOpen}</span></button>
+        <button type="button" class="seg-b" data-f="closed" role="tab">Bağlı <span class="seg-c">${tests.length - nOpen}</span></button>
+        <button type="button" class="seg-b" data-f="all" role="tab">Hamısı <span class="seg-c">${tests.length}</span></button>
+      </div>
+      <div class="tlist" id="tlist"></div>` : `<div class="card"><div class="empty">Hələ test yoxdur. <a href="#/newtest">İlk testi yaradın</a>.</div></div>`}`;
+  const draw = () => {
+    const list = tests.filter((t) => tab === 'all' || (tab === 'open') === !!t.is_open);
+    $$('[data-f]').forEach((b) => { b.classList.toggle('on', b.dataset.f === tab); b.setAttribute('aria-selected', b.dataset.f === tab); });
+    $('#tlist').innerHTML = list.length ? list.map(card).join('') : `<div class="card"><div class="empty">${tab === 'open' ? 'Açıq test yoxdur.' : 'Bağlı test yoxdur.'}</div></div>`;
+    $$('[data-toggle]').forEach((b) => b.onclick = async () => {
+      const { error: err } = await sb.from('tests').update({ is_open: b.dataset.open !== 'true' }).eq('id', b.dataset.toggle);
+      if (err) return fail(err);
+      route();
+    });
+  };
+  if (tests.length) { $$('[data-f]').forEach((b) => b.onclick = () => { tab = b.dataset.f; draw(); }); draw(); }
 }
 
 // Yeni test: 1) əsas məlumat 2) suallar (bankdan və ya PDF-dən) 3) yarat
@@ -1940,7 +1973,7 @@ async function newTestView() {
       <section class="card stack"><h2><span class="step-n">1</span> Əsas məlumat</h2>
         <div class="form-grid">
           <label class="field">Testin adı<input type="text" name="title" required maxlength="120" placeholder="məs. Kümeler · qısa yoxlama"></label>
-          <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz (ümumi link, şagird adını yazır)</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="field">Sinif<select name="class_id"><option value="">Sinifsiz — ümumi link</option>${(classes || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><span class="hint">Sinifsiz testdə şagird adını özü yazır.</span></label>
           <label class="field">Şagirdə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_submit' ? 'selected' : ''}>${v}</option>`).join('')}</select>
             <span class="hint">"Bağlananda" seçsəniz, test açıq olanda cavablar başqalarına ötürülməz.</span></label>
         </div>
@@ -2650,17 +2683,21 @@ async function testResultsView(id) {
   const avg = subs.length ? Math.round(subs.reduce((a, s) => a + (s.total ? s.score / s.total : 0), 0) / subs.length * 100) : null;
   const norm = (v) => String(v ?? '').trim().toLocaleLowerCase('az');
   const link = location.origin + location.pathname + '#/t/' + id;
+  const qStats = questions.map((q, i) => {
+    if (q.qtype !== 'mcq' || !subs.length) return { q, i, p: null, open: q.qtype !== 'mcq' };
+    const right = subs.filter((s) => norm(s.answers?.[q.id]) === norm(q.answer)).length;
+    return { q, i, p: Math.round(right / subs.length * 100) };
+  });
+  const hardest = qStats.filter((x) => x.p !== null).sort((x, y) => x.p - y.p)[0];
 
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>${esc(test.title)}</h1>
       <p class="muted">${esc(test.classes?.name || 'Sinifsiz')} · ${questions.length} sual · ${test.is_open ? 'açıq' : 'bağlı'}${rules ? ' · ' + rules : ''}</p></div>
       <div class="row"><button class="btn primary" id="copy">Linki kopyala</button><button class="btn" id="pdf">PDF</button><button class="btn danger" id="del">Testi sil</button></div></div>
-    <div class="card row between"><label class="row small" style="gap:8px">Şagirdə düzgün cavabları və həlli
-        <select id="rvMode" style="min-height:40px">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === (test.review_mode || 'never') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-      <span class="small muted">${test.review_mode === undefined ? 'Bu seçim üçün bazaya 006_review.sql lazımdır.' : 'Şagird şəxsi linkindən öz işinə baxır.'}</span></div>
-    <section class="grid">
-      <div class="card stat"><div class="label">Göndərilən iş</div><div class="value">${subs.length}</div></div>
+    <section class="grid res-stats">
+      <div class="card stat"><div class="label">Göndərib</div><div class="value">${subs.length}${(roster || []).length ? `<span class="of"> / ${(roster || []).length}</span>` : ''}</div></div>
       <div class="card stat"><div class="label">Orta nəticə</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
+      <div class="card stat"><div class="label">Ən çətin sual</div><div class="value">${hardest ? '№' + (hardest.i + 1) + ` <span class="of">${hardest.p}% düz</span>` : '—'}</div></div>
     </section>
     ${notSent.length ? `<section class="card stack"><div class="row between"><h2>Hələ göndərməyənlər (${notSent.length})</h2>
         ${notSent.every((st) => st.access_code) && test.is_open ? '<button class="btn small" id="remind">Xatırlatma mətnini kopyala</button>' : ''}</div>
@@ -2672,20 +2709,24 @@ async function testResultsView(id) {
           <td>${cellsHtml(questions, s.answers)}</td><td class="muted small">${fmtDate(s.created_at)}</td></tr>`; }).join('')}
       </tbody></table></div>` : '<div class="empty">Hələ heç kim göndərməyib.</div>'}
     </section>
-    <section class="card stack"><h2>Suallar üzrə</h2>
-      ${questions.map((q, i) => {
-        const answered = subs.filter((s) => norm(s.answers?.[q.id]) !== '');
-        let stat = '';
-        if (q.qtype === 'mcq') {
-          const right = subs.filter((s) => norm(s.answers?.[q.id]) === norm(q.answer)).length;
-          const p = subs.length ? Math.round(right / subs.length * 100) : 0;
-          stat = subs.length ? `<span class="tag ${p < 50 ? 'red' : 'ai'}">${p}% düz cavab</span>` : '';
-        }
-        const openAnswers = q.qtype === 'open' && answered.length
-          ? `<details class="sol"><summary>Şagird cavabları (${answered.length})</summary><div>${answered.map((s) => `<strong>${esc(s.student_name)}:</strong> ${esc(s.answers[q.id])}`).join('\n')}</div></details>` : '';
-        return `<div><div class="row"><strong>${i + 1}.</strong>${stat}</div>${questionHtml(q)}${openAnswers}</div>`;
-      }).join('')}
-    </section>`;
+    <section class="card stack"><div class="row between"><h2>Suallar üzrə</h2><span class="small muted">Suala basın — tam açılacaq</span></div>
+      <div class="qstat-grid">${qStats.map((x) => `<button type="button" class="qstat" data-qs="${x.i}">
+          <span class="qs-head"><strong>${x.i + 1}</strong>${x.p === null ? (x.open ? '<span class="small muted">açıq sual</span>' : '') : `<span class="qs-p ${x.p < 50 ? 'low' : x.p < 75 ? 'mid' : 'hi'}">${x.p}% düz</span>`}</span>
+          ${x.p === null ? '' : `<span class="qs-bar ${x.p < 50 ? 'low' : x.p < 75 ? 'mid' : 'hi'}" aria-hidden="true"><span style="width:${x.p}%"></span></span>`}
+          <span class="qs-text">${esc(x.q.body)}</span></button>`).join('')}</div>
+    </section>
+    <section class="card row between"><label class="row small" style="gap:8px">Şagirdə düzgün cavabları və həlli
+        <select id="rvMode" style="min-height:40px">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === (test.review_mode || 'never') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <span class="small muted">${test.review_mode === undefined ? 'Bu seçim üçün bazaya 006_review.sql lazımdır.' : 'Şagird şəxsi linkindən öz işinə baxır.'}</span></section>`;
+  $$('[data-qs]').forEach((b) => b.onclick = () => {
+    const x = qStats[+b.dataset.qs];
+    const answered = subs.filter((s) => norm(s.answers?.[x.q.id]) !== '');
+    const dist = x.q.qtype === 'mcq' && subs.length ? `<div class="small muted">Kim nə seçib: ${(x.q.options || []).map((o, j) => {
+        const n = subs.filter((s) => norm(s.answers?.[x.q.id]) === norm(o)).length; return n ? `<strong>${'ABCDEF'[j]})</strong> ${n}` : ''; }).filter(Boolean).join(' · ') || '—'}${subs.length - answered.length ? ` · boş ${subs.length - answered.length}` : ''}</div>` : '';
+    const openAnswers = x.q.qtype === 'open' && answered.length
+      ? `<details class="sol" open><summary>Şagird cavabları (${answered.length})</summary><div>${answered.map((s) => `<strong>${esc(s.student_name)}:</strong> ${esc(s.answers[x.q.id])}`).join('\n')}</div></details>` : '';
+    openDialog(`Sual ${x.i + 1}${x.p === null ? '' : ` · ${x.p}% düz`}`, dist + questionHtml(x.q) + openAnswers);
+  });
   $('#copy').onclick = () => copyText(link);
   $$('[data-sub]').forEach((b) => b.onclick = () => {
     const sub = subs.find((x) => x.id === b.dataset.sub);

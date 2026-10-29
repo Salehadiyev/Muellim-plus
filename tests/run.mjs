@@ -12,7 +12,7 @@ const tests = {
   'e2e/rules-e2e.cjs': [OK, /shuffle stable per student/, /auto-submit when time runs out/, /overdue test blocked/, /tests list: personal tag/],
   'e2e/pr-e2e.cjs': [OK, /personal test: Fərdi tapşırıq · .* 3 after_submit/, /Hörmətli valideyn/, /Fonksiyonlar 17%/],
   'e2e/an-e2e.cjs': [OK, /topics: Fonksiyonlar 17%/, /3 testdə/],
-  'e2e/review-e2e.cjs': [OK, /after_close: hidden while open/, /mode never → student review blocked/, /student page stats: 2 \/ 2 \| 17%/],
+  'e2e/review-e2e.cjs': [/qstat dialog: Sual 1/, OK, /after_close: hidden while open/, /mode never → student review blocked/, /student page stats: 2 \/ 2 \| 17%/],
   'e2e/portal-e2e.cjs': [/no page errors|NO ERRORS/, /portal: lower-case code ok/, /old code rejected; typed new code works/, /results: 1 submitted, 2 not yet/],
   'e2e/pdf-test.cjs': [OK, /test question_ids: 5 \| saved new: 4/, /incomplete crop → message shown/],
   'e2e/pdf-bank.cjs': [OK, /bank now: 5 \| sources: book,ai,ai,ai \| cards left: 0/],
