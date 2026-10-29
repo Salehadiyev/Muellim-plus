@@ -1748,6 +1748,7 @@ async function aiView() {
       <button type="button" role="tab" data-tab="examples">Nümunədən yarat</button>
       <button type="button" role="tab" data-tab="topic">Mövzudan yarat</button>
       <button type="button" role="tab" data-tab="general">Məktəb (ümumi)</button>
+      <button type="button" role="tab" data-tab="rewrite">✍️ Yaz və çevir</button>
     </div>
     <div id="tabExamples" class="stack"></div>
     <div id="tabBody" class="stack" hidden></div>`;
@@ -1759,6 +1760,7 @@ async function aiView() {
     $('#tabBody').hidden = t === 'examples';
     if (t === 'examples') { if (!examplesBuilt) { examplesTab(); examplesBuilt = true; } }
     else if (t === 'topic') topicTab();
+    else if (t === 'rewrite') rewriteTab();
     else generalTab();
     bindModelPicker(view());
   };
@@ -2375,6 +2377,92 @@ function simpleResults(results, doneLabel) {
     if (!list.length) return toast('Heç bir sual seçilməyib', true);
     pendingPrint = { questions: list, title: '', back: '#/ai' };
     go('#/print');
+  };
+}
+
+// ---------------- 4. Yaz və çevir: sualı yaz (və ya şəkildən oxut), dəyişiklik səviyyəsini seç ----------------
+const REWRITE_LEVELS = [
+  ['yungul', 'Yüngül', 'Eyni sual: adlar və rəqəmlər dəyişir'],
+  ['orta', 'Orta', 'Yeni kontekst, eyni quruluş və çətinlik'],
+  ['tam', 'Tam yeni', 'Eyni bilik və çətinlik, fərqli qurulma']
+];
+const rwState = { text: '', level: 'orta', qtype: 'mcq', grade: 11, difficulty: 'orta', topic: '' };
+function rewriteTab() {
+  $('#tabBody').innerHTML = `
+    <form class="card stack" id="rw">
+      <p class="muted small">Sualı yazın və ya yapışdırın (kitabdan, öz qeydlərinizdən). Dəyişiklik səviyyəsini seçin — AI eyni bacarığı yoxlayan <strong>yeni</strong> sual yazır, cavabı yenidən hesablayır və ikinci dəfə yoxlayır.</p>
+      <label class="field">Sual<span class="hint no-math">Formul üçün $x^2$, $\\frac{2}{3}$ · variantları da yaza bilərsiniz</span><textarea name="text" rows="5" maxlength="3000" required placeholder="məs. f(2x + 1) = 3x − 4 olarsa, f(5) neçədir?  A) 2  B) 3  C) 5  D) 7  E) 8">${esc(rwState.text)}</textarea></label>
+      <div class="row"><label class="btn small" style="cursor:pointer">📷 Şəkildən oxu<input type="file" accept="image/*" class="sr" id="rwImg"></label><span class="small muted" id="rwOcr"></span></div>
+      <div><div class="small" style="font-weight:600;margin-bottom:6px">Nə qədər dəyişsin?</div>
+        <div class="pills" role="radiogroup" aria-label="Dəyişiklik səviyyəsi">${REWRITE_LEVELS.map(([k, n, d]) => `<button type="button" class="pill-opt" role="radio" aria-checked="${rwState.level === k}" data-level="${k}"><strong>${n}</strong><span>${d}</span></button>`).join('')}</div></div>
+      <div class="form-grid">
+        <label class="field">Sual növü<select name="qtype"><option value="mcq" ${rwState.qtype === 'mcq' ? 'selected' : ''}>Çoxseçimli (A–E)</option><option value="open" ${rwState.qtype === 'open' ? 'selected' : ''}>Açıq sual</option></select></label>
+        <label class="field">Çətinlik<select name="difficulty">${DIFF.map((d) => `<option ${d === rwState.difficulty ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+        <label class="field">Mövzu<span class="hint">istəyə bağlı</span><input type="text" name="topic" maxlength="200" value="${esc(rwState.topic)}" list="rwTopics"><datalist id="rwTopics">${[...TRYOS_TOPICS.matematik, ...TRYOS_TOPICS.sayisal].map((t) => `<option value="${esc(t)}"></option>`).join('')}</datalist></label>
+        <label class="field">Neçə sual<select name="count">${[1, 2, 3, 5, 8, 10].map((n) => `<option ${n === 1 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      </div>
+      <div class="run-row">${modelPicker()}<button class="btn primary" type="submit">${icons.spark.replace('aria-hidden', 'width="18" height="18" stroke="#fff" aria-hidden')} Yeni sual yarat</button>
+        <span id="progress" class="muted small" role="status" aria-live="polite"></span></div>
+    </form>
+    <section id="results"></section>`;
+  const form = $('#rw');
+  $$('[data-level]', form).forEach((b) => b.onclick = () => { rwState.level = b.dataset.level; $$('[data-level]', form).forEach((o) => o.setAttribute('aria-checked', String(o === b))); });
+  form.text.oninput = () => { rwState.text = form.text.value; };
+  $('#rwImg').onchange = (e) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      $('#rwOcr').textContent = 'Şəkil oxunur…';
+      callAI('extract', { image: c.toDataURL('image/jpeg', 0.88) }).then((d) => {
+        form.text.value = rwState.text = d.text;
+        if (d.topic && !form.topic.value) form.topic.value = d.topic;
+        if (DIFF.includes(d.difficulty)) form.difficulty.value = d.difficulty;
+        $('#rwOcr').textContent = '✓ Oxundu — yoxlayın, səhv varsa düzəldin';
+      }).catch((err) => { $('#rwOcr').textContent = ''; fail(err); });
+    };
+    img.onerror = () => toast('Şəkil açılmadı', true);
+    img.src = URL.createObjectURL(file);
+  };
+  let results = [];
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form));
+    Object.assign(rwState, { text: f.text, qtype: f.qtype, difficulty: f.difficulty, topic: f.topic });
+    if (!String(f.text || '').trim()) return toast('Sualı yazın', true);
+    const n = +f.count || 1;
+    busy($('button[type=submit]', form), async () => {
+      results = [];
+      const base = { text: f.text, level: rwState.level, qtype: f.qtype, difficulty: f.difficulty, topic: f.topic, grade: rwState.grade };
+      const q = makeQueue(3);
+      let done = 0;
+      progress(`Yaradılır: 0 / ${n}…`);
+      // hər sorğu bir sual; bir neçə sual istənəndə təkrarlanmasın deyə əvvəlkilər bildirilir
+      await Promise.all(Array.from({ length: n }, (_, i) => q(async () => {
+        try {
+          const extra = (n > 1 ? `\n(Bu, ${n} variantdan ${i + 1}-cisidir: digər variantlardan fərqli kontekst, adlar və rəqəmlər seç.)` : '')
+            + (results.length ? '\nArtıq yaradılıb (bunları təkrarlama): ' + results.map((x) => x.body.replace(/\s+/g, ' ').slice(0, 120)).join(' | ') : '');
+          const d = await callAI('transform', { ...base, text: base.text + extra });
+          const nq = { ...d.question, _changes: d.changes || [] };
+          results.push(nq);
+          simpleResults(results, `${results.length} / ${n} sual hazırdır, yoxlanılır…`);
+          await checkQuestion(nq);
+          if (nq.ai_status !== 'passed') nq.ai_status = 'draft';
+        } catch (err) { if (err.expected) throw err; toast('Bir sual alınmadı: ' + err.message, true); }
+        done++;
+        progress(`Yaradılır: ${done} / ${n}…`);
+      })));
+      progress('');
+      simpleResults(results);
+      if (!results.length) throw new Error('Sual yaradılmadı, yenidən yoxlayın');
+      const lvl = REWRITE_LEVELS.find((l) => l[0] === rwState.level)[1];
+      const box = $('#results .card');
+      if (box) box.insertAdjacentHTML('afterbegin', `<p class="small muted" style="margin:0">Dəyişiklik səviyyəsi: <strong>${esc(lvl)}</strong>${results[0]?._changes?.length ? ` · nə dəyişdi: ${esc(results[0]._changes.join('; '))}` : ''}</p>`);
+      $('#results').scrollIntoView({ behavior: 'smooth' });
+    }).catch((err) => { progress(''); fail(err); });
   };
 }
 
