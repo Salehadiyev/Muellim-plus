@@ -232,10 +232,10 @@ function route() {
 
   const views = {
     '': dashboard, classes: classesView, class: classView, bank: bankView,
-    ai: aiView, book: bookView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView
+    ai: aiView, book: bookView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView
   };
   const view = views[page] || dashboard;
-  const navKey = page === 'class' || page === 'student' ? 'classes' : page === 'test' || page === 'newtest' ? 'tests' : (views[page] ? page : '');
+  const navKey = page === 'class' || page === 'student' || page === 'analysis' ? 'classes' : page === 'test' || page === 'newtest' ? 'tests' : (views[page] ? page : '');
   shell(navKey);
   window.scrollTo(0, 0);
   view(id).catch(fail);
@@ -422,7 +422,7 @@ async function classView(id) {
   const needsSql = students.length > 0 && !hasCodes;
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/classes">Siniflər</a> /</div><h1>${esc(cls.name)}</h1></div>
-      <button class="btn danger" id="delClass">Sinfi sil</button></div>
+      <div class="row"><a class="btn primary" href="#/analysis/${id}">Analiz</a><button class="btn danger" id="delClass">Sinfi sil</button></div></div>
     <div class="split">
       <section class="card stack"><div class="row between"><h2>Şagirdlər (${students.length})</h2>
           ${hasCodes ? '<button class="btn small" id="allLinks">Bütün linkləri kopyala</button>' : ''}</div>
@@ -1597,11 +1597,13 @@ async function bookView() {
 const testLink = (id) => appBase() + '#/t/' + id;
 
 async function testsView() {
-  const [{ data: tests, error }, { data: subs }] = await Promise.all([
-    sb.from('tests').select('id, title, is_open, class_id, question_ids, created_at, classes(name)').order('created_at', { ascending: false }),
-    sb.from('submissions').select('test_id')
+  const [{ data: tests, error }, { data: subs }, { data: studs }] = await Promise.all([
+    sb.from('tests').select('*, classes(name)').order('created_at', { ascending: false }),
+    sb.from('submissions').select('test_id'),
+    sb.from('students').select('id, full_name')
   ]);
   if (error) throw error;
+  const studName = Object.fromEntries((studs || []).map((x) => [x.id, x.full_name]));
   const subCount = {};
   (subs || []).forEach((s) => { subCount[s.test_id] = (subCount[s.test_id] || 0) + 1; });
 
@@ -1611,7 +1613,8 @@ async function testsView() {
     <section class="card stack">
       ${tests.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Sinif</th><th>Sual</th><th>Göndərən</th><th>Status</th><th></th></tr></thead><tbody>
         ${tests.map((t) => `<tr>
-          <td><a href="#/test/${t.id}"><strong>${esc(t.title)}</strong></a><div class="small muted">${fmtDate(t.created_at)}</div></td>
+          <td><a href="#/test/${t.id}"><strong>${esc(t.title)}</strong></a><div class="small muted">${fmtDate(t.created_at)}${t.time_limit_min ? ` · ⏱ ${t.time_limit_min} dəq` : ''}${t.due_at ? ` · son: ${esc(fmtDue(t.due_at))}` : ''}</div>
+            ${t.student_id ? `<span class="tag book">fərdi: ${esc(studName[t.student_id] || 'şagird')}</span>` : ''}</td>
           <td>${esc(t.classes?.name || '—')}</td><td>${t.question_ids.length}</td><td>${subCount[t.id] || 0}</td>
           <td><button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}">${t.is_open ? 'Açıq · bağla' : 'Bağlı · aç'}</button></td>
           <td><a class="btn small" href="#/test/${t.id}">Nəticələr</a></td></tr>`).join('')}
@@ -1646,6 +1649,15 @@ async function newTestView() {
           <label class="field">Şagirdə düzgün cavablar və həll<select name="review_mode">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === 'after_close' ? 'selected' : ''}>${v}</option>`).join('')}</select>
             <span class="hint">"Bağlananda" — test açıq olanda cavablar başqalarına ötürülməsin.</span></label>
         </div>
+        <details class="more-opts"><summary>Vaxt, son tarix, qarışdırma</summary>
+          <div class="form-grid" style="margin-top:10px">
+            <label class="field">Vaxt limiti (dəqiqə)<input type="number" name="time_limit_min" min="1" max="300" inputmode="numeric" placeholder="limitsiz">
+              <span class="hint">Şagird "Başla" basandan sayılır, bitəndə cavablar avtomatik göndərilir.</span></label>
+            <label class="field">Son tarix<input type="datetime-local" name="due_at">
+              <span class="hint">Bu vaxtdan sonra cavab qəbul edilmir.</span></label>
+            <label class="field row" style="gap:10px;align-items:center;min-height:44px"><input type="checkbox" name="shuffle" style="width:22px;height:22px"> Sualları və variantları hər şagird üçün qarışdır</label>
+          </div>
+        </details>
       </section>
 
       <section class="card stack"><h2><span class="step-n">2</span> Suallar</h2>
@@ -1733,8 +1745,13 @@ async function newTestView() {
       }
       const rec = { title: f.get('title').trim(), class_id: f.get('class_id') || null, question_ids: ids };
       if (f.get('review_mode') && f.get('review_mode') !== 'never') rec.review_mode = f.get('review_mode');
+      const tl = parseInt(f.get('time_limit_min'), 10);
+      if (tl > 0) rec.time_limit_min = Math.min(300, tl);
+      if (f.get('due_at')) rec.due_at = new Date(f.get('due_at')).toISOString();
+      if (f.get('shuffle')) rec.shuffle = true;
+      const needs7 = rec.time_limit_min || rec.due_at || rec.shuffle;
       const { data: row, error: err } = await sb.from('tests').insert(rec).select().single();
-      if (err) throw needSql(err, '006_review.sql');
+      if (err) throw needSql(err, needs7 ? '007_test_rules.sql' : '006_review.sql');
       toast('Test yaradıldı');
       go('#/test/' + row.id);
     }).catch(fail);
@@ -1982,11 +1999,120 @@ function pdfQuestions(pickerRoot, out) {
   };
 }
 
+// ================= Nəticə analizi =================
+// rows: [{ test, sub, questions }] → mövzular üzrə statistika
+function topicStats(rows) {
+  const m = {};
+  rows.forEach(({ sub, questions }) => questions.forEach((q) => {
+    if (q.qtype !== 'mcq') return;
+    const k = q.topic || 'Mövzusuz';
+    m[k] = m[k] || { topic: k, right: 0, total: 0 };
+    m[k].total++;
+    if (answerState(q, sub.answers?.[q.id]) === 'right') m[k].right++;
+  }));
+  return Object.values(m).map((x) => ({ ...x, pct: x.total ? Math.round(x.right / x.total * 100) : 0 })).sort((a, b) => a.pct - b.pct);
+}
+const pctColor = (p) => (p >= 75 ? 'var(--green)' : p >= 50 ? '#B7791F' : 'var(--red)');
+function topicBarsHtml(stats, empty = 'Hələ məlumat yoxdur.') {
+  if (!stats.length) return `<div class="empty">${empty}</div>`;
+  return `<div class="tbars">${stats.map((t) => `<div class="tbar"><span class="tbar-l">${esc(t.topic)}</span>
+    <span class="tbar-b"><i style="width:${t.pct}%;background:${pctColor(t.pct)}"></i></span>
+    <span class="tbar-v"><strong>${t.pct}%</strong> <span class="muted">${t.right}/${t.total}</span></span></div>`).join('')}</div>`;
+}
+// Testlər üzrə nəticə: sütunlar (xronoloji)
+function trendHtml(points) {
+  if (!points.length) return '<div class="empty">Hələ məlumat yoxdur.</div>';
+  return `<div class="trend">${points.map((p) => `<div class="trend-c" title="${esc(p.label)}: ${p.pct}%">
+      <span class="trend-v">${p.pct}%</span><span class="trend-b"><i style="height:${Math.max(3, p.pct)}%;background:${pctColor(p.pct)}"></i></span>
+      <span class="trend-l">${esc(p.label)}</span></div>`).join('')}</div>`;
+}
+const subPct = (sub) => (sub.total ? Math.round(sub.score / sub.total * 100) : 0);
+
+async function classAnalysisView(classId) {
+  const [{ data: cls, error }, { data: students }, { data: tests }] = await Promise.all([
+    sb.from('classes').select('*').eq('id', classId).single(),
+    sb.from('students').select('id, full_name').eq('class_id', classId).order('full_name'),
+    sb.from('tests').select('*').eq('class_id', classId).order('created_at')
+  ]);
+  if (error) throw error;
+  const tIds = (tests || []).map((t) => t.id);
+  const { data: subs } = tIds.length ? await sb.from('submissions').select('*').in('test_id', tIds) : { data: [] };
+  const qIds = [...new Set((tests || []).flatMap((t) => t.question_ids))];
+  const { data: qs } = qIds.length ? await sb.from('questions').select('*').in('id', qIds) : { data: [] };
+  const qById = Object.fromEntries((qs || []).map((q) => [q.id, q]));
+  const testById = Object.fromEntries((tests || []).map((t) => [t.id, { ...t, questions: t.question_ids.map((x) => qById[x]).filter(Boolean) }]));
+  const rows = (subs || []).map((sub) => ({ test: testById[sub.test_id], sub, questions: testById[sub.test_id]?.questions || [] })).filter((r) => r.test);
+  const byName = Object.fromEntries((students || []).map((x) => [x.full_name.trim().toLocaleLowerCase('az'), x.id]));
+  const sid = (sub) => sub.student_id || byName[sub.student_name.trim().toLocaleLowerCase('az')] || null;
+
+  const avg = rows.length ? Math.round(rows.reduce((a, r) => a + subPct(r.sub), 0) / rows.length) : null;
+  const trend = (tests || []).filter((t) => !t.student_id).map((t) => {
+    const rs = rows.filter((r) => r.test.id === t.id);
+    return rs.length ? { label: t.title, pct: Math.round(rs.reduce((a, r) => a + subPct(r.sub), 0) / rs.length), n: rs.length } : null;
+  }).filter(Boolean);
+  const topics = topicStats(rows);
+
+  // ən çox səhv edilən suallar
+  const qAgg = {};
+  rows.forEach(({ sub, questions, test }) => questions.forEach((q) => {
+    if (q.qtype !== 'mcq') return;
+    const a = qAgg[q.id] = qAgg[q.id] || { q, test, titles: new Set(), n: 0, right: 0, wrong: {}, empty: 0 };
+    a.titles.add(test.title);
+    a.n++;
+    const g = sub.answers?.[q.id];
+    const st = answerState(q, g);
+    if (st === 'right') a.right++;
+    else if (st === 'empty') a.empty++;
+    else { const L = 'ABCDEF'[q.options.findIndex((o) => normAns(o) === normAns(g))] || '?'; a.wrong[L] = (a.wrong[L] || 0) + 1; }
+  }));
+  const hard = Object.values(qAgg).filter((a) => a.n >= 2).map((a) => ({ ...a, pct: Math.round(a.right / a.n * 100) }))
+    .sort((x, y) => x.pct - y.pct).slice(0, 8).filter((a) => a.pct < 100);
+
+  const studentRows = (students || []).map((st) => {
+    const rs = rows.filter((r) => sid(r.sub) === st.id).sort((a, b) => (a.sub.created_at < b.sub.created_at ? -1 : 1));
+    const tp = topicStats(rs).filter((t) => t.total >= 2);
+    return { st, n: rs.length, avg: rs.length ? Math.round(rs.reduce((a, r) => a + subPct(r.sub), 0) / rs.length) : null,
+      last: rs.slice(-6).map((r) => subPct(r.sub)), weak: tp[0] && tp[0].pct < 60 ? tp[0] : null };
+  }).sort((a, b) => (a.avg ?? 101) - (b.avg ?? 101));
+
+  view().innerHTML = `
+    <div class="page-head"><div><div class="crumb"><a href="#/classes">Siniflər</a> / <a href="#/class/${classId}">${esc(cls.name)}</a> /</div><h1>Analiz · ${esc(cls.name)}</h1></div></div>
+    <section class="grid">
+      <div class="card stat"><div class="label">Test</div><div class="value">${(tests || []).length}</div></div>
+      <div class="card stat"><div class="label">Göndərilən iş</div><div class="value">${rows.length}</div></div>
+      <div class="card stat"><div class="label">Sinfin ortası</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
+    </section>
+    <section class="card stack"><h2>Testlər üzrə orta nəticə</h2>${trendHtml(trend)}</section>
+    <section class="card stack"><h2>Mövzular <span class="small muted">(zəifdən güclüyə)</span></h2>${topicBarsHtml(topics)}</section>
+    <section class="card stack"><h2>Ən çox səhv edilən suallar</h2>
+      ${hard.length ? `<div class="stack" style="gap:8px">${hard.map((a, i) => {
+        const top = Object.entries(a.wrong).sort((x, y) => y[1] - x[1])[0];
+        return `<button type="button" class="hard-q" data-hard="${i}">
+          <span class="tag ${a.pct < 50 ? 'red' : 'amber'}">${a.pct}% düz</span>
+          <span class="hard-t">${esc(a.q.body.replace(/\s+/g, ' ').slice(0, 120))}</span>
+          <span class="small muted">${a.titles.size > 1 ? a.titles.size + ' testdə' : esc(a.test.title)} · ${a.n} cavab${top ? ` · ən çox seçilən səhv: <strong>${top[0]}</strong> (${top[1]})` : ''}${a.empty ? ` · boş: ${a.empty}` : ''}</span></button>`;
+      }).join('')}</div>` : '<div class="empty">Hələ kifayət qədər cavab yoxdur.</div>'}
+    </section>
+    <section class="card stack"><h2>Şagirdlər <span class="small muted">(köməyə ehtiyacı olanlar yuxarıda)</span></h2>
+      <div class="table-wrap"><table><thead><tr><th>Şagird</th><th>Test</th><th>Orta</th><th>Son nəticələr</th><th>Zəif mövzu</th></tr></thead><tbody>
+      ${studentRows.map((r) => `<tr><td><a href="#/student/${r.st.id}">${esc(r.st.full_name)}</a></td><td>${r.n}</td>
+        <td>${r.avg === null ? '—' : `<strong style="color:${pctColor(r.avg)}">${r.avg}%</strong>`}</td>
+        <td><span class="spark">${r.last.map((p) => `<i style="height:${Math.max(18, p)}%;background:${pctColor(p)}" title="${p}%"></i>`).join('')}</span></td>
+        <td>${r.weak ? `<span class="tag red">${esc(r.weak.topic)} · ${r.weak.pct}%</span>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>
+    </section>`;
+  $$('[data-hard]').forEach((b) => b.onclick = () => {
+    const a = hard[+b.dataset.hard];
+    openDialog('Sual · ' + esc(a.test.title), questionHtml(a.q));
+  });
+}
+
 // Müəllim üçün: bir şagirdin bütün işləri
 async function studentWorkView(id) {
   const { data: st, error } = await sb.from('students').select('*, classes(name)').eq('id', id).single();
   if (error) throw error;
-  const { data: tests } = await sb.from('tests').select('id, title, is_open, question_ids, created_at').eq('class_id', st.class_id).order('created_at', { ascending: false });
+  const { data: testsAll } = await sb.from('tests').select('*').eq('class_id', st.class_id).order('created_at', { ascending: false });
+  const tests = (testsAll || []).filter((t) => !t.student_id || t.student_id === st.id);
   const testIds = (tests || []).map((t) => t.id);
   const { data: subsAll } = testIds.length ? await sb.from('submissions').select('*').in('test_id', testIds) : { data: [] };
   const nm = st.full_name.trim().toLocaleLowerCase('az');
@@ -2010,6 +2136,10 @@ async function studentWorkView(id) {
       <div class="card stat"><div class="label">Orta nəticə</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
       <div class="card stat"><div class="label">Suallar</div><div class="value" style="font-size:20px"><span style="color:var(--green)">✓ ${tot.right}</span> · <span style="color:var(--red)">✗ ${tot.wrong}</span> · — ${tot.empty}</div></div>
     </section>
+    <div class="split">
+      <section class="card stack"><h2>Mövzular</h2>${topicBarsHtml(topicStats(done.map((r) => ({ sub: r.sub, questions: r.questions }))), 'Hələ test yazmayıb.')}</section>
+      <section class="card stack"><h2>Nəticələr</h2>${trendHtml([...done].sort((a, b) => (a.sub.created_at < b.sub.created_at ? -1 : 1)).map((r) => ({ label: r.t.title, pct: subPct(r.sub) })))}</section>
+    </div>
     <section class="card stack"><h2>Testlər</h2>
       ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Nəticə</th><th>Suallar</th><th></th></tr></thead><tbody>
         ${rows.map((r, i) => `<tr>
@@ -2024,6 +2154,155 @@ async function studentWorkView(id) {
     const r = rows[+b.dataset.row];
     openDialog(esc(st.full_name) + ' · ' + esc(r.t.title), submissionDetailHtml(r.questions, r.sub));
   });
+  practiceSection(st, done);
+  reportSection(st, rows);
+}
+
+// ================= Valideyn hesabatı =================
+function reportSection(st, rows) {
+  const box = document.createElement('section');
+  box.className = 'card stack';
+  view().appendChild(box);
+  const teacher = session?.user?.user_metadata?.full_name || '';
+  const build = (days) => {
+    const to = Date.now();
+    const from = days ? to - days * 86400000 : 0;
+    const inP = (iso) => new Date(iso).getTime() >= from;
+    const period = rows.filter((r) => inP(r.t.created_at) || (r.sub && inP(r.sub.created_at)));
+    const done = period.filter((r) => r.sub);
+    const avg = done.length ? Math.round(done.reduce((a, r) => a + subPct(r.sub), 0) / done.length) : null;
+    const prev = days ? rows.filter((r) => r.sub && new Date(r.sub.created_at).getTime() < from && new Date(r.sub.created_at).getTime() >= from - days * 86400000) : [];
+    const prevAvg = prev.length ? Math.round(prev.reduce((a, r) => a + subPct(r.sub), 0) / prev.length) : null;
+    const tp = topicStats(done.map((r) => ({ sub: r.sub, questions: r.questions }))).filter((t) => t.total >= 2);
+    const strong = tp.filter((t) => t.pct >= 75).sort((a, b) => b.pct - a.pct).slice(0, 2);
+    const weak = tp.filter((t) => t.pct < 60).slice(0, 2);
+    const fmtD = (ms) => { const d = new Date(ms); return `${d.getDate()} ${AZ_MONTHS[d.getMonth()]}`; };
+    const lines = [
+      'Hörmətli valideyn,',
+      `${st.full_name}${st.classes?.name ? ' (' + st.classes.name + ')' : ''} · ${days ? `${fmtD(from)} – ${fmtD(to)}` : 'bütün dövr'}`,
+      '',
+      `Yazılan testlər: ${done.length} / ${period.length}`,
+      ...period.map((r) => r.sub
+        ? `• ${r.t.title} — ${r.sub.score}/${r.sub.total} (${subPct(r.sub)}%)${r.sub.late ? ', gecikmə ilə' : ''}`
+        : `• ${r.t.title} — ${r.t.is_open && !(r.t.due_at && new Date(r.t.due_at).getTime() < to) ? 'hələ yazmayıb' : 'yazmayıb'}`)
+    ];
+    if (avg !== null) lines.push('', `Orta nəticə: ${avg}%${prevAvg !== null ? ` (əvvəlki dövr: ${prevAvg}% ${avg > prevAvg ? '↑' : avg < prevAvg ? '↓' : '='})` : ''}`);
+    if (strong.length) lines.push(`Yaxşı bildiyi mövzular: ${strong.map((t) => `${t.topic} (${t.pct}%)`).join(', ')}`);
+    if (weak.length) lines.push(`Üzərində işləməli: ${weak.map((t) => `${t.topic} (${t.pct}%)`).join(', ')}`);
+    if (!period.length) lines.push('Bu dövrdə test olmayıb.');
+    lines.push('', 'Hörmətlə,' + (teacher ? '\n' + teacher : '\nmüəllim'));
+    return lines.join('\n');
+  };
+  box.innerHTML = `<div class="row between"><h2>Valideyn üçün hesabat</h2>
+      <select id="rpDays" style="min-height:40px"><option value="7">Son 7 gün</option><option value="30" selected>Son 30 gün</option><option value="0">Bütün dövr</option></select></div>
+    <p class="muted small">Mətni dəyişə və ya qeyd əlavə edə bilərsiniz, sonra WhatsApp-a göndərin.</p>
+    <textarea id="rpText" rows="12" style="font-size:14px;line-height:1.5"></textarea>
+    <div class="row"><button type="button" class="btn primary" id="rpShare">Göndər (WhatsApp və s.)</button><button type="button" class="btn" id="rpCopy">Kopyala</button></div>`;
+  const fill = () => { $('#rpText', box).value = build(+$('#rpDays', box).value); };
+  $('#rpDays', box).onchange = fill;
+  $('#rpShare', box).onclick = () => shareText($('#rpText', box).value, 'Hesabat kopyalandı');
+  $('#rpCopy', box).onclick = () => copyText($('#rpText', box).value, 'Hesabat kopyalandı');
+  fill();
+}
+
+// ================= Fərdi AI tapşırıq =================
+// Şagirdin səhv / boş buraxdığı suallardan bənzər yeni suallar → yoxlama → təsdiq → yalnız ona test
+const sampleFromQ = (q) => ({
+  text: q.body + '\n' + (q.options || []).map((o, i) => `${'ABCDE'[i]}) ${o}`).join('\n')
+    + (q.figure ? '\n[Şəklin SVG kodu]: ' + String(q.figure).slice(0, 3000) : ''),
+  image: null, topic: q.topic || '', section: q.section || 'matematik',
+  analysis: { section: q.section || 'matematik', topic: q.topic || '', family: q.subtype || '', visual: '', skill: '', rule: '', student_task: '',
+    rule_hidden: false, options_are_figures: hasOptionFigures(q), figure_required: !!q.figure, difficulty: q.difficulty || 'orta',
+    preserve: [], variable: [], uncertain: [], complete: true, conflict: '' }
+});
+
+function practiceSection(st, done) {
+  const missed = [];
+  const seen = new Set();
+  [...done].sort((a, b) => (a.sub.created_at < b.sub.created_at ? 1 : -1)).forEach((r) => r.questions.forEach((q) => {
+    if (q.qtype !== 'mcq' || seen.has(q.id)) return;
+    const s2 = answerState(q, r.sub.answers?.[q.id]);
+    if (s2 === 'wrong' || s2 === 'empty') { seen.add(q.id); missed.push({ q, state: s2, test: r.t.title }); }
+  }));
+  const box = document.createElement('section');
+  box.className = 'card stack';
+  box.id = 'practice';
+  view().appendChild(box);
+  const state = { items: [], running: false };
+  const render = () => {
+    const sel = state.items.filter((x) => x.q && x.q.ai_status !== 'checking' && (x.q._sel === undefined ? defaultChecked(x.q) || x.q.teacher_approved : x.q._sel));
+    box.innerHTML = `<div class="row between"><h2>Fərdi tapşırıq (AI)</h2>${modelPicker()}</div>
+      ${missed.length ? `<p class="muted small">${esc(st.full_name)} ${missed.length} sualda səhv edib və ya boş buraxıb. AI hər biri üçün bənzər yeni sual hazırlayır, yoxlayır; siz təsdiqləyib yalnız bu şagirdə göndərirsiniz.</p>
+        <div class="row"><label class="row small" style="gap:6px">Neçə sual <select id="pN" style="min-height:40px">${[...new Set([3, 5, 8, 10].map((n) => Math.min(n, missed.length)))].map((n) => `<option ${n === Math.min(5, missed.length) ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <button type="button" class="btn primary" id="pGo" ${state.running ? 'disabled' : ''}>${state.items.length ? 'Yenidən hazırla' : 'Tapşırıq hazırla'}</button></div>`
+        : '<div class="empty">Səhv edilmiş sual yoxdur — fərdi tapşırıq lazım deyil.</div>'}
+      ${state.items.length ? `<div class="mini-grid">${state.items.map((x, i) => `<div class="mini">
+          <div class="mini-head"><span class="tag ${x.src.state === 'wrong' ? 'red' : ''}">${x.src.state === 'wrong' ? 'səhv etmişdi' : 'boş buraxmışdı'}</span><span class="small muted">${esc(x.src.q.topic || '')}</span></div>
+          ${x.q ? miniQ(x.q, 'pr' + i, x.q._sel === undefined ? defaultChecked(x.q) || x.q.teacher_approved : x.q._sel)
+            : x.error ? `<p class="small" style="color:var(--red)">${esc(x.error)}</p>` : '<p class="small muted">hazırlanır…</p>'}</div>`).join('')}</div>
+        <div class="row between"><span class="small muted">Qaralamaları açıb yoxlayın və təsdiqləyin. Seçilən: <strong>${sel.length}</strong></span>
+          <button type="button" class="btn primary" id="pSend" ${state.running || !sel.length ? 'disabled' : ''}>Tapşırığı şagirdə göndər</button></div>` : ''}
+      <div id="pDone"></div>`;
+    bindModelPicker(box);
+    const byKey = Object.fromEntries(state.items.map((x, i) => ['pr' + i, x]));
+    bindMini(box, (k) => { const x = byKey[k]; return x && x.q ? { q: x.q, sample: { text: x.src.q.body }, onApprove: x.q.ai_status === 'checking' ? null : (on) => { if (on) x.q._sel = true; render(); } } : {}; });
+    $$('.check', box).forEach((c) => c.onchange = () => { const x = byKey[c.dataset.id]; if (x && x.q) x.q._sel = c.checked; render(); });
+    const go2 = $('#pGo', box);
+    if (go2) go2.onclick = () => run(+$('#pN', box).value);
+    const send = $('#pSend', box);
+    if (send) send.onclick = () => busy(send, () => sendPractice(sel.map((x) => x))).catch(fail);
+  };
+
+  const makeOne = async (src, feedback = '') => {
+    const q = src.q;
+    if (q.exam === 'tryos') {
+      const d = await callAI('tryos_from_examples', { samples: [sampleFromQ(q)], mode: 'benzer', perSample: 1, feedback });
+      return { ...d.questions[0], exam: 'tryos' };
+    }
+    const d = await callAI('transform', { text: sampleFromQ(q).text + (feedback ? '\nƏvvəlki cəhdin problemləri: ' + feedback : ''), level: 'orta', qtype: 'mcq', grade: q.grade || 7, difficulty: q.difficulty || 'orta', topic: q.topic || '' });
+    return d.question;
+  };
+
+  const run = async (n) => {
+    if (state.running) return;
+    state.running = true;
+    state.items = missed.slice(0, n).map((src) => ({ src, q: null, error: '' }));
+    render();
+    const queue = makeQueue(3);
+    await Promise.all(state.items.map((x) => queue(async () => {
+      try {
+        const sample = sampleFromQ(x.src.q);
+        let q = { ...(await makeOne(x.src)), _uid: ++qSeq, ai_status: 'checking' };
+        x.q = q; render();
+        let ok = await checkQuestion(q, { mode: 'benzer', sample });
+        if (!ok) {
+          const fb = [q.verify_note, q.fit_note].filter(Boolean).join('; ');
+          try { q = { ...(await makeOne(x.src, fb)), _uid: ++qSeq, ai_status: 'checking' }; x.q = q; render(); ok = await checkQuestion(q, { mode: 'benzer', sample }); } catch (_) { /* köhnəsi qalır */ }
+        }
+        if (!ok) x.q.ai_status = 'draft';
+      } catch (err) { x.error = err.message; }
+      render();
+    })));
+    state.running = false;
+    render();
+  };
+
+  const sendPractice = async (list) => {
+    const qsToSave = list.map((x) => ({ ...x.q, topic: x.q.topic || x.src.q.topic, exam: x.q.exam || x.src.q.exam }));
+    const ids = await saveQuestions(qsToSave, 'ai');
+    const d = new Date();
+    const rec = { title: `Fərdi tapşırıq · ${st.full_name} · ${d.getDate()} ${AZ_MONTHS[d.getMonth()]}`, class_id: st.class_id, student_id: st.id, question_ids: ids, review_mode: 'after_submit' };
+    const { data: row, error } = await sb.from('tests').insert(rec).select().single();
+    if (error) throw needSql(error, '007_test_rules.sql');
+    state.items = [];
+    render();
+    const msg = `${st.full_name}, sənin üçün səhvlərinə uyğun yeni tapşırıq hazırladım (${ids.length} sual). Buradan yaz:\n${studentLink(st.access_code)}`;
+    $('#pDone', box).innerHTML = `<div class="notice info stack">Tapşırıq yaradıldı: <a href="#/test/${row.id}">${esc(row.title)}</a>. O yalnız bu şagirdin səhifəsində görünür; düzgün cavablar göndərəndən sonra açılır.
+      ${st.access_code ? '<div><button type="button" class="btn small primary" id="pShare">Şagirdə xəbər göndər</button></div>' : ''}</div>`;
+    const sh = $('#pShare', box);
+    if (sh) sh.onclick = () => shareText(msg, 'Mətn kopyalandı');
+  };
+  render();
 }
 
 async function testResultsView(id) {
@@ -2032,10 +2311,18 @@ async function testResultsView(id) {
     sb.from('submissions').select('*').eq('test_id', id).order('created_at', { ascending: false })
   ]);
   if (error) throw error;
-  const [{ data: qs }, { data: roster }] = await Promise.all([
+  let [{ data: qs }, { data: roster }] = await Promise.all([
     sb.from('questions').select('*').in('id', test.question_ids.length ? test.question_ids : ['00000000-0000-0000-0000-000000000000']),
     test.class_id ? sb.from('students').select('id, full_name, access_code').eq('class_id', test.class_id).order('full_name') : Promise.resolve({ data: [] })
   ]);
+  const rosterAll = roster || [];
+  if (test.student_id) roster = rosterAll.filter((x) => x.id === test.student_id);
+  const rules = [
+    test.student_id ? `fərdi test: <strong>${esc((rosterAll.find((x) => x.id === test.student_id) || {}).full_name || 'şagird')}</strong>` : '',
+    test.time_limit_min ? `⏱ ${test.time_limit_min} dəqiqə` : '',
+    test.due_at ? `son tarix: ${esc(fmtDue(test.due_at))}` : '',
+    test.shuffle ? 'qarışdırılır' : ''
+  ].filter(Boolean).join(' · ');
   const sentIds = new Set(subs.map((s) => s.student_id).filter(Boolean));
   const sentNames = new Set(subs.map((s) => s.student_name.trim().toLocaleLowerCase('az')));
   const notSent = (roster || []).filter((st) => !sentIds.has(st.id) && !sentNames.has(st.full_name.trim().toLocaleLowerCase('az')));
@@ -2046,7 +2333,7 @@ async function testResultsView(id) {
 
   view().innerHTML = `
     <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>${esc(test.title)}</h1>
-      <p class="muted">${esc(test.classes?.name || 'Sinifsiz')} · ${questions.length} sual · ${test.is_open ? 'açıq' : 'bağlı'}</p></div>
+      <p class="muted">${esc(test.classes?.name || 'Sinifsiz')} · ${questions.length} sual · ${test.is_open ? 'açıq' : 'bağlı'}${rules ? ' · ' + rules : ''}</p></div>
       <div class="row"><button class="btn primary" id="copy">Linki kopyala</button><button class="btn" id="pdf">PDF</button><button class="btn danger" id="del">Testi sil</button></div></div>
     <div class="card row between"><label class="row small" style="gap:8px">Şagirdə düzgün cavabları və həlli
         <select id="rvMode" style="min-height:40px">${Object.entries(REVIEW_MODES).map(([k, v]) => `<option value="${k}" ${k === (test.review_mode || 'never') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
@@ -2061,7 +2348,7 @@ async function testResultsView(id) {
     <section class="card stack"><h2>Şagirdlər</h2>
       ${subs.length ? `<p class="small muted">Xanalar suallardır: <span class="cell c-right">✓</span> düz, <span class="cell c-wrong">✗</span> səhv, <span class="cell c-empty">—</span> boş. Şagirdin adına basanda işi açılır.</p>
       <div class="table-wrap"><table><thead><tr><th>Şagird</th><th>Bal</th><th>Suallar</th><th>Vaxt</th></tr></thead><tbody>
-        ${subs.map((s) => { const p = s.total ? Math.round(s.score / s.total * 100) : 0; return `<tr><td><button type="button" class="linkish" data-sub="${s.id}">${esc(s.student_name)}</button></td><td><strong>${s.score}/${s.total}</strong> <span class="small muted">${p}%</span></td>
+        ${subs.map((s) => { const p = s.total ? Math.round(s.score / s.total * 100) : 0; return `<tr><td><button type="button" class="linkish" data-sub="${s.id}">${esc(s.student_name)}</button></td><td><strong>${s.score}/${s.total}</strong> <span class="small muted">${p}%</span>${s.late ? ' <span class="tag amber" title="Vaxt bitəndən sonra göndərilib">gecikib</span>' : ''}</td>
           <td>${cellsHtml(questions, s.answers)}</td><td class="muted small">${fmtDate(s.created_at)}</td></tr>`; }).join('')}
       </tbody></table></div>` : '<div class="empty">Hələ heç kim göndərməyib.</div>'}
     </section>
@@ -2113,13 +2400,118 @@ const studentQuestionsHtml = (test) => test.questions.map((q, i) => `<fieldset c
     </fieldset>`).join('');
 
 // Cavabları toplayır; boş sual varsa təsdiq istəyir (imtina edilsə null)
-function collectAnswers(form, test) {
+function collectAnswers(form, test, auto = false) {
   const f = new FormData(form);
   const answers = {};
   test.questions.forEach((q) => { const v = f.get('q_' + q.id); if (v !== null && String(v).trim() !== '') answers[q.id] = String(v); });
   const missing = test.questions.length - Object.keys(answers).length;
-  if (missing && !confirm(missing + ' suala cavab verilməyib. Yenə də göndərilsin?')) return null;
+  if (!auto && missing && !confirm(missing + ' suala cavab verilməyib. Yenə də göndərilsin?')) return null;
   return answers;
+}
+
+// ---- Qarışdırma (şagirdə görə sabit), vaxt sayğacı, qaralama ----
+function seededRandom(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+}
+function shuffled(arr, rnd) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function shuffleTest(test, seed) {
+  const rnd = seededRandom(seed);
+  const questions = shuffled(test.questions, rnd).map((q) => {
+    if (q.qtype !== 'mcq' || !(q.options || []).length) return q;
+    const idx = shuffled(q.options.map((_, i) => i), rnd);
+    return { ...q, options: idx.map((i) => q.options[i]), option_figures: hasOptionFigures(q) ? idx.map((i) => q.option_figures[i]) : q.option_figures };
+  });
+  return { ...test, questions };
+}
+const fmtClock = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+const AZ_MONTHS = ['yan', 'fev', 'mar', 'apr', 'may', 'iyn', 'iyl', 'avq', 'sen', 'okt', 'noy', 'dek'];
+const fmtDue = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return `${d.getDate()} ${AZ_MONTHS[d.getMonth()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+// Test formu: qaralama yaddaşı, vaxt bitəndə avtomatik göndərmə
+function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline = null, onSubmit }) {
+  $app.innerHTML = `<form class="student" id="st">
+    ${top}
+    <h1>${esc(test.title)}</h1>
+    ${test.due_at ? `<p class="muted small" style="margin:-8px 0 0">Son tarix: <strong>${esc(fmtDue(test.due_at))}</strong></p>` : ''}
+    ${nameField}
+    ${deadline ? '<div class="timer" id="timer" role="timer" aria-live="off"></div>' : ''}
+    ${studentQuestionsHtml(test)}
+    <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
+  </form>`;
+  const form = $('#st');
+  // qaralama: səhifə yenilənsə cavablar itməsin
+  const load = () => { try { return JSON.parse(localStorage.getItem(draftKey) || '{}'); } catch (_) { return {}; } };
+  if (draftKey) {
+    const d = load();
+    Object.entries(d).forEach(([k, v]) => {
+      const el = form.querySelector(`[name="${CSS.escape(k)}"]`);
+      if (!el) return;
+      if (el.type === 'radio') { const r = form.querySelector(`[name="${CSS.escape(k)}"][value="${CSS.escape(v)}"]`); if (r) r.checked = true; } else el.value = v;
+    });
+    const save = () => { const o = {}; new FormData(form).forEach((v, k) => { if (String(v).trim()) o[k] = String(v); }); try { localStorage.setItem(draftKey, JSON.stringify(o)); } catch (_) { /* */ } };
+    form.addEventListener('change', save);
+    form.addEventListener('input', save);
+  }
+  let sent = false;
+  let timer = null;
+  const submit = async (auto) => {
+    if (sent) return;
+    const answers = collectAnswers(form, test, auto);
+    if (!answers) return;
+    sent = true;
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    btn.textContent = 'Göndərilir…';
+    try {
+      await onSubmit(answers, auto, new FormData(form));
+      clearInterval(timer);
+      try { if (draftKey) localStorage.removeItem(draftKey); } catch (_) { /* */ }
+    } catch (err) {
+      sent = false;
+      btn.disabled = false;
+      btn.textContent = 'Cavabları göndər';
+      fail(err);
+    }
+  };
+  form.onsubmit = (e) => { e.preventDefault(); submit(false); };
+  if (deadline) {
+    const tick = () => {
+      if (!form.isConnected) return clearInterval(timer);
+      const left = deadline - Date.now();
+      const el = $('#timer');
+      el.textContent = 'Qalan vaxt: ' + fmtClock(left);
+      el.classList.toggle('low', left < 60000);
+      if (left <= 0) { clearInterval(timer); toast('Vaxt bitdi, cavablar göndərilir'); submit(true); }
+    };
+    timer = setInterval(tick, 500);
+    tick();
+  }
+}
+
+// Vaxtlı test üçün başlamazdan əvvəl ekran
+function startScreen(test, { top = '', nameField = '', onStart }) {
+  $app.innerHTML = `<form class="student" id="startForm">
+    ${top}
+    <h1>${esc(test.title)}</h1>
+    <div class="card stack">
+      <p><strong>${test.questions.length} sual · ${test.time_limit_min} dəqiqə</strong></p>
+      ${test.due_at ? `<p class="muted small">Son tarix: ${esc(fmtDue(test.due_at))}</p>` : ''}
+      <p class="notice">"Başla" basandan sonra vaxt gedir və dayanmır. Vaxt bitəndə cavablar avtomatik göndəriləcək.</p>
+      ${nameField}
+      <button class="btn primary block" type="submit" style="min-height:52px">Başla</button>
+    </div>
+  </form>`;
+  $('#startForm').onsubmit = (e) => { e.preventDefault(); busy($('button[type=submit]', e.target), () => onStart(new FormData(e.target))).catch(fail); };
 }
 
 const studentMsg = (title, text, extra = '') => {
@@ -2128,40 +2520,50 @@ const studentMsg = (title, text, extra = '') => {
 
 async function studentTest(id) {
   $app.innerHTML = '<div class="center-screen"><div class="spinner" aria-label="Yüklənir"></div></div>';
-  const { data: test, error } = await sb.rpc('get_test_for_student', { p_test_id: id });
-  if (error || !test) return studentMsg('Test açılmadı', 'Test tapılmadı və ya müəllim onu bağlayıb.');
+  const { data: raw, error } = await sb.rpc('get_test_for_student', { p_test_id: id });
+  if (error || !raw) return studentMsg('Test açılmadı', 'Test tapılmadı və ya müəllim onu bağlayıb.');
+  if (raw.overdue) return studentMsg(esc(raw.title), `Son tarix keçib (${esc(fmtDue(raw.due_at))}). Cavablar artıq qəbul edilmir.`);
   const doneKey = 'mp_done_' + id;
   let done = null;
   try { done = JSON.parse(localStorage.getItem(doneKey) || 'null'); } catch (_) { done = null; }
-  if (done) return studentDone(test, done);
+  if (done) return studentDone(raw, done);
 
+  let seed = '';
+  try { seed = sessionStorage.getItem('mp_seed_' + id) || ''; if (!seed) { seed = String(Math.random()); sessionStorage.setItem('mp_seed_' + id, seed); } } catch (_) { seed = String(Math.random()); }
+  const test = raw.shuffle ? shuffleTest(raw, seed + id) : raw;
   const students = test.students || [];
-  $app.innerHTML = `<form class="student" id="st">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
-    <h1>${esc(test.title)}</h1>
-    <div class="card stack">
-      ${students.length
-        ? `<label class="field">Adınızı seçin<select name="name" required><option value="">— seçin —</option>${students.map((s) => `<option>${esc(s)}</option>`).join('')}</select></label>`
-        : '<label class="field">Ad və soyadınız<input type="text" name="name" required maxlength="80" autocomplete="name"></label>'}
-    </div>
-    ${studentQuestionsHtml(test)}
-    <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
-  </form>`;
+  const nameField = `<div class="card stack">${students.length
+    ? `<label class="field">Adınızı seçin<select name="name" required><option value="">— seçin —</option>${students.map((s) => `<option>${esc(s)}</option>`).join('')}</select></label>`
+    : '<label class="field">Ad və soyadınız<input type="text" name="name" required maxlength="80" autocomplete="name"></label>'}</div>`;
+  const top = '<div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>';
 
-  $('#st').onsubmit = (e) => {
-    e.preventDefault();
-    const name = String(new FormData(e.target).get('name') || '').trim();
-    if (!name) return toast('Adınızı seçin', true);
-    const answers = collectAnswers(e.target, test);
-    if (!answers) return;
-    busy($('button[type=submit]', e.target), async () => {
-      const { data, error: err } = await sb.rpc('submit_test', { p_test_id: id, p_student_name: name, p_answers: answers });
+  const run = (name, deadline) => mountTestForm(test, {
+    top, draftKey: 'mp_draft_' + id, deadline,
+    nameField: name ? `<input type="hidden" name="name" value="${esc(name)}"><p class="muted">${esc(name)}</p>` : nameField,
+    onSubmit: async (answers, auto, f) => {
+      const nm = String(f.get('name') || name || '').trim();
+      if (!nm) throw new Error('Adınızı seçin');
+      const { data, error: err } = await sb.rpc('submit_test', { p_test_id: id, p_student_name: nm, p_answers: answers });
       if (err) throw new Error(err.message);
-      const result = { ...data, name };
+      const result = { ...data, name: nm };
       try { localStorage.setItem(doneKey, JSON.stringify(result)); } catch (_) { /* yaddaş bağlıdır */ }
       studentDone(test, result);
-    }).catch(fail);
-  };
+    }
+  });
+  if (!test.time_limit_min) return run('', null);
+  // ümumi linkdə vaxt brauzerdə saxlanılır
+  let started = 0;
+  try { started = +localStorage.getItem('mp_start_' + id) || 0; } catch (_) { /* */ }
+  let savedName = '';
+  try { savedName = localStorage.getItem('mp_name_' + id) || ''; } catch (_) { /* */ }
+  if (started && savedName) return run(savedName, started + test.time_limit_min * 60000);
+  startScreen(test, { top, nameField, onStart: async (f) => {
+    const nm = String(f.get('name') || '').trim();
+    if (!nm) throw new Error('Adınızı seçin');
+    const t0 = Date.now();
+    try { localStorage.setItem('mp_start_' + id, String(t0)); localStorage.setItem('mp_name_' + id, nm); } catch (_) { /* */ }
+    run(nm, t0 + test.time_limit_min * 60000);
+  } });
 }
 
 function studentDone(test, r, back = '', reviewHref = '', reviewNote = '') {
@@ -2234,23 +2636,27 @@ async function studentPortal(rawCode, testId, sub) {
     if (error || !test) return studentMsg('Test açılmadı', 'Test tapılmadı.', `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
     if (test.result) return studentDone(test, { ...test.result, name: test.name }, home, test.review ? `${home}/${testId}/review` : '', test.review ? '' : reviewNoteOf(test.review_mode));
     if (test.closed) return studentMsg(esc(test.title), 'Müəllim bu testi bağlayıb.', `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
-    $app.innerHTML = `<form class="student" id="st">
-      <div class="row between"><a class="muted" href="${home}">‹ Testlərim</a><span class="muted">${esc(test.name)}</span></div>
-      <h1>${esc(test.title)}</h1>
-      ${studentQuestionsHtml(test)}
-      <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
-    </form>`;
-    $('#st').onsubmit = (e) => {
-      e.preventDefault();
-      const answers = collectAnswers(e.target, test);
-      if (!answers) return;
-      busy($('button[type=submit]', e.target), async () => {
+    if (test.overdue) return studentMsg(esc(test.title), `Son tarix keçib (${esc(fmtDue(test.due_at))}). Cavablar artıq qəbul edilmir.`, `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
+    const shown = test.shuffle ? shuffleTest(test, String(test.seed) + testId) : test;
+    const top = `<div class="row between"><a class="muted" href="${home}">‹ Testlərim</a><span class="muted">${esc(test.name)}</span></div>`;
+    const run = (deadline) => mountTestForm(shown, {
+      top, deadline, draftKey: 'mp_draft_' + code + '_' + testId,
+      onSubmit: async (answers) => {
         const { data, error: err } = await sb.rpc('student_submit_test', { p_code: code, p_test_id: testId, p_answers: answers });
         if (err) throw new Error(err.message);
         const now = test.review_mode === 'after_submit';
-        studentDone(test, { ...data, name: test.name }, home, now ? `${home}/${testId}/review` : '', now ? '' : reviewNoteOf(test.review_mode));
-      }).catch(fail);
-    };
+        studentDone(shown, { ...data, name: test.name }, home, now ? `${home}/${testId}/review` : '', now ? '' : reviewNoteOf(test.review_mode));
+      }
+    });
+    if (!test.time_limit_min) { run(null); return; }
+    // server vaxtı ilə brauzer vaxtı arasındakı fərq
+    const deadlineOf = (startedAt, serverNow) => Date.now() + (new Date(startedAt).getTime() + test.time_limit_min * 60000 - new Date(serverNow).getTime());
+    if (test.started_at) { run(deadlineOf(test.started_at, test.now)); return; }
+    startScreen(shown, { top, onStart: async () => {
+      const { data: st, error: err } = await sb.rpc('student_start_test', { p_code: code, p_test_id: testId });
+      if (err) throw new Error(/function .* does not exist/i.test(err.message) ? 'Müəllim bazanı yeniləməlidir (007).' : err.message);
+      run(deadlineOf(st.started_at, st.now));
+    } });
     return;
   }
 
@@ -2260,7 +2666,8 @@ async function studentPortal(rawCode, testId, sub) {
     return studentCodeForm(error ? 'Hazırda açmaq olmadı, bir az sonra yenidən yoxlayın.' : 'Bu link və ya kod etibarsızdır. Müəlliminizdən yeni link istəyin.');
   }
   try { localStorage.setItem(CODE_KEY, code); } catch (_) { /* */ }
-  const todo = me.tests.filter((t) => !t.result && t.is_open);
+  const todo = me.tests.filter((t) => !t.result && t.is_open && !t.overdue);
+  const missed = me.tests.filter((t) => !t.result && t.overdue);
   const done = me.tests.filter((t) => t.result);
   const avg = done.length ? Math.round(done.reduce((a, t) => a + pct(t.result), 0) / done.length) : null;
   $app.innerHTML = `<div class="student">
@@ -2268,8 +2675,10 @@ async function studentPortal(rawCode, testId, sub) {
     <div><h1>Salam, ${esc(me.name)}</h1><p class="muted">${esc(me.class || '')}</p></div>
     <section class="card stack"><h2>Yazılacaq testlər${todo.length ? ` (${todo.length})` : ''}</h2>
       ${todo.length ? todo.map((t) => `<a class="portal-row" href="${home}/${t.id}">
-          <span><strong>${esc(t.title)}</strong><span class="small muted"> · ${t.count} sual</span></span><span class="btn small primary">Başla</span></a>`).join('')
+          <span><strong>${esc(t.title)}</strong>${t.personal ? ' <span class="tag book">sənin üçün</span>' : ''}<span class="small muted"> · ${t.count} sual${t.time_limit_min ? ` · ⏱ ${t.time_limit_min} dəq` : ''}</span>
+            ${t.due_at ? `<br><span class="small" style="color:#8A5A00">son tarix: ${esc(fmtDue(t.due_at))}</span>` : ''}</span><span class="btn small primary">Başla</span></a>`).join('')
         : '<div class="empty">Hazırda yazılacaq test yoxdur.</div>'}
+      ${missed.length ? `<div class="small muted">Vaxtı keçmiş: ${missed.map((t) => esc(t.title)).join(', ')}</div>` : ''}
     </section>
     <section class="card stack"><div class="row between"><h2>Nəticələrim</h2>${avg === null ? '' : `<span class="tag ai">orta ${avg}%</span>`}</div>
       ${done.length ? done.map((t) => `<div class="portal-row">

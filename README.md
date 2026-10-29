@@ -51,6 +51,7 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - **004_status.sql** — AI yoxlama statusları (keçib / yoxlama tələb edir / qaralama) və müəllim təsdiqi.
 - **005_student_links.sql** — hər şagirdə şəxsi link (8 simvollu kod), şagird kabineti, bir şagird bir testi bir dəfə göndərir.
 - **006_review.sql** — testdən sonra şagird öz səhvlərini görür (müəllim seçir: göstərmə / göndərən kimi / test bağlananda).
+- **007_test_rules.sql** — vaxt limiti (başlama anı serverdə), son tarix, sual/variant qarışdırma, fərdi (bir şagirdə) test, gecikmiş iş qeydi.
 - **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
 
 ## TR-YÖS rejimi
@@ -73,6 +74,11 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 - Köhnə ümumi test linki (`#/t/...`, ad seçməklə) də işləyir.
 - **Səhvlərimə bax** (`#/s/KOD/TEST/review`): şagirdin cavabı, düzgün cavab və həll; yalnız müəllim icazə verəndə (testin `review_mode`).
 - Müəllim: test nəticəsində hər şagird üçün sual xanaları (✓ ✗ —), ada basanda işi açılır; sinifdə şagirdin adına basanda onun bütün testləri (`#/student/ID`).
+
+## Müəllim alətləri
+- **Analiz** (sinif → Analiz): testlər üzrə orta nəticə, mövzular (zəifdən güclüyə), ən çox səhv edilən suallar və ən çox seçilən səhv variant, şagirdlər (köməyə ehtiyacı olanlar yuxarıda).
+- **Şagird səhifəsi**: mövzular, nəticələr, hər test üzrə xanalar; **Fərdi tapşırıq (AI)** — səhv/boş suallardan bənzər yeni suallar, yoxlama, təsdiq, yalnız həmin şagirdə test; **Valideyn hesabatı** (7/30 gün, WhatsApp-a göndər).
+- **Yeni test → Vaxt, son tarix, qarışdırma**: vaxt bitəndə avtomatik göndərmə, cavab qaralaması brauzerdə saxlanılır, qarışdırma hər şagird üçün sabit.
 
 ## Testə PDF-dən sual
 - Testlər → Yeni test → **Kitabdan / PDF-dən sual**: istənilən PDF və ya şəkil açılır, sual çərçivəyə alınır, aşağıda seçim çıxır:
