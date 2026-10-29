@@ -424,7 +424,8 @@ async function classView(id) {
         ${students.length ? `<div class="table-wrap"><table><tbody>${students.map((s) => `<tr>
             <td>${esc(s.full_name)}${s.access_code ? `<div class="small muted mono">${esc(s.access_code)}</div>` : ''}</td>
             <td style="text-align:right;white-space:nowrap">
-              ${s.access_code ? `<button class="btn small primary" data-share="${s.id}">Linki göndər</button>
+              ${s.access_code ? `<a class="btn small" href="${esc(studentLink(s.access_code))}" target="_blank" rel="noopener">Bax</a>
+              <button class="btn small primary" data-share="${s.id}">Linki göndər</button>
               <button class="btn small" data-recode="${s.id}" title="Köhnə link işləməyəcək">Yeni link</button>` : ''}
               <button class="btn small danger" data-del="${s.id}" aria-label="${esc(s.full_name)} sil">Sil</button></td></tr>`).join('')}</tbody></table></div>`
           : '<div class="empty">Siyahı boşdur.</div>'}
