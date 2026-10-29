@@ -71,9 +71,12 @@ async function callAI(action, payload) {
     body: JSON.stringify({ action, model: currentModel(), ...payload })
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || 'AI xətası');
+  if (!r.ok) throw new Error(data.error || (r.status === 504 ? 'AI 5 dəqiqə ərzində cavab vermədi. Yenidən yoxlayın.' : 'AI xətası (' + r.status + ')'));
+  if (data._helper) lastHelper = data._helper;
   return data;
 }
+let lastHelper = '';
+const HELPER_NAME = { sonnet: 'Claude Sonnet', 'gemini-flash': 'Gemini', 'gpt-sol': 'GPT Sol', opus: 'Claude Opus' };
 
 async function copyText(text, msg = 'Link kopyalandı') {
   try { await navigator.clipboard.writeText(text); toast(msg); }
@@ -1678,6 +1681,8 @@ async function testsView() {
 
 // ================= Test üçün PDF-dən sual: təmiz orijinal və ya AI ilə yeni =================
 // picker: seçici yeri; out: nəticə kartları. Qaytarır: { busy(), selected() }
+const fmtElapsed = (t0) => { const sec = Math.floor((Date.now() - t0) / 1000); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); };
+
 function pdfQuestions(pickerRoot, out) {
   const jobs = [];
   const run = makeQueue(3);
@@ -1725,13 +1730,18 @@ function pdfQuestions(pickerRoot, out) {
   // Yoxla; keçməsə bir dəfə yenidən cəhd; yenə keçməsə qaralama
   const settle = async (job, q, remake) => {
     let cur = q;
+    job.step = 'yoxlanılır';
+    render();
     let ok = await checkQuestion(cur, { mode: job.mode, sample: job.sample });
     render();
     if (!ok) {
       const fb = [cur.verify_note, cur.fit_note].filter(Boolean).join('; ');
       let repl = null;
+      job.step = 'yoxlamadan keçmədi, yenidən hazırlanır';
+      render();
       try { repl = await remake(fb); } catch (err) { job.errors.push(err.message); }
       if (repl) {
+        job.step = 'yenidən yoxlanılır';
         job.questions[job.questions.indexOf(cur)] = repl;
         cur = repl;
         render();
@@ -1745,17 +1755,19 @@ function pdfQuestions(pickerRoot, out) {
   const prep = (x, job) => ({ ...x, _uid: ++qSeq, _source: job.mode === 'original' ? 'book' : 'ai', ai_status: 'checking' });
 
   function startJob(image, mode, n) {
-    const job = { id: ++qSeq, image, mode, n, state: 'reading', questions: [], errors: [], warnings: [], sample: null };
+    const job = { id: ++qSeq, image, mode, n, state: 'reading', step: 'şəkil oxunur', t0: Date.now(), questions: [], errors: [], warnings: [], sample: null, helper: '' };
     jobs.push(job);
     render();
     run(async () => {
       const d = await callAI('tryos_analyze', { image, text: '' });
+      job.helper = d._helper || '';
       const a = d.analysis;
       job.sample = { text: d.text, image, topic: a.topic, section: a.section, analysis: a };
       (a.uncertain || []).forEach((u) => job.warnings.push('qeyri-müəyyən: ' + u));
       if (a.conflict) job.warnings.push('ziddiyyət: ' + a.conflict);
       if (!a.complete) { job.state = 'incomplete'; render(); return; }
       job.state = 'working';
+      job.step = mode === 'original' ? 'yenidən yazılır, şəkillər çəkilir' : 'suallar yaradılır';
       render();
       if (mode === 'original') {
         const make = async (feedback = '') => {
@@ -1804,7 +1816,9 @@ function pdfQuestions(pickerRoot, out) {
         <img src="${j.image}" alt="Kitabdakı sual">
         <div class="stack" style="gap:6px;flex:1;min-width:0">
           <div class="row"><span class="tag book">${MODE_LABEL[j.mode]}${j.mode === 'original' ? '' : ' · ' + j.n}</span><span class="tag ${cls}">${txt}</span>
+            ${j.state === 'reading' || j.state === 'working' ? `<span class="small muted" data-elapsed="${j.t0}">${esc(j.step)} · ${fmtElapsed(j.t0)}</span>` : ''}
             <button type="button" class="btn small" data-rmjob="${j.id}" style="margin-left:auto">Sil</button></div>
+          ${j.helper && j.helper !== 'sonnet' ? `<p class="small" style="color:#8A5A00">Claude əlçatan deyil (balans?) — köməkçi işləri ${esc(HELPER_NAME[j.helper] || j.helper)} görür, daha yavaş ola bilər.</p>` : ''}
           ${j.state === 'incomplete' ? '<p class="small" style="color:var(--red)">Kəsik natamamdır: şərt, şəkil və ya variantlar çatışmır. Sualı tam çərçivəyə alıb yenidən seçin.</p>' : ''}
           ${j.warnings.length ? `<ul class="warn-list">${j.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
           ${j.errors.length ? `<p class="small" style="color:var(--red)">${j.errors.map(esc).join('<br>')}</p>` : ''}
@@ -1825,6 +1839,10 @@ function pdfQuestions(pickerRoot, out) {
     out.dispatchEvent(new Event('pdfchange', { bubbles: true }));
   }
 
+  const tick = setInterval(() => {
+    if (!out.isConnected) return clearInterval(tick);
+    $$('[data-elapsed]', out).forEach((el) => { el.textContent = el.textContent.replace(/· [\d:]+$/, '· ' + fmtElapsed(+el.dataset.elapsed)); });
+  }, 1000);
   // səhifədən çıxanda panel qalmasın
   window.addEventListener('hashchange', () => panel.remove(), { once: true });
 

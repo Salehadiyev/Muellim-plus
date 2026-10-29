@@ -102,6 +102,7 @@ export default async function handler(req, res) {
     const store = { calls: [], genModel: body._model };
     try {
       const out = await usageStore.run(store, actions[action]);
+      if (store.lastHelper && out && typeof out === 'object') out._helper = store.lastHelper;
       const made = (out.questions ? out.questions.length : 0) + (out.question ? 1 : 0);
       await saveUsage(req, action, store.calls, made, body._model.key);
       return res.status(200).json(out);
@@ -671,13 +672,17 @@ async function askOnce(model, system, content, maxTokens) {
 // Köməkçi işlər (oxuma, analiz, yoxlama) üçün modellər sırası:
 // əvvəl Claude Sonnet; o işləməsə (balans, açar, xəta) — qoşulu başqa provayder
 // (mümkünsə sualı yazan modeldən fərqli, yoxlama müstəqil olsun), ən sonda sualı yazan modelin özü.
+const providerDown = {}; // provayder → bu vaxta qədər sınanmasın (balans/açar xətası, 3 dəq)
 function helperChain() {
   const store = usageStore.getStore() || {};
+  const now = Date.now();
+  Object.entries(providerDown).forEach(([p, until]) => { if (until > now) (store.badProviders = store.badProviders || new Set()).add(p); });
   const gen = store.genModel;
   const has = (m) => Boolean(process.env[PROVIDER_KEY[m.provider]]) && !(store.badProviders || new Set()).has(m.provider);
   const asHelper = (m) => ({ ...m, helper: true });
   const others = [MODELS['gemini-flash'], MODELS['gpt-sol']].filter((m) => m.provider !== gen?.provider);
-  const list = [HELPER, ...others, ...(gen && gen.provider !== 'anthropic' ? [gen] : [])].filter(has).map(asHelper);
+  let list = [HELPER, ...others, ...(gen && gen.provider !== 'anthropic' ? [gen] : [])].filter(has).map(asHelper);
+  if (!list.length) list = [HELPER, ...others].filter((m) => Boolean(process.env[PROVIDER_KEY[m.provider]])).map(asHelper);
   const seen = new Set();
   return list.filter((m) => (seen.has(m.provider) ? false : seen.add(m.provider)));
 }
@@ -698,6 +703,7 @@ async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HE
       // balans/açar problemi olan provayder bu sorğuda bir daha sınanmasın
       if ([401, 402, 403].includes(err.status) || /balans|açarı/.test(err.publicMessage || "")) {
         if (store) (store.badProviders = store.badProviders || new Set()).add(m.provider);
+        providerDown[m.provider] = Date.now() + 3 * 60 * 1000;
       }
     }
   }
@@ -753,16 +759,26 @@ async function callGemini(model, system, content, maxTokens) {
   const parts = content.map((c) => c.type === 'image'
     ? { inlineData: { mimeType: c.source.media_type, data: c.source.data } }
     : { text: c.text });
-  const r = await fetchRetry(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.id)}:generateContent`, {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.id)}:generateContent`;
+  const send = (fast) => fetchRetry(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts }],
-      generationConfig: { maxOutputTokens: Math.max(maxTokens, 16000), responseMimeType: 'application/json' }
+      generationConfig: {
+        maxOutputTokens: Math.max(maxTokens, 16000), responseMimeType: 'application/json',
+        ...(fast ? { thinkingConfig: { thinkingLevel: 'low' } } : {})
+      }
     })
   });
-  const data = await r.json().catch(() => ({}));
+  // Köməkçi işlərdə az düşünsün (sürət); model bu ayarı qəbul etməsə, ayarsız təkrar
+  let r = await send(Boolean(model.helper));
+  let data = await r.json().catch(() => ({}));
+  if (!r.ok && r.status === 400 && model.helper && /thinking/i.test(JSON.stringify(data))) {
+    r = await send(false);
+    data = await r.json().catch(() => ({}));
+  }
   if (!r.ok) throw aiError('Gemini', r.status, data);
   recordUsage(model, data.usageMetadata);
   const cand = (data.candidates || [])[0];
