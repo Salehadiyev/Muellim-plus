@@ -1,134 +1,44 @@
-# Müəllim+ · ilk versiya
+# Müəllim+
 
-Riyaziyyat müəllimləri üçün platforma: siniflər, şagirdlər, AI ilə sual yaratma, kitabdan sual kəsib orijinala çevirmə, sual bankı və şagirdlər üçün onlayn test.
+TR-YÖS (Temel Matematik + Sayısal Yetenek) hazırlığı üçün müəllim platforması: tələbələr və qruplar, sual bankı, AI ilə sual, kitabdan/PDF-dən sual, testlər və denemelər, səhv dəftəri, materiallar, dərs və ödəniş dəftəri. Tələbələr qeydiyyatsız, öz şəxsi linki ilə girir.
 
-## Menyu (sadələşdirilmiş)
-- **Ana səhifə** — 3 böyük düymə (Sual yarat, Test yarat, Siniflər), açıq testlər (kim neçə yazıb), son nəticələr.
-- **Siniflər** — şagirdlər, şəxsi linklər, Analiz, şagird səhifəsi (fərdi tapşırıq, valideyn hesabatı).
-- **Suallar** — üç bölmə: Sual bankı · Kitabdan / PDF (`#/pdf`) · AI ilə yarat (`#/ai`).
-- **Testlər** — siyahı və + Yeni test.
-- **Ayarlar** — AI xərci və limit, AI sayğacı, Müəllimlər (admin), hesab.
+Sayt: **https://muellim-plus.vercel.app**
 
-## Nə var
+## Hər şey harada saxlanılır
 
-| Hissə | Nə edir |
-|---|---|
-| Giriş | Müəllim e-poçt və şifrə ilə qeydiyyatdan keçir |
-| Siniflər | Sinif yaradılır, şagird siyahısı yapışdırılır |
-| AI ilə sual | Mövzu, sinif, çətinlik seçilir, suallar həlli ilə gəlir |
-| Kitabdan sual | Səhifənin şəkli çəkilir, sual çərçivəyə alınır, AI onu yeni orijinal suala çevirir. Kitabın şəkli saxlanılmır |
-| Sual bankı | Bütün suallar, axtarış və filtr |
-| Testlər | Bankdan sual seçilir, link şagirdlərə göndərilir, şagird qeydiyyatsız açır, çoxseçimli suallar avtomatik yoxlanılır |
+| Yer | Nə var | Nə vaxt lazımdır |
+|---|---|---|
+| **GitHub** — `Salehadiyev/Muellim-plus` | Bütün kod, dəyişikliklərin tarixçəsi, SQL faylları (`supabase/`), sınaqlar | Yeni dəyişiklik, köhnə versiyaya qayıtmaq |
+| **Vercel** — `muellim-plus` layihəsi | Saytın özü, API açarları (Settings → Environment Variables) | GitHub-a kod gələndə sayt **özü yenilənir**; açarı dəyişmək lazım olanda |
+| **Supabase** | Baza: tələbələr, suallar, testlər, nəticələr, ödənişlər, fayllar | Yeni SQL işə salmaq (SQL Editor), ehtiyat nüsxə |
+| **AI hesabları** (Anthropic, OpenAI, Google AI Studio) | AI açarları və balans | Balans bitəndə |
 
-## Fayllar
+Sayt bu hesablarda işləyir — hər hansı söhbət bağlansa da dayanmır.
 
-- `index.html`, `app.js`, `styles.css` — sayt (heç bir quraşdırma tələb etmir)
-- `api/ai.js` — Claude AI ilə əlaqə (gizli açar yalnız serverdə qalır)
-- `api/config.js` — sayta açıq Supabase məlumatını verir
-- `supabase/schema.sql` — verilənlər bazası və təhlükəsizlik qaydaları
+## Yeni dəyişiklik lazım olanda
+1. claude.ai-də yeni söhbət aç və GitHub repozitoriyasını (`Salehadiyev/Muellim-plus`) qoş.
+2. Nə istədiyini yaz. Claude əvvəlcə `CLAUDE.md` faylını oxuyur — layihənin quruluşu və iş qaydaları oradadır.
+3. Claude dəyişikliyi edir, sınaqları işlədir və GitHub-a göndərir; Vercel saytı özü yeniləyir.
+4. Bazada dəyişiklik lazım olsa, Claude SQL-i söhbətə yazır: **Supabase → SQL Editor → New query → yapışdır → Run**.
 
-## İşə salma (iPad-dən də olur)
+## Ehtiyat nüsxə
+- Saytda **Ayarlar → Məlumatlarımı yüklə** — bütün məlumat bir faylda. Ayda bir dəfə yüklə və saxla.
+- Pulsuz Supabase planı avtomatik nüsxə saxlamır; tələbə çoxalanda Pro plana keçmək məsləhətdir.
 
-### 1. Supabase (verilənlər bazası, pulsuz)
-1. supabase.com → **Start your project** → GitHub ilə daxil ol
-2. **New project**: ad `muellim-plus`, güclü şifrə, region **Frankfurt** (Azərbaycana ən yaxın)
-3. Sol menyu → **SQL Editor** → **New query** → `supabase/schema.sql` faylının hamısını yapışdır → **Run**
-4. **Project Settings → API**: `Project URL` və `anon public` açarını bir yerə qeyd et
-5. Sınaq müddətində asanlıq üçün: **Authentication → Sign In / Providers → Email** → "Confirm email" söndür
+## Bazanın yenilənmələri (SQL faylları)
+`supabase/` qovluğunda: `schema.sql` (əsas) və `002`…`016` yeniləmələri. Hamısı bir faylda: `supabase/full_schema.sql` — **yeni boş Supabase layihəsi** üçün bunu bir dəfə işə salmaq kifayətdir. Hər fayl təkrar işə salına bilər (zərərsizdir).
 
-### 2. Claude API açarı
-1. console.anthropic.com → hesab aç
-2. **Billing** → kart əlavə et, kiçik məbləğ yüklə
-3. **API Keys** → **Create Key** → açarı kopyala (bir dəfə göstərilir)
+## Bölmələr (qısa)
+- **Ana səhifə** — bu günün xülasəsi, zəif nəticələr, açıq testlər.
+- **Tələbələr** — yarat, qrupa qoy, köçür, sil; şəxsi link; tələbə səhifəsi (nəticələr, gizli qeyd, fərdi tapşırıq, valideyn hesabatı).
+- **Qruplar** — tələbələr, testlər, səhv dəftəri, materiallar, analiz, imtahan tarixi.
+- **Suallar** — bank (real çətinlik, toplu silmə), kitabdan/PDF, AI ilə (nümunədən, mövzudan, məktəb, yaz və çevir).
+- **Testlər** — yeni test, ⚡ avtomatik test (kitabdan / AI / bankdan, asan-orta-çətin bölgüsü), açıq/bağlı, nəticələr və tələbənin qələmlə həlli.
+- **Materiallar** — PDF, şəkil, mətn, video link — qrup-qrup.
+- **Dərslər** — aylıq ödəniş (ayın neçəsi), gəldi/gəlmədi, geri al, tarixçə.
+- **Ayarlar** — AI xərci və limitlər, ehtiyat nüsxə.
 
-### 3. Vercel (sayt, pulsuz)
-1. vercel.com → GitHub ilə daxil ol
-2. **Add New → Project** → `muellim-plus` reposunu seç → **Import**
-3. **Environment Variables** bölməsinə üçünü əlavə et:
-   - `SUPABASE_URL` = Supabase Project URL
-   - `SUPABASE_ANON_KEY` = Supabase anon public açarı
-   - `ANTHROPIC_API_KEY` = Claude API açarı
-4. **Deploy** → bir dəqiqədən sonra saytın linki hazırdır
-
-### 4. Son addım
-Supabase → **Authentication → URL Configuration** → **Site URL** yerinə Vercel linkini yaz.
-
-## Yeniləmələr (bazaya)
-- **002_tryos.sql** — TR-YÖS, şəkillər və yoxlama üçün yeni sütunlar. Supabase → SQL Editor → faylın hamısını yapışdır → Run.
-- **004_status.sql** — AI yoxlama statusları (keçib / yoxlama tələb edir / qaralama) və müəllim təsdiqi.
-- **005_student_links.sql** — hər şagirdə şəxsi link (8 simvollu kod), şagird kabineti, bir şagird bir testi bir dəfə göndərir.
-- **006_review.sql** — testdən sonra şagird öz səhvlərini görür (müəllim seçir: göstərmə / göndərən kimi / test bağlananda).
-- **009_hardening.sql** — indekslər, ölçü limitləri, ümumi linkdə eyni adla təkrar göndərmənin və axının qarşısı, səhv jurnalı (`app_errors`), mənfi AI xərcinin qadağası, yalnız təsdiqlənmiş müəllim yaza bilir. 008-dən sonra işlədilməlidir.
-- **full_schema.sql** — yeni Supabase layihəsi üçün hamısı bir faylda (`supabase/build-full.sh` ilə yaradılır, əl ilə dəyişməyin).
-- **008_access.sql** — müəllim təsdiqi (yeni qeydiyyat admin təsdiqləyənə qədər işləmir), gündəlik/aylıq AI xərc limiti, admin üçün "Müəllimlər" səhifəsi. Mövcud hesablar təsdiqlənir, ən birinci hesab admin olur.
-- **007_test_rules.sql** — vaxt limiti (başlama anı serverdə), son tarix, sual/variant qarışdırma, fərdi (bir şagirdə) test, gecikmiş iş qeydi.
-- **003_usage.sql** — AI sayğacı (yaradılan / banka düşən / boşa gedən sual və xərc, model üzrə). Qiymətlər `api/ai.js` → `priceOf`.
-
-## TR-YÖS rejimi
-- AI ilə sual → **TR-YÖS**: türkcə, 5 variant, əvvəlcə tip planı, sonra 3-lük partiyalarla suallar (40-a qədər).
-- Qrafik, Venn, cədvəl, sxem və şəkilli variantlar SVG kimi çəkilir.
-- Hər sual ikinci AI tərəfindən cavab açarı görmədən həll edilir: uyğun gəlirsə "✓ yoxlanılıb", gəlmirsə "⚠ yoxla".
-- Qaydalar: `api/_tryos.js`.
-
-## Nümunədən yaratma (TR-YÖS)
-- Hər nümunə əvvəlcə analiz olunur (`tryos_analyze`, Claude Sonnet, şəkil ilə): ailə, vizual quruluş, qayda, qorunmalı/dəyişən xüsusiyyətlər, qeyri-müəyyənlik, kəsiyin tamlığı. Natamam kəsik istifadə olunmur; qeyri-müəyyən nümunə müəllim təsdiqi ilə işlədilir.
-- Rejimlər (`api/_tryos.js` → `TRYOS_MODES`): izomorf / bənzər / fərqli quruluş. Bənzər və izomorfda sual ailəsi və təqdimat qorunur.
-- "Səhifədəki bütün suallar"da hər sual üçün orijinal səhifədən ayrıca kəsik götürülür və yaratmaya göndərilir.
-- Hər nümunəyə 1–5 sual; sorğular 2-lik hissələrə bölünür, çatışmayan bir dəfə avtomatik tamamlanır, sonra "Çatışmayanları yarat".
-- Yoxlama iki ayrı hissədir: (A) düzgünlük — cavab açarını görmədən, brauzerdə çəkilmiş yekun görüntü ilə; (B) nümunəyə uyğunluq — orijinal nümunə, analiz və rejimlə. Keçməyən sual bir dəfə yenidən yaradılır, yenə keçməsə qaralama olur. Müəllim təsdiqi ayrıca (Sual bankı → Təsdiqlə).
-
-## Şagird kabineti
-- Sinif səhifəsində hər şagirdin **Linki göndər** düyməsi var (iPad-də paylaşma pəncərəsi açılır, WhatsApp seçmək olar). **Yeni link** köhnəsini etibarsız edir.
-- Şagird `#/s/KOD` linkini açır: sinfinin açıq testlərini yazır (ad seçmədən), öz nəticələrini və orta faizini görür. Eyni testi iki dəfə göndərə bilmir.
-- Test nəticələrində **Hələ göndərməyənlər** siyahısı və xatırlatma mətni.
-- Köhnə ümumi test linki (`#/t/...`, ad seçməklə) də işləyir.
-- **Səhvlərimə bax** (`#/s/KOD/TEST/review`): şagirdin cavabı, düzgün cavab və həll; yalnız müəllim icazə verəndə (testin `review_mode`).
-- Müəllim: test nəticəsində hər şagird üçün sual xanaları (✓ ✗ —), ada basanda işi açılır; sinifdə şagirdin adına basanda onun bütün testləri (`#/student/ID`).
-
-## Müəllim alətləri
-- **Analiz** (sinif → Analiz): testlər üzrə orta nəticə, mövzular (zəifdən güclüyə), ən çox səhv edilən suallar və ən çox seçilən səhv variant, şagirdlər (köməyə ehtiyacı olanlar yuxarıda).
-- **Şagird səhifəsi**: mövzular, nəticələr, hər test üzrə xanalar; **Fərdi tapşırıq (AI)** — səhv/boş suallardan bənzər yeni suallar, yoxlama, təsdiq, yalnız həmin şagirdə test; **Valideyn hesabatı** (7/30 gün, WhatsApp-a göndər).
-- **Yeni test → Vaxt, son tarix, qarışdırma**: vaxt bitəndə avtomatik göndərmə, cavab qaralaması brauzerdə saxlanılır, qarışdırma hər şagird üçün sabit.
-
-## Testə PDF-dən sual
-- Testlər → Yeni test → **Kitabdan / PDF-dən sual**: istənilən PDF və ya şəkil açılır, sual çərçivəyə alınır, aşağıda seçim çıxır:
-  - **Orijinalı təmiz çıxart** (`clean_copy`, həmişə köməkçi model — Claude Sonnet, o işləməsə başqası): sual dəyişmədən, kitabın dilində yenidən yazılır, şəkillər SVG ilə çəkilir, cavab tapılır (4–5 variant).
-  - **AI ilə yarat**: **Bənzər** və ya **Yeni quruluş**, 1–3 sual (`tryos_from_examples`).
-- Hər ikisində əvvəl analiz (natamam kəsik dayandırılır), sonra yoxlama; keçməyən bir dəfə yenidən yaradılır, yenə keçməsə qaralama (avtomatik seçilmir).
-- Seçilən suallar **Testi yarat** basılanda banka yazılır və testə əlavə olunur.
-
-## PDF
-- Sual bankı → sualları seç → **PDF**; və ya AI nəticələrindən, test səhifəsindən.
-- A4, iki sütun, səhifədə 4 və ya 6 sual, sonda cavab açarı; ayrıca "Həllər" sənədi.
-
-## AI modelləri
-TR-YÖS səhifəsinin yuxarısında model seçilir. Açarı olmayan model boz görünür.
-
-| Model | Vercel dəyişəni |
-|---|---|
-| Claude Opus 5.5 / Sonnet 5.5 | `ANTHROPIC_API_KEY` |
-| GPT-6.1 Sol | `OPENAI_API_KEY` |
-| Gemini 3.8 Flash | `GEMINI_API_KEY` |
-
-Köməkçi işlər (şəkil oxuma, təmiz orijinal, yoxlama): müəllim Claude-dan başqa model seçibsə (məs. GPT-6.1 Sol), hamısını o görür; Claude seçilibsə Claude Sonnet (`HELPER_MODEL`). Ehtiyat sırası: seçilən → Claude → Gemini (pulsuz limitli, ən sonda). Sol üçün düşünmə səviyyəsi `low` (`OPENAI_EFFORT`, `OPENAI_EFFORT_HELPER`).
-Model adları dəyişsə: `ANTHROPIC_MODEL`, `SONNET_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`.
-Yeni dəyişən əlavə edəndən sonra Vercel-də **Redeploy** lazımdır.
-
-## Qeydlər
-- Model `ANTHROPIC_MODEL` dəyişəni ilə dəyişdirilə bilər (standart: `claude-opus-5-5`; daha ucuz variant: `claude-sonnet-5-5`).
-- AI istifadəsi hər sorğuya görə ödənişlidir; Anthropic Console-da xərc limiti qoymaq tövsiyə olunur.
-- Şagirdlər test linkini açanda cavablar onlara görünmür, bal serverdə hesablanır.
-
-## Sınaqlar (avtomatik)
-- Hər `git push`-da GitHub Actions (`.github/workflows/tests.yml`) işləyir: təmiz Postgres-də bütün miqrasiyalar iki dəfə + təhlükəsizlik yoxlamaları (`tests/sql`), sonra brauzer (Playwright) və server sınaqları (`tests/run.mjs`).
-- Lokal: `npm install --prefix tests && npx --prefix tests playwright install chromium && node tests/run.mjs`; baza: `PGHOST=... PGUSER=... tests/sql/run.sh`.
-- Yeni miqrasiya əlavə edəndə: `supabase/build-full.sh` (yoxsa CI xəta verir).
-- Sınaq faylları sayta yüklənmir (`.vercelignore`).
-
-## Möhkəmləndirmə
-- **Səhv izləmə**: brauzer və server səhvləri `app_errors`-a yazılır (şagird kodları və açarlar yazılmır), admin Ayarlar → Səhvlər.
-- **Təhlükəsizlik başlıqları**: CSP (`index.html`), `X-Frame-Options`, `nosniff`, HSTS və s. (`vercel.json`).
-- **Hesab**: şifrə bərpası (e-poçt linki → yeni şifrə), sessiya bitəndə girişə qaytarma, internet yoxdursa aydın mesaj.
-- **Ehtiyat nüsxə**: Ayarlar → Məlumatlarımı yüklə (JSON). Real backup üçün Supabase Pro (gündəlik backup) tövsiyə olunur.
-- **Məxfilik**: `#/privacy` (girişsiz açılır). Hüquqşünas baxışı tövsiyə olunur.
-- **Böyük bank**: yüngül indeks + görünən suallar üçün tam sətir, 50-50 göstərilir.
+## Texniki (proqramçı üçün)
+- Front-end: `index.html`, `app.js`, `styles.css` (build yoxdur). Server: `api/ai.js`, `api/_tryos.js`, `api/config.js` (Vercel funksiyaları).
+- Sınaqlar: `tests/run.mjs` (Playwright + server), `tests/sql/run.sh` (Postgres: miqrasiyalar + təhlükəsizlik yoxlamaları). GitHub Actions hər push-da işlədir.
+- Ətraflı: `CLAUDE.md`.
