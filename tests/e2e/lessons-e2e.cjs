@@ -4,9 +4,10 @@ const path = require('path'); const fs = require('fs');
 const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
 const ROOT = path.join(__dirname, '..', '..');
 const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
+const nd = new Date(); const pad2 = (n) => String(n).padStart(2, '0'); const first = `${nd.getFullYear()}-${pad2(nd.getMonth() + 1)}-01`;
 const q = (id, diff, ans) => ({ id, teacher_id: 'u1', body: 'Fonksiyon sualı ' + id, qtype: 'mcq', options: ['1', '2', '3', '4', '5'], answer: ans, option_figures: [], topic: 'Fonksiyonlar', difficulty: diff, ai_status: 'passed', exam: 'tryos', created_at: ago(20) });
 const QS = [q('a1', 'asan', '1'), q('a2', 'asan', '1'), q('o1', 'orta', '1'), q('o2', 'orta', '1'), q('c1q', 'çətin', '1')];
-const studs = ['Əli Həsənov', 'Nərgiz Quliyeva', 'Rəşad Məmmədov'].map((n, i) => ({ id: 's' + i, class_id: 'c1', full_name: n, access_code: 'CODE234' + i, lesson_price: i === 0 ? 30 : null }));
+const studs = ['Əli Həsənov', 'Nərgiz Quliyeva', 'Rəşad Məmmədov'].map((n, i) => ({ id: 's' + i, class_id: 'c1', full_name: n, access_code: 'CODE234' + i, lesson_price: i === 0 ? 200 : null, pay_day: i === 0 ? 1 : null, billing_start: i === 0 ? first : null }));
 // a1: hamı səhv edir (real çətin), qalanları düz
 const subs = studs.map((st, i) => ({ id: 'x' + i, test_id: 't1', student_id: st.id, student_name: st.full_name, answers: { a1: '2', a2: '1', o1: '1', o2: '1', c1q: '1' }, score: 4, total: 5, created_at: ago(3) }));
 const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: studs, questions: QS,
@@ -26,30 +27,47 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
   const setDb = (d) => p.evaluate((x) => localStorage.setItem('mockdb', JSON.stringify(x)), d);
   await p.goto('http://app.test/'); await setDb(DB);
   await p.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ access_token: 'tok', user: { id: 'u1', email: 'a@b.az' } })));
-  await p.goto('http://app.test/#/'); await p.reload(); await p.click('nav >> text=Dərslər'); await p.waitForSelector('.ls-row');
-  console.log('rows:', await p.$$eval('.ls-row', (x) => x.length), '| month:', (await p.textContent('.month-bar strong')).trim());
+  await p.goto('http://app.test/#/'); await p.reload(); await p.waitForFunction(() => document.getElementById('navStCount')?.textContent === '3');
+  console.log('nav count:', await p.textContent('#navStCount'));
+  await p.click('nav >> text=Dərslər'); await p.waitForSelector('.ls-row');
   const row = (i) => `.ls-row[data-sid="s${i}"]`;
-  await p.click(`${row(0)} [data-came]`); await p.waitForSelector(`${row(0)} >> text=Borc: 30 ₼`);
-  await p.fill('#lsTopic', 'Fonksiyonlar'); await p.click(`${row(0)} [data-came]`); await p.waitForSelector(`${row(0)} >> text=Borc: 60 ₼`);
-  await p.click(`${row(0)} [data-miss]`); await p.waitForSelector(`${row(0)} >> text=1 buraxıb`);
-  promptAnswer = '50'; await p.click(`${row(0)} [data-pay]`); await p.waitForSelector(`${row(0)} >> text=Borc: 10 ₼`);
-  console.log('Əli:', (await p.textContent(`${row(0)} .ls-who .small`)).trim(), '|', (await p.textContent(`${row(0)} .ls-bal`)).trim());
-  await p.fill(`${row(1)} [data-price]`, '25'); await p.dispatchEvent(`${row(1)} [data-price]`, 'change'); await p.waitForSelector('text=Qiymət yadda saxlandı');
-  await p.click(`${row(1)} [data-came]`); await p.waitForSelector(`${row(1)} >> text=Borc: 25 ₼`);
-  promptAnswer = '40'; await p.click(`${row(1)} [data-pay]`); await p.waitForSelector(`${row(1)} >> text=Avans: 15 ₼`);
-  console.log('stats:', await p.$$eval('.ls-stats .value', (x) => x.map((e) => e.textContent.replace(/\s+/g, ' ').trim()).join(' | ')));
+  const chip = async (i) => (await p.textContent(`${row(i)} .ls-bal`)).replace(/\s+/g, ' ').trim();
+  console.log('rows:', await p.$$eval('.ls-row', (x) => x.length), '| stats:', await p.$$eval('.ls-stats4 .value', (x) => x.map((e) => e.textContent.trim()).join(' | ')));
+  console.log('Əli overdue:', await chip(0));
+  // davamiyyət: gəldi → yenə bas (silinir) → geri al → gəlmədi
+  await p.click(`${row(0)} [data-att=came]`); await p.waitForSelector(`${row(0)} [data-att=came].on-came`);
+  let d = await db(); console.log('came:', d.lessons.map((l) => l.status + ':' + l.fee).join(','), '| money unchanged:', (await chip(0)).includes('Gecikir'));
+  await p.click(`${row(0)} [data-att=came]`); await p.waitForSelector(`${row(0)} [data-att=came]:not(.on-came)`);
+  console.log('toggle off:', (await db()).lessons.length, '| undo bar:', (await p.textContent('#undoBar span')).trim());
+  await p.click('#undoBar button'); await p.waitForSelector(`${row(0)} [data-att=came].on-came`); console.log('undo restored:', (await db()).lessons.length);
+  await p.click(`${row(0)} [data-att=missed]`); await p.waitForSelector(`${row(0)} [data-att=missed].on-miss`);
+  d = await db(); console.log('switched:', d.lessons.map((l) => l.status).join(','), '| one per day:', d.lessons.filter((l) => l.student_id === 's0').length);
+  await p.click('#allCame'); await p.waitForSelector(`${row(1)} [data-att=came].on-came`);
+  d = await db(); console.log('all came:', d.lessons.map((l) => l.student_id + ':' + l.status).sort().join(','));
+  await p.click('#undoBar button'); await p.waitForSelector(`${row(1)} [data-att=came]:not(.on-came)`); console.log('all came undone:', (await db()).lessons.length);
+  // aylıq ödəniş: ödə → geri al → yenə ödə
+  promptAnswer = '200'; await p.click(`${row(0)} [data-pay]`); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
+  console.log('paid:', await chip(0));
+  await p.click('#undoBar button'); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('Gecikir'), row(0)); console.log('pay undone:', (await db()).payments.length);
+  await p.click(`${row(0)} [data-pay]`); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
+  // Nərgiz: aylıq 150, ayın 28-i
+  await p.fill(`${row(1)} [data-price]`, '150'); await p.dispatchEvent(`${row(1)} [data-price]`, 'change'); await p.waitForSelector('text=Aylıq məbləğ yadda saxlandı');
+  await p.fill(`${row(1)} [data-pday]`, '28'); await p.dispatchEvent(`${row(1)} [data-pday]`, 'change'); await p.waitForSelector('text=Ödəniş günü: ayın 28-i');
+  d = await db(); const n1 = d.students.find((x) => x.id === 's1');
+  const expect1 = nd.getDate() >= 28 ? 'Gecikir' : 'Gözlənilir';
+  console.log('Nərgiz:', n1.lesson_price, n1.pay_day, n1.billing_start === first, '| chip ok:', (await chip(1)).includes(expect1));
+  console.log('stats after:', await p.$$eval('.ls-stats4 .value', (x) => x.map((e) => e.textContent.trim()).join(' | ')));
   await p.screenshot({ path: path.join(T, 'ls1-list.png'), fullPage: true });
-  await p.click(`${row(0)} [data-hist]`); await p.waitForSelector('#rvDialog[open] .h-row');
-  console.log('history:', await p.$$eval('#rvDialog .h-row', (x) => x.map((e) => e.querySelector('.h-k').textContent.trim() + ' ' + e.querySelector('.h-m').textContent.trim()).join(', ')));
+  await p.click(`${row(0)} [data-hist]`); await p.waitForSelector('#rvDialog[open] .h-month');
+  console.log('history months:', await p.$$eval('#rvDialog .h-month', (x) => x.map((e) => e.textContent.replace(/\s+/g, ' ').trim()).join(' || ')));
   console.log('report:', (await p.textContent('#rvDialog p.pre')).trim());
   await p.screenshot({ path: path.join(T, 'ls2-history.png') });
-  await p.click('#rvDialog [data-hdp]'); await p.waitForSelector(`${row(0)} >> text=Borc: 60 ₼`); console.log('payment deleted → borc 60');
+  await p.click('#rvDialog [data-close]');
   // gizli qeyd + tələbə səhifəsində xülasə
   await p.goto('http://app.test/#/student/s0'); await p.waitForSelector('#tNote'); await p.waitForSelector('#ledgerCard .pchip');
   await p.fill('#tNote', 'Üslü sayılarda zəifdir'); await p.waitForSelector('#noteState >> text=yadda saxlandı');
-  console.log('note saved:', (await db()).students[0].teacher_note, '| ledger:', (await p.textContent('#ledgerCard')).replace(/\s+/g, ' ').trim().slice(0, 120));
+  console.log('note saved:', (await db()).students[0].teacher_note, '| ledger:', (await p.textContent('#ledgerCard')).replace(/\s+/g, ' ').trim().slice(0, 140));
   await p.screenshot({ path: path.join(T, 'ls3-student.png'), fullPage: true });
-  const cnt = await p.evaluate(() => localStorage.getItem('mockdb')); 
   // real çətinlik: bank
   await p.goto('http://app.test/#/bank'); await p.waitForSelector('#list .qtile'); await p.waitForSelector('.real-box');
   console.log('real box:', (await p.textContent('.real-box')).replace(/\s+/g, ' ').trim());
@@ -68,7 +86,7 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
   const before = (await db()).questions.length; await p.click('#aTest'); await p.waitForSelector('#newTest');
   console.log('no duplicates on test:', (await db()).questions.length === before, '| checked:', await p.$$eval('#tqList .check:checked', (x) => x.length));
   // 013 olmayan baza
-  const d = await db(); delete d.lessons; delete d.payments; await setDb(d);
+  d = await db(); delete d.lessons; delete d.payments; await setDb(d);
   await p.goto('http://app.test/#/lessons'); await p.reload(); await p.waitForSelector('.notice');
   console.log('no 013 lessons:', (await p.textContent('.notice')).includes('013_lessons.sql'));
   await p.goto('http://app.test/#/bank'); await p.waitForSelector('#list .qtile'); console.log('no 013 bank ok:', !(await p.$('.real-box .btn')));

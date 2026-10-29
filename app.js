@@ -321,7 +321,7 @@ function shell(active) {
   $app.innerHTML = `<div class="shell">
     <nav class="nav" aria-label="Əsas menyu">
       <a class="brand" href="#/"><span class="brand-mark">M+</span><span class="brand-name">Müəllim+</span></a>
-      ${items.map(([k, label]) => `<a class="item ${k === active ? 'active' : ''}" href="#/${k}">${label}</a>`).join('')}
+      ${items.map(([k, label]) => `<a class="item ${k === active ? 'active' : ''}" href="#/${k}">${label}${k === 'students' ? '<span class="nav-count" id="navStCount"></span>' : ''}</a>`).join('')}
       <div class="spacer"></div>
       <a class="item ${active === 'settings' ? 'active' : ''}" href="#/settings">Ayarlar</a>
       <div class="who"><span>${esc(email)}</span><button type="button" class="btn small" id="logout">Çıxış</button></div>
@@ -329,6 +329,8 @@ function shell(active) {
     <main class="main" id="view"><div class="spinner" aria-label="Yüklənir"></div></main>
   </div>`;
   $('#logout').onclick = async () => { await sb.auth.signOut(); go('#/'); };
+  // menyuda ümumi tələbə sayı
+  Promise.resolve(sb.from('students').select('id', { count: 'exact', head: true })).then((r) => { const el = document.getElementById('navStCount'); if (el && r && typeof r.count === 'number') el.textContent = r.count; }, () => {});
 }
 
 const view = () => document.getElementById('view');
@@ -3369,16 +3371,23 @@ async function classAnalysisView(classId) {
 
 // Müəllim üçün: bir tələbənin bütün işləri
 // ================= Dərs və ödəniş dəftəri (yalnız müəllim) =================
+// Ödəniş AYLIQDIR: tələbəyə aylıq məbləğ və ödəniş günü (ayın neçəsi) yazılır. Davamiyyət (gəldi/gəlmədi) pula təsir etmir.
 const money = (n) => `${(Math.round(Number(n || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '')} ₼`;
 const ymOf = (d) => String(d || '').slice(0, 7);
 const ymLabel = (ym) => { const [y, m] = ym.split('-').map(Number); const n = AZ_MONTHS_FULL[m - 1]; return `${n[0].toLocaleUpperCase('az')}${n.slice(1)} ${y}`; };
+const monthName = (ym) => ymLabel(ym).split(' ')[0];
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const shiftYm = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const dueDateOf = (ym, day) => { const [y, m] = ym.split('-').map(Number); const dd = Math.min(Math.max(1, day || 1), new Date(y, m, 0).getDate()); return `${ym}-${String(dd).padStart(2, '0')}`; };
 let lessonsYm = '';
+let lessonsDate = '';
+let ledgerNeeds016 = false;
 
 async function loadLedger() {
-  const [st, ls, ps] = await Promise.all([
-    sb.from('students').select('id, full_name, class_id, lesson_price, classes(name)').order('full_name'),
+  const cols = 'id, full_name, class_id, lesson_price, pay_day, billing_start, classes(name)';
+  let st = await sb.from('students').select(cols).order('full_name');
+  if (st.error && /pay_day|billing_start/i.test(st.error.message || '')) { ledgerNeeds016 = true; st = await sb.from('students').select('id, full_name, class_id, lesson_price, classes(name)').order('full_name'); }
+  const [ls, ps] = await Promise.all([
     sb.from('lessons').select('*').order('lesson_date', { ascending: false }),
     sb.from('payments').select('*').order('paid_on', { ascending: false })
   ]);
@@ -3387,17 +3396,54 @@ async function loadLedger() {
     ? Object.assign(new Error('need013'), { need013: true }) : err;
   return { students: st.data || [], lessons: ls.data || [], payments: ps.data || [] };
 }
-function ledgerOf(sid, L, ym) {
-  const ls = L.lessons.filter((x) => x.student_id === sid), ps = L.payments.filter((x) => x.student_id === sid);
-  const fees = ls.reduce((a, x) => a + Number(x.fee || 0), 0), paid = ps.reduce((a, x) => a + Number(x.amount || 0), 0);
-  const mLs = ls.filter((x) => ymOf(x.lesson_date) === ym), mPs = ps.filter((x) => ymOf(x.paid_on) === ym);
-  return { ls, ps, balance: fees - paid, came: mLs.filter((x) => x.status === 'came').length, missed: mLs.filter((x) => x.status === 'missed').length,
-    mFees: mLs.reduce((a, x) => a + Number(x.fee || 0), 0), mPaid: mPs.reduce((a, x) => a + Number(x.amount || 0), 0) };
+
+// Aylıq hesab: ödəniş günü çatmış hər ay üçün aylıq məbləğ; ödənişlər köhnə aydan başlayaraq bağlanır
+function billingOf(x, L, ym) {
+  const fee = Number(x.lesson_price || 0);
+  const ps = L.payments.filter((p) => p.student_id === x.id);
+  const ls = L.lessons.filter((l) => l.student_id === x.id);
+  const paid = ps.reduce((a, p) => a + Number(p.amount || 0), 0);
+  const today = todayIso(), curYm = today.slice(0, 7);
+  const start = ymOf(x.billing_start) || curYm;
+  const last = ym > curYm ? ym : curYm;
+  const months = [];
+  if (fee > 0) for (let m = start; m <= last && months.length < 120; m = shiftYm(m, 1)) months.push({ ym: m, due: dueDateOf(m, x.pay_day) });
+  let left = paid;
+  months.forEach((m) => { m.paid = Math.min(fee, Math.max(0, left)); left -= fee; m.full = m.paid >= fee - 0.004; m.overdue = !m.full && m.due <= today; });
+  const owed = months.filter((m) => m.due <= today).length * fee;
+  const mLs = ls.filter((l) => ymOf(l.lesson_date) === ym);
+  return { fee, ps, ls, paid, balance: owed - paid, months, sel: months.find((m) => m.ym === ym) || null, next: months.find((m) => !m.full) || null,
+    came: mLs.filter((l) => l.status === 'came').length, missed: mLs.filter((l) => l.status === 'missed').length,
+    mPaid: ps.filter((p) => ymOf(p.paid_on) === ym).reduce((a, p) => a + Number(p.amount || 0), 0) };
 }
-const balanceChip = (b) => (b > 0.004 ? `<span class="pchip low">Borc: ${money(b)}</span>` : b < -0.004 ? `<span class="pchip hi">Avans: ${money(-b)}</span>` : '<span class="pchip">Hesab bağlıdır</span>');
+function monthChip(g, ym) {
+  if (!g.fee) return '<span class="pchip">aylıq məbləğ yazılmayıb</span>';
+  const m = g.sel;
+  if (!m) return '<span class="pchip">—</span>';
+  if (m.full) return `<span class="pchip hi">✓ ${esc(monthName(ym))} ödənilib</span>`;
+  if (m.overdue) return `<span class="pchip low">Gecikir · ${money(g.fee - m.paid)}</span>`;
+  return `<span class="pchip mid">Gözlənilir · ${esc(fmtDayAz(m.due))}${m.paid > 0 ? ` (${money(m.paid)} ödənilib)` : ''}</span>`;
+}
+const balanceChip = (b) => (b > 0.004 ? `<span class="pchip low">Borc: ${money(b)}</span>` : b < -0.004 ? `<span class="pchip hi">Avans: ${money(-b)}</span>` : '<span class="pchip">Borc yoxdur</span>');
+
+// Son əməli geri almaq üçün aşağıda çıxan zolaq
+let undoTimer = null;
+function showUndo(msg, fn) {
+  let bar = document.getElementById('undoBar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'undoBar'; bar.className = 'undo-bar'; bar.setAttribute('role', 'status'); document.body.appendChild(bar); }
+  bar.innerHTML = `<span>${esc(msg)}</span><button type="button" class="btn small">↶ Geri al</button>`;
+  bar.hidden = false;
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => { bar.hidden = true; }, 12000);
+  $('button', bar).onclick = async () => {
+    bar.hidden = true; clearTimeout(undoTimer);
+    try { await fn(); toast('Geri alındı'); } catch (err) { fail(err); }
+  };
+}
 
 async function lessonsView() {
   if (!lessonsYm) lessonsYm = todayIso().slice(0, 7);
+  if (!lessonsDate) lessonsDate = todayIso();
   let L;
   try { L = await loadLedger(); } catch (err) {
     if (!err.need013) throw err;
@@ -3408,64 +3454,103 @@ async function lessonsView() {
   const classes = [...new Map(L.students.map((x) => [x.class_id, x.classes?.name || ''])).entries()];
   let cls = '';
   const draw = () => {
+    const date = lessonsDate;
     const list = L.students.filter((x) => !cls || x.class_id === cls);
-    const rows = list.map((x) => ({ x, g: ledgerOf(x.id, L, ym) }));
-    const sum = rows.reduce((a, r) => ({ came: a.came + r.g.came, fees: a.fees + r.g.mFees, paid: a.paid + r.g.mPaid, debt: a.debt + Math.max(0, r.g.balance) }), { came: 0, fees: 0, paid: 0, debt: 0 });
+    const rows = list.map((x) => ({ x, g: billingOf(x, L, ym), day: L.lessons.find((l) => l.student_id === x.id && l.lesson_date === date) || null }));
+    const sum = rows.reduce((a, r) => ({ exp: a.exp + (r.g.sel ? r.g.fee : 0), paid: a.paid + r.g.mPaid, debt: a.debt + Math.max(0, r.g.balance),
+      came: a.came + (r.day?.status === 'came' ? 1 : 0), missed: a.missed + (r.day?.status === 'missed' ? 1 : 0) }), { exp: 0, paid: 0, debt: 0, came: 0, missed: 0 });
     view().innerHTML = `
-      <div class="page-head"><div><h1>Dərslər</h1><p class="muted">Dərsləri və ödənişləri qeyd edin — borc özü hesablanır. Bunu yalnız siz görürsünüz.</p></div></div>
+      <div class="page-head"><div><h1>Dərslər</h1><p class="muted">Aylıq ödənişlər və dərsə gəlib-gəlmədiyi. Bunu yalnız siz görürsünüz.</p></div></div>
+      ${ledgerNeeds016 ? '<p class="notice">Aylıq ödəniş günü üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>016_monthly.sql</strong> → Run.</p>' : ''}
       <div class="month-bar"><button class="btn small" data-ym="-1" aria-label="Əvvəlki ay">‹</button><strong>${esc(ymLabel(ym))}</strong><button class="btn small" data-ym="1" aria-label="Növbəti ay">›</button>
         ${classes.length > 1 ? `<select id="lsClass" aria-label="Qrup" style="min-height:40px;width:auto;margin-left:auto"><option value="">Bütün qruplar</option>${classes.map(([id, n]) => `<option value="${id}" ${id === cls ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
-      <section class="grid res-stats ls-stats">
-        <div class="card stat"><div class="label">Keçilən dərs</div><div class="value">${sum.came}</div></div>
-        <div class="card stat"><div class="label">Hesablanıb / ödənilib</div><div class="value" style="font-size:22px">${money(sum.fees)} <span class="of">/ ${money(sum.paid)}</span></div></div>
-        <div class="card stat"><div class="label">Ümumi borc</div><div class="value" style="color:${sum.debt > 0 ? 'var(--red)' : 'var(--green)'}">${money(sum.debt)}</div></div>
+      <section class="grid ls-stats4">
+        <div class="card stat"><div class="label">Tələbə</div><div class="value">${list.length}</div></div>
+        <div class="card stat"><div class="label">${esc(monthName(ym))}: gözlənilən</div><div class="value" style="font-size:22px">${money(sum.exp)}</div></div>
+        <div class="card stat"><div class="label">${esc(monthName(ym))}: ödənilib</div><div class="value" style="font-size:22px;color:var(--green)">${money(sum.paid)}</div></div>
+        <div class="card stat"><div class="label">Ümumi borc</div><div class="value" style="font-size:22px;color:${sum.debt > 0 ? 'var(--red)' : 'var(--green)'}">${money(sum.debt)}</div></div>
       </section>
       <div class="card ls-quick">
-        <label class="row small" style="gap:8px">Tarix <input type="date" id="lsDate" value="${todayIso()}" style="min-height:40px;width:auto"></label>
-        <label class="row small" style="gap:8px;flex:1;min-width:200px">Mövzu <input type="text" id="lsTopic" maxlength="200" placeholder="istəyə bağlı, məs. Fonksiyonlar" style="min-height:40px"></label>
-        <span class="small muted">"✓ Dərs" və "✗ Gəlmədi" bu tarixlə yazılır.</span>
+        <label class="row small" style="gap:8px"><strong>Dərs günü</strong> <input type="date" id="lsDate" value="${date}" style="min-height:40px;width:auto"></label>
+        <label class="row small" style="gap:8px;flex:1;min-width:180px">Mövzu <input type="text" id="lsTopic" maxlength="200" placeholder="istəyə bağlı, məs. Fonksiyonlar" style="min-height:40px"></label>
+        <span class="small"><strong style="color:var(--green)">✓ ${sum.came}</strong> gəldi · <strong style="color:var(--red)">✗ ${sum.missed}</strong> gəlmədi</span>
+        <button class="btn small ok" id="allCame">✓ Hamısı gəldi</button>
       </div>
-      ${rows.length ? `<section class="card ls-list">${rows.map(({ x, g }) => `<div class="ls-row" data-sid="${x.id}">
-          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="small muted">${esc(x.classes?.name || '')} · bu ay: ${g.came} dərs${g.missed ? `, ${g.missed} buraxıb` : ''}</span></div>
-          <label class="ls-price" title="Bir dərsin qiyməti">₼<input type="number" min="0" step="0.5" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="qiymət" data-price="${x.id}" aria-label="${esc(x.full_name)}: dərs qiyməti"></label>
-          <span class="ls-bal">${balanceChip(g.balance)}</span>
-          <span class="ls-act"><button class="btn small ok" data-came="${x.id}">✓ Dərs</button><button class="btn small" data-miss="${x.id}">✗ Gəlmədi</button>
-            <button class="btn small primary" data-pay="${x.id}">+ Ödəniş</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
-        </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/classes">Qruplar</a> bölməsindən əlavə edin.</div></div>'}`;
+      ${rows.length ? `<section class="card ls-list">${rows.map(({ x, g, day }) => `<div class="ls-row" data-sid="${x.id}">
+          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="small muted">${esc(x.classes?.name || '')} · ${esc(monthName(ym))}: ${g.came} dərs${g.missed ? `, ${g.missed} gəlmədi` : ''}</span></div>
+          <span class="ls-money"><label class="ls-price" title="Aylıq ödəniş">₼<input type="number" min="0" step="1" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="aylıq" data-price="${x.id}" aria-label="${esc(x.full_name)}: aylıq ödəniş"></label>
+            <label class="ls-day" title="Ödəniş günü">ayın<input type="number" min="1" max="31" inputmode="numeric" value="${x.pay_day ?? ''}" placeholder="1" data-pday="${x.id}" aria-label="${esc(x.full_name)}: ödəniş günü" ${ledgerNeeds016 ? 'disabled' : ''}>-i</label></span>
+          <span class="ls-bal">${monthChip(g, ym)}${g.balance > g.fee + 0.004 ? balanceChip(g.balance) : g.balance < -0.004 ? balanceChip(g.balance) : ''}</span>
+          <span class="ls-att" role="group" aria-label="${esc(x.full_name)}: ${esc(fmtDayAz(date))}">
+            <button class="btn small att ${day?.status === 'came' ? 'on-came' : ''}" data-att="came" data-s="${x.id}" aria-pressed="${day?.status === 'came'}">✓ Gəldi</button>
+            <button class="btn small att ${day?.status === 'missed' ? 'on-miss' : ''}" data-att="missed" data-s="${x.id}" aria-pressed="${day?.status === 'missed'}">✗ Gəlmədi</button></span>
+          <span class="ls-act"><button class="btn small primary" data-pay="${x.id}">+ Ödəniş</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
+        </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/students">Tələbələr</a> bölməsindən əlavə edin.</div></div>'}`;
     $$('[data-ym]').forEach((b) => b.onclick = () => { lessonsYm = shiftYm(ym, +b.dataset.ym); route(); });
     $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = e.target.value; draw(); });
+    $('#lsDate').onchange = (e) => { lessonsDate = e.target.value || todayIso(); if (ymOf(lessonsDate) !== lessonsYm) { lessonsYm = ymOf(lessonsDate); route(); } else draw(); };
     const byId = Object.fromEntries(L.students.map((x) => [x.id, x]));
     const reload = async () => { L = await loadLedger(); draw(); };
+    const topic = () => $('#lsTopic').value.trim() || null;
     $$('[data-price]').forEach((inp) => inp.onchange = async () => {
+      const x = byId[inp.dataset.price];
       const v = inp.value === '' ? null : Math.max(0, Number(inp.value));
-      const { error } = await sb.from('students').update({ lesson_price: v }).eq('id', inp.dataset.price);
+      const upd = { lesson_price: v };
+      if (v && !x.billing_start && !ledgerNeeds016) upd.billing_start = todayIso().slice(0, 7) + '-01';
+      const { error } = await sb.from('students').update(upd).eq('id', x.id);
       if (error) return fail(error);
-      byId[inp.dataset.price].lesson_price = v;
-      toast('Qiymət yadda saxlandı');
+      toast('Aylıq məbləğ yadda saxlandı');
+      await reload();
     });
-    const addLesson = (sid, status, btn) => busy(btn, async () => {
-      const x = byId[sid];
-      if (status === 'came' && (x.lesson_price === null || x.lesson_price === undefined || x.lesson_price === '')) {
-        if (!confirm(`${x.full_name} üçün dərs qiyməti yazılmayıb. Pulsuz dərs kimi yazılsın? (Qiyməti sətirdə ₼ xanasına yazın.)`)) return;
+    $$('[data-pday]').forEach((inp) => inp.onchange = async () => {
+      const v = inp.value === '' ? null : Math.min(31, Math.max(1, parseInt(inp.value, 10) || 1));
+      const { error } = await sb.from('students').update({ pay_day: v }).eq('id', inp.dataset.pday);
+      if (error) return fail(needSql(error, '016_monthly.sql'));
+      toast(v ? `Ödəniş günü: ayın ${v}-i` : 'Ödəniş günü silindi');
+      await reload();
+    });
+    // Davamiyyət: eyni düymə yenidən basılsa qeyd silinir; fərqlisi basılsa dəyişir. Hər əməl geri alına bilər.
+    $$('[data-att]').forEach((b) => b.onclick = () => busy(b, async () => {
+      const x = byId[b.dataset.s]; const want = b.dataset.att;
+      const cur = L.lessons.find((l) => l.student_id === x.id && l.lesson_date === lessonsDate);
+      const label = want === 'came' ? '✓ gəldi' : '✗ gəlmədi';
+      if (cur && cur.status === want) {
+        const { error } = await sb.from('lessons').delete().eq('id', cur.id);
+        if (error) throw error;
+        const back = { student_id: cur.student_id, lesson_date: cur.lesson_date, status: cur.status, fee: 0, topic: cur.topic };
+        showUndo(`${x.full_name}: qeyd silindi`, async () => { const { error: e } = await sb.from('lessons').insert(back); if (e) throw e; await reload(); });
+      } else if (cur) {
+        const { error } = await sb.from('lessons').update({ status: want }).eq('id', cur.id);
+        if (error) throw error;
+        const old = cur.status;
+        showUndo(`${x.full_name}: ${label}`, async () => { const { error: e } = await sb.from('lessons').update({ status: old }).eq('id', cur.id); if (e) throw e; await reload(); });
+      } else {
+        const { data: row, error } = await sb.from('lessons').insert({ student_id: x.id, lesson_date: lessonsDate, status: want, fee: 0, topic: topic() }).select().single();
+        if (error) throw error;
+        showUndo(`${x.full_name}: ${label} (${fmtDayAz(lessonsDate)})`, async () => { const { error: e } = await sb.from('lessons').delete().eq('id', row.id); if (e) throw e; await reload(); });
       }
-      const row = { student_id: sid, status, lesson_date: $('#lsDate').value || todayIso(), fee: status === 'came' ? Number(x.lesson_price || 0) : 0, topic: $('#lsTopic').value.trim() || null };
-      const { error } = await sb.from('lessons').insert(row);
+      await reload();
+    }).catch(fail));
+    $('#allCame').onclick = () => busy($('#allCame'), async () => {
+      const todo = list.filter((x) => !L.lessons.some((l) => l.student_id === x.id && l.lesson_date === lessonsDate));
+      if (!todo.length) return toast('Hamısı artıq qeyd olunub');
+      const { data: made, error } = await sb.from('lessons').insert(todo.map((x) => ({ student_id: x.id, lesson_date: lessonsDate, status: 'came', fee: 0, topic: topic() }))).select();
       if (error) throw error;
-      toast(status === 'came' ? `${x.full_name}: dərs yazıldı (${money(row.fee)})` : `${x.full_name}: gəlmədi`);
+      const ids = (made || []).map((r) => r.id);
+      showUndo(`${todo.length} tələbə: ✓ gəldi`, async () => { const { error: e } = await sb.from('lessons').delete().in('id', ids); if (e) throw e; await reload(); });
       await reload();
     }).catch(fail);
-    $$('[data-came]').forEach((b) => b.onclick = () => addLesson(b.dataset.came, 'came', b));
-    $$('[data-miss]').forEach((b) => b.onclick = () => addLesson(b.dataset.miss, 'missed', b));
     $$('[data-pay]').forEach((b) => b.onclick = () => {
-      const x = byId[b.dataset.pay]; const g = ledgerOf(x.id, L, ym);
-      const raw = prompt(`${x.full_name} — ödəniş məbləği (₼):`, g.balance > 0 ? String(Math.round(g.balance * 100) / 100) : String(x.lesson_price || ''));
+      const x = byId[b.dataset.pay]; const g = billingOf(x, L, ym);
+      const def = g.balance > 0 ? Math.round(g.balance * 100) / 100 : (g.fee || '');
+      const raw = prompt(`${x.full_name} — ödəniş məbləği (₼):`, String(def));
       if (raw === null) return;
       const amount = Number(String(raw).replace(',', '.'));
       if (!(amount > 0)) return toast('Məbləğ düzgün deyil', true);
       busy(b, async () => {
-        const { error } = await sb.from('payments').insert({ student_id: x.id, amount, paid_on: $('#lsDate').value || todayIso() });
+        const { data: row, error } = await sb.from('payments').insert({ student_id: x.id, amount, paid_on: lessonsDate }).select().single();
         if (error) throw error;
-        toast(`${x.full_name}: ${money(amount)} ödəniş yazıldı`);
+        showUndo(`${x.full_name}: ${money(amount)} ödəniş yazıldı`, async () => { const { error: e } = await sb.from('payments').delete().eq('id', row.id); if (e) throw e; await reload(); });
         await reload();
       }).catch(fail);
     });
@@ -3475,29 +3560,38 @@ async function lessonsView() {
 }
 
 function openHistory(x, L, ym, reload) {
-  const g = ledgerOf(x.id, L, ym);
-  const items = [...g.ls.map((l) => ({ d: l.lesson_date, t: l.created_at, kind: 'l', l })), ...g.ps.map((p) => ({ d: p.paid_on, t: p.created_at, kind: 'p', p }))]
-    .sort((a, b) => (a.d === b.d ? (a.t < b.t ? 1 : -1) : a.d < b.d ? 1 : -1));
-  const report = `${x.full_name} · ${ymLabel(ym)}: ${g.came} dərs${g.missed ? ` (${g.missed} dəfə gəlməyib)` : ''}, hesablanıb ${money(g.mFees)}, ödənilib ${money(g.mPaid)}. `
-    + (g.balance > 0.004 ? `Ümumi borc: ${money(g.balance)}.` : g.balance < -0.004 ? `Avans: ${money(-g.balance)}.` : 'Hesab bağlıdır.');
-  openDialog(esc(x.full_name) + ' · dərslər və ödənişlər', `
-    <div class="row between"><span>${balanceChip(g.balance)}</span><button type="button" class="btn small" id="hCopy">Valideyn üçün hesabatı kopyala</button></div>
+  const g = billingOf(x, L, ym);
+  const mLs = g.ls.filter((l) => ymOf(l.lesson_date) === ym);
+  const report = `${x.full_name} · ${ymLabel(ym)}: ${g.came + g.missed ? `${g.came + g.missed} dərsdən ${g.came}-də iştirak edib${g.missed ? ` (${g.missed} dəfə gəlməyib)` : ''}` : 'dərs qeydi yoxdur'}. `
+    + (g.fee ? (g.sel?.full ? `Aylıq ödəniş (${money(g.fee)}) ödənilib.` : g.sel ? `Aylıq ödəniş ${money(g.fee)} — ödəniş günü ${fmtDayAz(g.sel.due)}${g.sel.paid > 0 ? `, ${money(g.sel.paid)} ödənilib` : ''}.` : '') : '')
+    + (g.balance > g.fee + 0.004 ? ` Ümumi borc: ${money(g.balance)}.` : '');
+  openDialog(esc(x.full_name) + ' · ödəniş və dərslər', `
+    <div class="row between"><span>${monthChip(g, ym)} ${balanceChip(g.balance)}</span><button type="button" class="btn small" id="hCopy">Valideyn üçün hesabatı kopyala</button></div>
     <p class="small muted pre">${esc(report)}</p>
-    ${items.length ? `<div class="h-list">${items.map((it) => it.kind === 'l'
-      ? `<div class="h-row"><span class="h-d">${esc(fmtDayAz(it.d))}</span><span class="h-k ${it.l.status === 'came' ? 'came' : 'miss'}">${it.l.status === 'came' ? '✓ Dərs' : '✗ Gəlmədi'}</span><span class="h-t">${esc(it.l.topic || '')}</span><span class="h-m">${it.l.status === 'came' ? money(it.l.fee) : ''}</span><button class="btn small danger" data-hdl="${it.l.id}" aria-label="Sil">Sil</button></div>`
-      : `<div class="h-row"><span class="h-d">${esc(fmtDayAz(it.d))}</span><span class="h-k pay">💳 Ödəniş</span><span class="h-t">${esc(it.p.note || '')}</span><span class="h-m">+${money(it.p.amount)}</span><button class="btn small danger" data-hdp="${it.p.id}" aria-label="Sil">Sil</button></div>`).join('')}</div>`
-      : '<div class="empty">Hələ qeyd yoxdur.</div>'}`);
+    <h3>Aylar</h3>
+    ${g.months.length ? `<div class="h-list">${g.months.slice().reverse().map((m) => `<div class="h-row h-month"><span class="h-d">${esc(ymLabel(m.ym))}</span>
+        <span class="small muted">ödəniş günü ${esc(fmtDayAz(m.due))}</span><span class="h-m">${money(g.fee)}</span>
+        <span>${m.full ? '<span class="pchip hi">✓ ödənilib</span>' : m.overdue ? `<span class="pchip low">gecikir · ${money(g.fee - m.paid)}</span>` : `<span class="pchip mid">gözlənilir${m.paid > 0 ? ` · ${money(m.paid)} ödənilib` : ''}</span>`}</span></div>`).join('')}</div>`
+      : '<p class="small muted">Aylıq məbləğ yazılmayıb.</p>'}
+    <h3>Ödənişlər</h3>
+    ${g.ps.length ? `<div class="h-list">${g.ps.map((p) => `<div class="h-row"><span class="h-d">${esc(fmtDayAz(p.paid_on))}</span><span class="h-k pay">💳 Ödəniş</span><span class="h-t">${esc(p.note || '')}</span><span class="h-m">+${money(p.amount)}</span><button class="btn small danger" data-hdp="${p.id}" aria-label="Sil">Sil</button></div>`).join('')}</div>`
+      : '<p class="small muted">Hələ ödəniş yoxdur.</p>'}
+    <h3>Dərslər · ${esc(monthName(ym))}</h3>
+    ${mLs.length ? `<div class="h-list">${mLs.map((l) => `<div class="h-row"><span class="h-d">${esc(fmtDayAz(l.lesson_date))}</span><span class="h-k ${l.status === 'came' ? 'came' : 'miss'}">${l.status === 'came' ? '✓ Gəldi' : '✗ Gəlmədi'}</span><span class="h-t">${esc(l.topic || '')}</span><span></span><button class="btn small danger" data-hdl="${l.id}" aria-label="Sil">Sil</button></div>`).join('')}</div>`
+      : '<p class="small muted">Bu ay dərs qeydi yoxdur.</p>'}`);
   const dlg = document.getElementById('rvDialog');
   $('#hCopy', dlg).onclick = () => copyText(report, 'Hesabat kopyalandı');
-  const del = (table, id) => async () => {
+  const del = (table, row) => async () => {
     if (!confirm('Bu qeyd silinsin?')) return;
-    const { error } = await sb.from(table).delete().eq('id', id);
+    const { error } = await sb.from(table).delete().eq('id', row.id);
     if (error) return fail(error);
     dlg.close();
+    const { id, created_at, ...back } = row;
+    showUndo('Qeyd silindi', async () => { const { error: e } = await sb.from(table).insert(back); if (e) throw e; await reload(); });
     await reload();
   };
-  $$('[data-hdl]', dlg).forEach((b) => b.onclick = del('lessons', b.dataset.hdl));
-  $$('[data-hdp]', dlg).forEach((b) => b.onclick = del('payments', b.dataset.hdp));
+  $$('[data-hdl]', dlg).forEach((b) => b.onclick = del('lessons', g.ls.find((l) => l.id === b.dataset.hdl)));
+  $$('[data-hdp]', dlg).forEach((b) => b.onclick = del('payments', g.ps.find((p) => p.id === b.dataset.hdp)));
 }
 
 async function studentWorkView(id) {
@@ -3561,12 +3655,14 @@ async function studentWorkView(id) {
   };
   loadLedger().then((L) => {
     const box = $('#ledgerCard'); if (!box) return;
-    const g = ledgerOf(id, L, todayIso().slice(0, 7));
+    const me = L.students.find((x) => x.id === id) || st;
+    const ym = todayIso().slice(0, 7);
+    const g = billingOf(me, L, ym);
     const last = g.ls.slice(0, 3);
-    box.innerHTML = `<h2>💳 Dərslər və ödəniş</h2>
-      <div class="row between">${balanceChip(g.balance)}<span class="small muted">dərs qiyməti: ${st.lesson_price === null || st.lesson_price === undefined ? '—' : money(st.lesson_price)}</span></div>
-      <p class="small">Bu ay: <strong>${g.came}</strong> dərs${g.missed ? `, ${g.missed} dəfə gəlməyib` : ''} · hesablanıb ${money(g.mFees)} · ödənilib ${money(g.mPaid)}</p>
-      ${last.length ? `<div class="small muted">Son dərslər: ${last.map((l) => `${esc(fmtDayAz(l.lesson_date))}${l.status === 'missed' ? ' (gəlmədi)' : ''}${l.topic ? ' — ' + esc(l.topic) : ''}`).join(' · ')}</div>` : ''}
+    box.innerHTML = `<h2>💳 Ödəniş və dərslər</h2>
+      <div class="row between"><span>${monthChip(g, ym)} ${g.balance > g.fee + 0.004 || g.balance < -0.004 ? balanceChip(g.balance) : ''}</span><span class="small muted">aylıq: ${g.fee ? money(g.fee) + (me.pay_day ? `, ayın ${me.pay_day}-i` : '') : '—'}</span></div>
+      <p class="small">Bu ay: <strong>${g.came}</strong> dərsə gəlib${g.missed ? `, ${g.missed} dəfə gəlməyib` : ''} · ödənilib ${money(g.mPaid)}</p>
+      ${last.length ? `<div class="small muted">Son dərslər: ${last.map((l) => `${esc(fmtDayAz(l.lesson_date))}${l.status === 'missed' ? ' (gəlmədi)' : ' ✓'}${l.topic ? ' — ' + esc(l.topic) : ''}`).join(' · ')}</div>` : ''}
       <a class="btn small" href="#/lessons" style="align-self:flex-start">Dərslər səhifəsi ›</a>`;
   }).catch((err) => { const box = $('#ledgerCard'); if (box) box.innerHTML = err.need013 ? '<h2>💳 Dərslər və ödəniş</h2><p class="notice">Bazada <strong>013_lessons.sql</strong> işə salın.</p>' : `<p class="notice">${esc(err.message)}</p>`; });
   $$('[data-row]').forEach((b) => b.onclick = () => {

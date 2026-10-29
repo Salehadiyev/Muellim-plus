@@ -228,7 +228,7 @@ select t_ok((select public from storage.buckets where id = 'notes'), 'qeyd qovlu
 set role authenticated;
 set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
 update students set lesson_price = 30, teacher_note = 'gizli: üslü sayılarda zəif' where id = '00000000-0000-4000-8000-0000000000b1';
-insert into lessons (student_id, status, fee) values ('00000000-0000-4000-8000-0000000000b1', 'came', 30), ('00000000-0000-4000-8000-0000000000b1', 'missed', 0);
+insert into lessons (student_id, status, fee, lesson_date) values ('00000000-0000-4000-8000-0000000000b1', 'came', 30, current_date), ('00000000-0000-4000-8000-0000000000b1', 'missed', 0, current_date - 1);
 insert into payments (student_id, amount) values ('00000000-0000-4000-8000-0000000000b1', 20);
 select t_err($q$ insert into payments (student_id, amount) values ('00000000-0000-4000-8000-0000000000b1', -5) $q$, 'mənfi ödəniş olmur');
 select t_err($q$ insert into lessons (student_id) values ('00000000-0000-4000-8000-0000000000b3') $q$, 'başqasının tələbəsinə dərs yazmaq olmur');
@@ -272,6 +272,16 @@ select t_ok((select count(*) from submission_drawings) = 0, 'başqa müəllim ş
 set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
 select t_ok((select count(*) from submission_drawings) = 1, 'müəllim öz tələbəsinin həllini görür');
 select t_err($q$ insert into submission_drawings (submission_id, question_id, image) select id, id, 'data:image/png;base64,QQ==' from submissions limit 1 $q$, 'müəllim birbaşa yaza bilmir');
+reset role;
+
+-- ---------- 016: aylıq ödəniş, gündə bir dərs qeydi ----------
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+update students set pay_day = 5 where id = '00000000-0000-4000-8000-0000000000b1';
+select t_err($q$ update students set pay_day = 40 where id = '00000000-0000-4000-8000-0000000000b1' $q$, 'ödəniş günü 1–31');
+insert into lessons (student_id, lesson_date, status) values ('00000000-0000-4000-8000-0000000000b1', current_date - 5, 'came');
+select t_err($q$ insert into lessons (student_id, lesson_date, status) values ('00000000-0000-4000-8000-0000000000b1', current_date - 5, 'missed') $q$, 'eyni gün iki qeyd olmur');
 reset role;
 
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

@@ -707,3 +707,22 @@ body.ink-open { overflow: hidden; }
 .rv-ink { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .rv-ink img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 10px; cursor: zoom-in; background: #fff; }
 .rv-ink img.big { max-width: 100%; cursor: zoom-out; }
+
+/* ---------- Dərslər: aylıq ödəniş + davamiyyət ---------- */
+.ls-stats4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ls-money { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ls-day { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+.ls-day input { width: 56px; min-height: 40px; padding: 4px 6px; text-align: center; }
+.ls-bal { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.ls-att { display: inline-flex; gap: 6px; }
+.btn.att { min-height: 40px; }
+.btn.att.on-came { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+.btn.att.on-miss { background: var(--red); border-color: var(--red); color: #fff; font-weight: 700; }
+.h-month { grid-template-columns: 130px 1fr auto auto; }
+.undo-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(18px, env(safe-area-inset-bottom)); z-index: 900; display: flex; align-items: center; gap: 14px; background: #172033; color: #fff; padding: 10px 12px 10px 18px; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); max-width: calc(100vw - 24px); }
+.undo-bar .btn { background: #fff; color: #172033; border-color: #fff; font-weight: 700; }
+.undo-bar[hidden] { display: none; }
+.nav-count { margin-left: auto; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 99px; background: rgba(255,255,255,.16); }
+.nav a.item.active .nav-count { background: var(--accent-soft); color: var(--accent-dark); }
+.nav-count:empty { display: none; }
+@media (max-width: 900px) { .ls-stats4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
