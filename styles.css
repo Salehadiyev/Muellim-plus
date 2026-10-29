@@ -342,3 +342,16 @@ body.capturing .sheet { box-shadow: none; }
 .crop-choice > img { width: 96px; max-height: 96px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; flex: none; }
 @media (max-width: 600px) { .pdf-job { flex-direction: column; } .pdf-job > img { width: 100%; max-height: 200px; } }
 .mini-why { font-size: 12px; color: #8A2A1B; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Şagird işi */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; max-width: 420px; }
+.cell { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 3px; border-radius: 5px; font-size: 11px; font-weight: 600; background: #EEF1F5; color: #5B6577; }
+.cell.c-right { background: var(--green-soft); color: var(--green); }
+.cell.c-wrong { background: #FDE7E4; color: var(--red); }
+.cell.c-open { background: var(--amber-soft); color: #5C3300; }
+.rv-q { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid #EEF1F5; }
+.card > .rv-q { border-bottom: 0; padding: 0; }
+.rv-opts li.wrong { border-color: var(--red); background: #FDE7E4; }
+.rv-mark { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; text-align: left; }
+#rvList > [hidden] { display: none; }
