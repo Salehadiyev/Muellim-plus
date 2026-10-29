@@ -854,7 +854,7 @@ async function bankView() {
     const page = rows.slice(0, shown);
     let full;
     try { full = await fullQuestions(page.map((q) => q.id)); } catch (err) { return fail(err); }
-    if (seq !== renderSeq) return; // daha yeni axtarış başlayıb
+    if (seq !== renderSeq || !$('#shownInfo')) return; // daha yeni axtarış başlayıb və ya səhifə dəyişib
     const byId = Object.fromEntries(full.map((q) => [q.id, { ...q, teacher_approved: data.find((d) => d.id === q.id)?.teacher_approved }]));
     $('#shownInfo').textContent = rows.length > page.length ? `${rows.length} uyğun sualdan ${page.length} göstərilir` : (rows.length && rows.length !== data.length ? `${rows.length} uyğun sual` : '');
     $('#list').innerHTML = rows.length
