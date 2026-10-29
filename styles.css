@@ -567,3 +567,23 @@ a.seg-b { text-decoration: none; }
   .big-action { display: grid; grid-template-columns: 44px 1fr; column-gap: 14px; row-gap: 2px; min-height: 0; padding: 14px 16px; align-items: center; }
   .big-action .icon-box { grid-row: span 2; }
 }
+
+/* ---------- Avtomatik test ---------- */
+.mix { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: stretch; }
+.mix-b { display: flex; flex-direction: column; gap: 6px; border-radius: 12px; padding: 10px 12px; font-weight: 700; font-size: 14px; border: 1px solid transparent; }
+.mix-b input { font-size: 22px; font-weight: 700; text-align: center; min-height: 48px; background: #fff; }
+.mix-0 { background: var(--green-soft); color: var(--green); border-color: #CBE7D6; }
+.mix-1 { background: var(--amber-soft); color: var(--amber); border-color: #F6D6BC; }
+.mix-2 { background: var(--red-soft); color: var(--red); border-color: #F5C9C3; }
+.mix-total { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 14px; font-size: 13px; color: var(--muted); }
+.mix-total strong { font-family: 'Space Grotesk', sans-serif; font-size: 28px; color: var(--ink); }
+.choice-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.choice { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; background: #fff; }
+.choice input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); flex: none; }
+.choice span { display: flex; flex-direction: column; gap: 2px; }
+.choice small { color: var(--muted); font-size: 13px; }
+.choice:has(input:checked) { border: 2px solid var(--accent); background: #F4FBFC; }
+.dgroup { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.dgroup::before { content: ''; width: 10px; height: 10px; border-radius: 50%; }
+.dgroup.d0::before { background: var(--green); } .dgroup.d1::before { background: #D97706; } .dgroup.d2::before { background: var(--red); }
+@media (max-width: 520px) { .mix { grid-template-columns: repeat(3, minmax(0, 1fr)); } .mix-total { grid-column: 1 / -1; flex-direction: row; gap: 6px; } }

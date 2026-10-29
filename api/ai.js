@@ -180,22 +180,30 @@ function imageBlock(dataUrl) {
 async function extractSplit(b) {
   const img = imageBlock(b.image);
   if (!img) throw publicError('Şəkil oxunmadı');
+  const want = String(b.want || '').replace(/["`$\\]/g, '').slice(0, 120).trim();
   const prompt = `Şəkildə imtahan/test səhifəsi var. Oradakı HƏR riyaziyyat və ya məntiq sualını ayrıca götür.
 Hər sual üçün:
 - "text": sualın tam mətni və variantları (A)… E)), olduğu kimi; riyazi ifadələr LaTeX ilə $...$ arasında; sualın nömrəsini yazma.
 - Sualda şəkil, qrafik, cədvəl, ədəd oxu və ya sxem varsa, "text"-in sonunda "[Şekil: ...]" kimi onu dəqiq təsvir et (ədədlər, nöqtələr, oxlar, bölgələr).
 - "topic": mövzu (türkcə, məs. "Köklü sayılar"), "section": "matematik" və ya "sayisal".
 - "box": sualın şəkildəki yeri, faizlə [x, y, en, hündürlük] (0-100).
-Yarımçıq görünən sualı götürmə. Oxunmayan hissəni təxmin etmə.
-Bu formada qaytar: {"questions": [{"text": "...", "topic": "...", "section": "matematik", "box": [0, 0, 50, 25]}]}`;
+- "difficulty": TR-YÖS səviyyəsinə görə "asan", "orta" və ya "çətin" (həll addımlarının sayına və tələyə görə).${want ? `
+- "match": sual "${want}" mövzusuna aiddirsə true, deyilsə false. Dillər fərqli ola bilər (məs. funksiya = fonksiyon, çoxluq = küme); mövzunun əsas ideyası bu sualda yoxlanırsa true.` : ''}
+Yarımçıq görünən sualı götürmə. Oxunmayan hissəni təxmin etmə. Sual olmayan mətni (izah, nümunə həll, başlıq) götürmə.
+Bu formada qaytar: {"questions": [{"text": "...", "topic": "...", "section": "matematik", "difficulty": "orta",${want ? ' "match": true,' : ''} "box": [0, 0, 50, 25]}]}`;
   const data = await askJSON([img, { type: 'text', text: prompt }], { maxTokens: 12000 });
   const questions = (Array.isArray(data.questions) ? data.questions : []).map((q) => ({
     text: String(q.text || '').trim().slice(0, 4000),
     topic: String(q.topic || '').slice(0, 120),
     section: pick(q.section, ['matematik', 'sayisal'], 'matematik'),
-    box: Array.isArray(q.box) && q.box.length === 4 && q.box.every((n) => Number.isFinite(+n)) ? q.box.map((n) => Math.max(0, Math.min(100, +n))) : null
+    box: Array.isArray(q.box) && q.box.length === 4 && q.box.every((n) => Number.isFinite(+n)) ? q.box.map((n) => Math.max(0, Math.min(100, +n))) : null,
+    difficulty: pick(q.difficulty, ['asan', 'orta', 'çətin'], 'orta'),
+    ...(want ? { match: q.match === true } : {})
   })).filter((q) => q.text);
-  if (!questions.length) throw publicError('Səhifədə sual tapılmadı');
+  if (!questions.length) {
+    if (want) return { questions: [] }; // avtomatik axtarışda boş səhifə səhv deyil
+    throw publicError('Səhifədə sual tapılmadı');
+  }
   return { questions: questions.slice(0, 20) };
 }
 
@@ -410,11 +418,15 @@ function tryosContext(b) {
 }
 
 async function tryosPlan(b) {
-  const count = clampInt(b.count, 1, 40, 10);
+  const mix = b.mix && typeof b.mix === 'object'
+    ? { asan: clampInt(b.mix.asan, 0, 40, 0), orta: clampInt(b.mix.orta, 0, 40, 0), 'çətin': clampInt(b.mix.cetin, 0, 40, 0) } : null;
+  const mixTotal = mix ? mix.asan + mix.orta + mix['çətin'] : 0;
+  if (mix && (mixTotal < 1 || mixTotal > 40)) throw publicError('Sual sayı 1–40 arası olmalıdır');
+  const count = mix ? mixTotal : clampInt(b.count, 1, 40, 10);
   const c = tryosContext(b);
   const prompt = `${c.sectionText}
 ${c.topic ? 'Müəllimin seçdiyi mövzu: ' + c.topic + '.' : ''}
-Çətinlik: ${c.difficulty === 'qarışıq' ? 'qarışıq (asan → orta → çətin inkişafı ilə)' : c.difficulty}.
+Çətinlik: ${mix ? `DƏQİQ bölgü — ${mix.asan} asan, ${mix.orta} orta, ${mix['çətin']} çətin (planda bu sıra ilə: əvvəl asanlar, sonra ortalar, sonra çətinlər)` : c.difficulty === 'qarışıq' ? 'qarışıq (asan → orta → çətin inkişafı ilə)' : c.difficulty}.
 ${c.notes ? 'Müəllimin əlavə istəyi: ' + c.notes : ''}${c.exampleText}
 
 ${count} sual üçün DAXİLİ TİP PLANI qur. Hər bənd həqiqətən fərqli tip olsun (quruluş, axtarılan kəmiyyət, təqdimat forması, əsas həll ideyası).
@@ -432,6 +444,13 @@ Bu formada qaytar:
     visual: String(p.visual || 'yok').slice(0, 20)
   }));
   if (!plan.length) throw publicError('AI plan qaytarmadı, yenidən yoxlayın', 502);
+  if (mix) {
+    // bölgü dəqiq olsun: plan qısa gəlsə, axırıncı bəndlər təkrarlanır, çətinlik sıra ilə yazılır
+    const base = plan.length;
+    for (let i = 0; plan.length < count; i++) plan.push({ ...plan[i % base], idea: plan[i % base].idea + ' (başqa ədədlər və quruluşla)' });
+    const order = [...Array(mix.asan).fill('asan'), ...Array(mix.orta).fill('orta'), ...Array(mix['çətin']).fill('çətin')];
+    plan.forEach((p, i) => { p.difficulty = order[i]; });
+  }
   return { plan, notes: String(data.notes || '').slice(0, 600) };
 }
 

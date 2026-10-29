@@ -23,6 +23,7 @@ const tests = {
   'e2e/account-e2e.cjs': [OK, /forgot password sends link/, /recovery link → new password → app/, /expired session → back to login/],
   'e2e/csp-e2e.cjs': [OK, /pdf rendered: true/, /csp violations: \[\]/],
   'e2e/data-e2e.cjs': [OK, /privacy page public/, /export all data \(paged\)/, /csp: \[\]/],
+  'e2e/auto-e2e.cjs': [/total: 4/, /pdf info: book.pdf · 3 səhifə \| to: 3/, /book groups: Asan · 2 \| Orta · 1 \| Çətin · 1/, /book items: Orijinal sual \d \| Orijinal sual \d \| AI sual orta \d \| Orijinal sual \d/, /Kitabda çatmadı \(orta 1\)/, /want: extract:Fonksiyonlar/, /fill plan: tryos_plan:\{"asan":0,"orta":1,"cetin":0\}/, /newtest title: Fonksiyonlar \| checked: 4/, /ai plan: tryos_plan:\{"asan":1,"orta":1,"cetin":1\} \| groups: Asan · 1 \| Orta · 1 \| Çətin · 1/, /print ok: true/],
   'e2e/bigbank-e2e.cjs': [OK, /head: 2300 sual/, /rendered: 50/, /after more: 100/, /search one: Sual nömrə 2299/, /Seçilənlərdən test \(2300\)/, /bank dlg: Sual 1 \/ 2300/, /bank next: Sual 2 \/ 2300/, /✓ new test with big bank/],
   'e2e/errors-e2e.cjs': [OK, /network error → clear internet message/, /only unexpected errors logged/, /admin sees and clears errors/],
   // server (api/ai.js, saxta provayderlər)
@@ -32,6 +33,7 @@ const tests = {
   'server/effort.mjs': [/effort sent: 200 low/, /effort rejected → retry: 200 low>none/],
   'server/order.mjs': [/Sol chosen, no Claude → 200 gpt-sol \| tried: openai$/m, /Sol 429 → 200 gemini-flash \| tried: openai>anthropic>google \| fast: true/],
   'server/gem.mjs': [/gemini rejects thinkingLevel → 200 \| configs: low>default/],
+  'server/auto.mjs': [/extract want: 200 çətin\/true,orta\/false \| prompt clean: true/, /empty page with want: 200 0/, /empty page without want: 400/, /plan mix: 200 5 asan,asan,orta,çətin,çətin \| prompt: true/, /plan too many: 400/],
   'server/gate.mjs': [/not approved\s+403 \| AI called: 0/, /daily limit hit\s+429 \| AI called: 0/, /monthly limit hit\s+429/, /gate error 500\s+503/, /no 008 \(404\)\s+200/]
 };
 

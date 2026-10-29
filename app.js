@@ -302,11 +302,11 @@ function route() {
   if (page === 'book' || page === 'questions') return go(page === 'book' ? '#/pdf' : '#/bank');
   const views = {
     '': dashboard, classes: classesView, class: classView, bank: bankView, pdf: pdfView,
-    ai: aiView, tests: testsView, newtest: newTestView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView,
+    ai: aiView, tests: testsView, newtest: newTestView, auto: autoView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView,
     settings: settingsView, ...(access.is_admin ? { teachers: teachersView } : {})
   };
   const view = views[page] || dashboard;
-  const NAV = { class: 'classes', student: 'classes', analysis: 'classes', bank: 'questions', pdf: 'questions', ai: 'questions', test: 'tests', newtest: 'tests', teachers: 'settings' };
+  const NAV = { class: 'classes', student: 'classes', analysis: 'classes', bank: 'questions', pdf: 'questions', ai: 'questions', test: 'tests', newtest: 'tests', auto: 'tests', teachers: 'settings' };
   const navKey = NAV[page] || (views[page] ? page : '');
   shell(navKey);
   window.scrollTo(0, 0);
@@ -1974,6 +1974,306 @@ const qSubnav = (active) => `<nav class="seg sub-seg" aria-label="Suallar">${Q_T
 
 const testLink = (id) => appBase() + '#/t/' + id;
 
+// ================= Avtomatik test: kitabdan seçmə və ya AI ilə, çətinlik bölgüsü ilə =================
+const DIFFS = [['asan', 'Asan'], ['orta', 'Orta'], ['çətin', 'Çətin']];
+const autoState = { running: false, status: '', results: [], notes: [], title: '', topic: '' };
+let pendingTestTitle = '';
+
+function cropCanvasBox(canvas, box, maxSide = 1100) {
+  const pad = 3;
+  const x = Math.max(0, box[0] - pad), y = Math.max(0, box[1] - pad);
+  const w = Math.min(100 - x, box[2] + pad * 2), h = Math.min(100 - y, box[3] + pad * 2);
+  const sx = x / 100 * canvas.width, sy = y / 100 * canvas.height, sw = w / 100 * canvas.width, sh = h / 100 * canvas.height;
+  const k = Math.min(1, maxSide / Math.max(sw, sh));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.86);
+}
+
+async function renderPdfPage(pdf, n, width = 1400) {
+  const page = await pdf.getPage(n);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: Math.min(3, width / base.width) });
+  const c = document.createElement('canvas');
+  c.width = Math.floor(viewport.width); c.height = Math.floor(viewport.height);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, canvas: c, viewport }).promise;
+  return c;
+}
+
+// AI ilə dəqiq bölgü: { asan, orta, 'çətin' } → yoxlanmış suallar
+async function autoGenerate(topic, mix, onStatus) {
+  const section = TRYOS_TOPICS.sayisal.includes(topic) ? 'sayisal' : 'matematik';
+  const base = { section, topic, difficulty: 'qarisiq', notes: '' };
+  const total = mix.asan + mix.orta + mix['çətin'];
+  onStatus(`AI tip planı qurur (${total} sual)…`);
+  const { plan } = await callAI('tryos_plan', { ...base, mix: { asan: mix.asan, orta: mix.orta, cetin: mix['çətin'] } });
+  const out = [];
+  const batches = [];
+  for (let i = 0; i < plan.length; i += 3) batches.push(plan.slice(i, i + 3));
+  const q = makeQueue(3);
+  let done = 0;
+  await Promise.all(batches.map((items) => q(async () => {
+    try {
+      const data = await callAI('tryos_generate', { ...base, items, avoid: out.map((x) => x.body.replace(/\s+/g, ' ').slice(0, 140)) });
+      const got = data.questions.map((x, i) => ({ ...x, difficulty: (items[i] || items[0]).difficulty, _source: 'ai' }));
+      out.push(...got);
+      autoState.results.push(...got);
+      renderAuto();
+      done += items.length;
+      onStatus(`AI sualları yazır: ${Math.min(done, total)} / ${total}, yoxlanılır…`);
+      await Promise.all(got.map((x) => checkQuestion(x).then(() => { if (x.ai_status !== 'passed') x.ai_status = 'draft'; renderAuto(); })));
+    } catch (err) {
+      if (err.expected) throw err;
+      autoState.notes.push('Bir partiya alınmadı: ' + err.message);
+    }
+  })));
+  return out;
+}
+
+// Kitabdakı bir sual → təmiz orijinal və ya bənzər (yoxlama + bir dəfə təkrar cəhd)
+async function autoFromBook(image, mode, diff) {
+  const d = await callAI('tryos_analyze', { image, text: '' });
+  const a = { ...d.analysis, difficulty: diff };
+  if (!a.complete) throw Object.assign(new Error('sual kəsikdə natamamdır'), { skip: true });
+  const sample = { text: d.text, image, topic: a.topic, section: a.section, analysis: a };
+  const make = mode === 'original'
+    ? async (feedback = '') => (await callAI('clean_copy', { image, text: d.text, analysis: a, feedback })).questions[0]
+    : async (feedback = '') => {
+      const r = await callAI('tryos_from_examples', { samples: [sample], mode: 'benzer', perSample: 1, feedback });
+      if (!r.questions?.length) throw new Error('AI bənzər sual qaytarmadı');
+      return r.questions[0];
+    };
+  let q = await make();
+  let ok = await checkQuestion(q, { mode, sample });
+  if (!ok) {
+    try {
+      const q2 = await make([q.verify_note, q.fit_note].filter(Boolean).join('; '));
+      ok = await checkQuestion(q2, { mode, sample });
+      q = q2;
+    } catch (err) { if (err.expected) throw err; }
+  }
+  if (!ok) q.ai_status = 'draft';
+  return { ...q, difficulty: diff, _source: mode === 'original' ? 'book' : 'ai', _sample: sample };
+}
+
+async function autoView() {
+  const allTopics = [...TRYOS_TOPICS.matematik, ...TRYOS_TOPICS.sayisal];
+  let pdf = null; let src = 'book';
+  view().innerHTML = `
+    <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>Avtomatik test</h1>
+      <p class="muted">Nə lazım olduğunu yazın: sistem sualları kitabdan özü seçsin və ya AI ilə yaratsın. Sonda PDF yükləyin və ya test edin.</p></div></div>
+    <form id="autoForm" class="stack">
+      <section class="card stack"><h2><span class="step-n">1</span> Nə lazımdır?</h2>
+        <label class="field">Mövzu<span class="hint">siyahıdan seçin və ya öz sözünüzlə yazın</span><input type="text" name="topic" list="autoTopics" required maxlength="120" placeholder="məs. Fonksiyonlar" value="${esc(autoState.topic)}">
+          <datalist id="autoTopics">${allTopics.map((t) => `<option value="${esc(t)}"></option>`).join('')}</datalist></label>
+        <div class="mix">${DIFFS.map(([k, l], i) => `<label class="mix-b mix-${i}"><span>${l}</span><input type="number" name="n${i}" min="0" max="20" value="5" inputmode="numeric" aria-label="${l} sual sayı"></label>`).join('')}
+          <div class="mix-total">Cəmi <strong id="mixTotal">15</strong> sual</div></div>
+      </section>
+      <section class="card stack"><h2><span class="step-n">2</span> Haradan?</h2>
+        <div class="seg" role="tablist" aria-label="Mənbə">
+          <button type="button" class="seg-b on" data-src="book" role="tab">📖 Kitabdan (PDF)</button>
+          <button type="button" class="seg-b" data-src="ai" role="tab">✨ AI yaratsın</button></div>
+        <div data-srcpane="book" class="stack">
+          <label class="btn" style="align-self:flex-start">📄 PDF kitabı seç<input type="file" accept="application/pdf,.pdf" class="sr" id="autoPdf"></label>
+          <div id="pdfInfo" class="small muted">Kitab seçilməyib.</div>
+          <div class="form-grid" id="pageRange" hidden>
+            <label class="field">Səhifədən<input type="number" name="from" min="1" value="1" inputmode="numeric"></label>
+            <label class="field">Səhifəyə<input type="number" name="to" min="1" value="1" inputmode="numeric"></label></div>
+          <p class="hint">Bir dəfəyə ən çox 40 səhifəyə baxılır. Mövzunun olduğu fəsli yazsanız daha tez və ucuz olar: hər səhifə 1 AI sorğusudur, lazım olan qədər sual tapılan kimi axtarış dayanır.</p>
+          <div class="choice-row" role="radiogroup" aria-label="Tapılan suallar necə verilsin">
+            <label class="choice"><input type="radio" name="out" value="original" checked><span><strong>Orijinal</strong><small>kitabdakı sual təmiz yazılır, şəkillər yenidən çəkilir</small></span></label>
+            <label class="choice"><input type="radio" name="out" value="benzer"><span><strong>AI ilə bənzər</strong><small>hər sualdan eyni tipdə yeni sual</small></span></label></div>
+          <label class="row small" style="gap:8px"><input type="checkbox" name="fill" checked style="width:20px;height:20px"> Kitabda çatmasa, qalanını AI ilə tamamla</label>
+        </div>
+        <div data-srcpane="ai" class="stack" hidden><p class="small muted">AI mövzu üzrə müxtəlif tiplərdən plan qurur, sualları yazır və hər birini ayrıca yoxlayır. Bölgü dəqiq saxlanılır.</p></div>
+        <div class="run-row">${modelPicker()}<button class="btn primary" type="submit" id="autoRun">⚡ Başla</button></div>
+      </section>
+    </form>
+    <section id="autoOut" class="stack"></section>`;
+  bindModelPicker($('#autoForm'));
+  const form = $('#autoForm');
+  const need = () => Object.fromEntries(DIFFS.map(([k], i) => [k, Math.max(0, Math.min(20, parseInt(form['n' + i].value, 10) || 0))]));
+  const sumNeed = () => Object.values(need()).reduce((a, b) => a + b, 0);
+  form.addEventListener('input', (e) => { if (/^n\d$/.test(e.target.name)) $('#mixTotal').textContent = sumNeed(); });
+  $$('[data-src]').forEach((b) => b.onclick = () => {
+    src = b.dataset.src;
+    $$('[data-src]').forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-srcpane]').forEach((p) => { p.hidden = p.dataset.srcpane !== src; });
+  });
+  form.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.type === 'number') e.preventDefault(); });
+  $('#autoPdf').onchange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    $('#pdfInfo').innerHTML = '<span class="spinner sm" aria-hidden="true"></span> PDF açılır…';
+    try {
+      const pdfjs = await import(PDFJS_URL);
+      pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+      pdf = await pdfjs.getDocument({ data: await file.arrayBuffer(), isEvalSupported: false }).promise;
+      $('#pdfInfo').innerHTML = `<strong>${esc(file.name)}</strong> · ${pdf.numPages} səhifə`;
+      $('#pageRange').hidden = false;
+      form.from.max = form.to.max = pdf.numPages;
+      form.from.value = 1; form.to.value = Math.min(pdf.numPages, 40);
+    } catch (err) { console.error(err); pdf = null; $('#pdfInfo').textContent = 'PDF açılmadı. Başqa fayl yoxlayın.'; }
+  };
+
+  const status = (t) => { autoState.status = t; const el = $('#autoStatus'); if (el) el.textContent = t; };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    if (autoState.running) return toast('Əvvəlki iş hələ gedir', true);
+    const topic = form.topic.value.trim();
+    const n = need(); const total = sumNeed();
+    if (!topic) return toast('Mövzunu yazın', true);
+    if (!total) return toast('Ən azı bir sual sayı yazın', true);
+    if (total > 40) return toast('Bir dəfəyə ən çox 40 sual', true);
+    let from = 1, to = 1;
+    if (src === 'book') {
+      if (!pdf) return toast('Əvvəlcə PDF kitabı seçin', true);
+      from = Math.max(1, Math.min(pdf.numPages, parseInt(form.from.value, 10) || 1));
+      to = Math.max(from, Math.min(pdf.numPages, parseInt(form.to.value, 10) || from));
+      if (to - from + 1 > 40) return toast('Bir dəfəyə ən çox 40 səhifə seçin', true);
+    }
+    const mode = form.out.value; const fill = form.fill.checked;
+    Object.assign(autoState, { running: true, results: [], notes: [], topic, title: `${topic} · ${total} sual` });
+    renderAuto();
+    busy($('#autoRun'), async () => {
+      try {
+        if (src === 'ai') {
+          await autoGenerate(topic, n, status);
+        } else {
+          await runBook({ pdf, topic, n, from, to, mode, fill });
+        }
+        const order = { asan: 0, orta: 1, 'çətin': 2 };
+        autoState.results.sort((a, b) => (order[a.difficulty] ?? 1) - (order[b.difficulty] ?? 1));
+        status('');
+        if (!autoState.results.length) throw new Error('Sual alınmadı. Səhifə aralığını və ya mövzunu dəyişib yenidən yoxlayın.');
+      } finally { autoState.running = false; renderAuto(); }
+    }).catch((err) => { status(''); fail(err); });
+  };
+
+  async function runBook({ pdf: doc, topic, n, from, to, mode, fill }) {
+    const cand = { asan: [], orta: [], 'çətin': [] };
+    const enough = () => DIFFS.every(([k]) => cand[k].length >= n[k] + (n[k] ? 1 : 0)); // bir ehtiyat da tapılsın
+    const pages = []; for (let p = from; p <= to; p++) pages.push(p);
+    const canvases = new Map();
+    let scanned = 0; let stop = null;
+    const q = makeQueue(3);
+    const found = () => DIFFS.map(([k, l]) => `${l.toLowerCase()} ${cand[k].length}`).join(', ');
+    status(`Kitab oxunur: 0 / ${pages.length} səhifə…`);
+    await Promise.all(pages.map((pn) => q(async () => {
+      if (stop || enough()) return;
+      try {
+        const c = await renderPdfPage(doc, pn);
+        const r = await callAI('extract', { image: c.toDataURL('image/jpeg', 0.85), split: true, want: topic });
+        const hits = (r.questions || []).filter((x) => x.match && x.box);
+        if (hits.length) canvases.set(pn, c);
+        hits.forEach((h) => (cand[h.difficulty] || cand.orta).push({ ...h, page: pn }));
+      } catch (err) {
+        if (err.expected) { stop = err; return; }
+        autoState.notes.push(`Səhifə ${pn} oxunmadı: ${err.message}`);
+      }
+      scanned++;
+      status(`Kitab oxunur: ${scanned} / ${pages.length} səhifə · tapıldı: ${found()}`);
+    })));
+    if (stop) throw stop;
+    DIFFS.forEach(([k]) => cand[k].sort((a, b) => a.page - b.page || a.box[1] - b.box[1]));
+    const totalFound = DIFFS.reduce((s, [k]) => s + cand[k].length, 0);
+    if (!totalFound) autoState.notes.push(`${from}–${to} səhifələrdə «${topic}» mövzusunda sual tapılmadı.`);
+
+    // Hər bölmə üçün lazım olan qədər: alınmayan sualın yerinə növbətisi götürülür
+    const short = { asan: 0, orta: 0, 'çətin': 0 };
+    let made = 0; const want = DIFFS.reduce((s, [k]) => s + Math.min(n[k], cand[k].length), 0);
+    const q2 = makeQueue(3);
+    const fillSlot = async (k) => {
+      for (let c = cand[k].shift(); c; c = cand[k].shift()) {
+        try {
+          const qq = await autoFromBook(cropCanvasBox(canvases.get(c.page), c.box), mode, k);
+          qq._page = c.page;
+          autoState.results.push(qq);
+          made++;
+          status(`Suallar hazırlanır: ${made} / ${want} (${mode === 'original' ? 'təmiz orijinal' : 'AI bənzər'}, hər biri yoxlanılır)…`);
+          renderAuto();
+          return;
+        } catch (err) {
+          if (err.expected) throw err;
+          autoState.notes.push(`Səhifə ${c.page}: ${err.message}${cand[k].length ? ' — növbəti sual götürüldü' : ''}`);
+        }
+      }
+      short[k]++;
+    };
+    status(`Suallar hazırlanır: 0 / ${want}…`);
+    await Promise.all(DIFFS.flatMap(([k]) => Array.from({ length: n[k] }, () => q2(() => fillSlot(k)))));
+    canvases.clear();
+    const miss = DIFFS.filter(([k]) => short[k]).map(([k, l]) => `${l.toLowerCase()} ${short[k]}`).join(', ');
+    if (miss) {
+      if (fill) {
+        autoState.notes.push(`Kitabda çatmadı (${miss}) — qalanı AI ilə yaradıldı.`);
+        await autoGenerate(topic, short, status);
+      } else autoState.notes.push(`Kitabda çatmadı: ${miss}.`);
+    }
+  }
+
+  renderAuto();
+}
+
+function renderAuto() {
+  const box = $('#autoOut');
+  if (!box) return;
+  const st = autoState;
+  const res = st.results;
+  const isSel = (q) => (q._sel === undefined ? q.ai_status !== 'draft' && q.ai_status !== 'checking' : q._sel);
+  if (!res.length && !st.running) { box.innerHTML = st.notes.length ? `<div class="card"><ul class="warn-list">${st.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''; return; }
+  const groups = DIFFS.map(([k, l], gi) => ({ k, l, gi, items: res.map((q, i) => ({ q, i })).filter((x) => (x.q.difficulty || 'orta') === k) })).filter((g) => g.items.length);
+  const nSel = res.filter(isSel).length;
+  box.innerHTML = `<div class="card stack">
+    <div class="row between"><h2>${st.running ? 'Hazırlanır…' : `${esc(st.title.split(' · ')[0])}: ${res.length} sual hazırdır`}</h2>
+      ${st.running ? '' : `<div class="row"><button class="btn" id="aPdf">📄 PDF yüklə</button><button class="btn" id="aSave">Banka saxla</button><button class="btn primary" id="aTest">Test yarat ›</button></div>`}</div>
+    ${st.running ? `<p class="row small" role="status" aria-live="polite"><span class="spinner sm" aria-hidden="true"></span><span id="autoStatus">${esc(st.status)}</span></p>` : `<p class="small muted">Seçilən: <strong>${nSel}</strong>. Suala basın: tam açılır. Yoxlamadan keçməyənlər (qaralama) seçilməyib — açıb baxın, düzgündürsə təsdiqləyin.</p>`}
+    ${st.notes.length ? `<ul class="warn-list">${st.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${groups.map((g) => `<h3 class="dgroup d${g.gi}">${g.l} · ${g.items.length}</h3>
+      <div class="mini-grid">${g.items.map(({ q, i }) => `<div class="mini">${miniQ(q, 'a' + i, isSel(q)).replace('<span class="mini-meta">', `<span class="mini-meta"><span class="tag ${q._source === 'book' ? 'book' : 'ai'}">${q._source === 'book' ? '📖 s.' + (q._page || '') : '✨ AI'}</span>`)}</div>`).join('')}</div>`).join('')}
+  </div>`;
+  bindMini(box, (key) => { const q = res[+key.slice(1)]; return { q, sample: q?._sample || null, onApprove: (on) => { if (on) q._sel = true; renderAuto(); } }; });
+  $$('.check', box).forEach((c) => c.onchange = () => { res[+c.dataset.id.slice(1)]._sel = c.checked; renderAuto(); });
+  if (st.running) return;
+  const chosen = () => res.filter(isSel);
+  const saveAll = async (list) => {
+    const todo = list.filter((q) => !q._id);
+    for (const srcKey of ['book', 'ai']) {
+      const part = todo.filter((q) => (q._source || 'ai') === srcKey);
+      if (!part.length) continue;
+      const ids = await saveQuestions(part.map((q) => { const { _sample, ...rest } = q; return rest; }), srcKey);
+      part.forEach((q, i) => { q._id = ids[i]; });
+    }
+    return list.map((q) => q._id).filter(Boolean);
+  };
+  $('#aPdf').onclick = () => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    pendingPrint = { questions: list, title: st.title.split(' · ')[0], back: '#/auto' };
+    go('#/print');
+  };
+  $('#aSave').onclick = (e) => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    busy(e.currentTarget, async () => { const ids = await saveAll(list); toast(ids.length + ' sual bankdadır'); }).catch(fail);
+  };
+  $('#aTest').onclick = (e) => {
+    const list = chosen();
+    if (!list.length) return toast('Heç bir sual seçilməyib', true);
+    busy(e.currentTarget, async () => {
+      pendingTestIds = await saveAll(list);
+      pendingTestTitle = st.title.split(' · ')[0];
+      go('#/newtest');
+    }).catch(fail);
+  };
+}
+
 async function testsView() {
   const [{ data: tests, error }, { data: subs }, { data: studs }] = await Promise.all([
     sb.from('tests').select('*, classes(name)').order('created_at', { ascending: false }),
@@ -2018,7 +2318,7 @@ async function testsView() {
 
   view().innerHTML = `
     <div class="page-head"><div><h1>Testlər</h1><p class="muted">Sinfə bağlı test şagirdlərin şəxsi linkində avtomatik görünür.</p></div>
-      <a class="btn primary" href="#/newtest">+ Yeni test</a></div>
+      <div class="row"><a class="btn" href="#/auto">⚡ Avtomatik test</a><a class="btn primary" href="#/newtest">+ Yeni test</a></div></div>
     ${tests.length ? `<div class="seg tseg" role="tablist" aria-label="Testləri süz">
         <button type="button" class="seg-b" data-f="open" role="tab">Açıq <span class="seg-c">${nOpen}</span></button>
         <button type="button" class="seg-b" data-f="closed" role="tab">Bağlı <span class="seg-c">${tests.length - nOpen}</span></button>
@@ -2050,7 +2350,7 @@ async function newTestView() {
   const topics = [...new Set(qs.map((q) => q.topic).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'az'));
 
   view().innerHTML = `
-    <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>Yeni test</h1></div></div>
+    <div class="page-head"><div><div class="crumb"><a href="#/tests">Testlər</a> /</div><h1>Yeni test</h1></div><a class="btn" href="#/auto">⚡ Avtomatik test</a></div>
     <form id="newTest" class="stack">
       <section class="card stack"><h2><span class="step-n">1</span> Əsas məlumat</h2>
         <div class="form-grid">
@@ -2103,6 +2403,7 @@ async function newTestView() {
     </form>`;
 
   const form = $('#newTest');
+  if (pendingTestTitle) { $('input[name=title]', form).value = pendingTestTitle; pendingTestTitle = ''; }
   const pdf = pdfQuestions($('#tqPicker'), $('#tqPdf'));
   const countSel = () => {
     const nb = $$('#tqList .check:checked', form).length;
