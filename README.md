@@ -18,6 +18,7 @@ Sayt bu hesablarda işləyir — hər hansı söhbət bağlansa da dayanmır.
 ## Yeni dəyişiklik lazım olanda
 1. claude.ai-də yeni söhbət aç və GitHub repozitoriyasını (`Salehadiyev/Muellim-plus`) qoş.
 2. Nə istədiyini yaz. Claude əvvəlcə `CLAUDE.md` faylını oxuyur — layihənin quruluşu və iş qaydaları oradadır.
+   Başqa AI köməkçisi (GPT, Codex və s.) ilə işləyəndə ona de: **"Əvvəlcə repozitoriyadakı AGENTS.md faylını oxu və ona əməl et."**
 3. Claude dəyişikliyi edir, sınaqları işlədir və GitHub-a göndərir; Vercel saytı özü yeniləyir.
 4. Bazada dəyişiklik lazım olsa, Claude SQL-i söhbətə yazır: **Supabase → SQL Editor → New query → yapışdır → Run**.
 
