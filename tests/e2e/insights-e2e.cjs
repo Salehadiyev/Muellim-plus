@@ -39,7 +39,7 @@ const DB = {
   await p.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ access_token: 'tok', user: { id: 'u1', email: 'a@b.az' } })));
   // müəllim: imtahan tarixi + qeydlər
   await p.goto('http://app.test/#/class/c1'); await p.reload(); await p.waitForSelector('#examDate');
-  const exam = new Date(Date.now() + 40 * 864e5).toISOString().slice(0, 10);
+  const ed = new Date(Date.now() + 40 * 864e5); const exam = `${ed.getFullYear()}-${String(ed.getMonth() + 1).padStart(2, '0')}-${String(ed.getDate()).padStart(2, '0')}`;
   await p.fill('#examDate', exam); await p.click('#saveExam'); await p.waitForSelector('text=Yadda saxlandı');
   console.log('exam saved:', (await db()).classes[0].exam_date === exam, '|', (await p.textContent('#examLeft')).trim());
   await p.click('[data-ctab=nt]'); await p.waitForSelector('#ntNew'); await p.click('#ntNew');

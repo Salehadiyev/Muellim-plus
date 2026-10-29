@@ -224,4 +224,25 @@ reset role;
 select t_ok((select count(*) from storage.objects) = 1, 'başqa müəllim faylı silə bilmədi');
 select t_ok((select public from storage.buckets where id = 'notes'), 'qeyd qovluğu yaradıldı');
 
+-- ---------- 013: dərs, ödəniş, gizli qeyd, real çətinlik ----------
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+update students set lesson_price = 30, teacher_note = 'gizli: üslü sayılarda zəif' where id = '00000000-0000-4000-8000-0000000000b1';
+insert into lessons (student_id, status, fee) values ('00000000-0000-4000-8000-0000000000b1', 'came', 30), ('00000000-0000-4000-8000-0000000000b1', 'missed', 0);
+insert into payments (student_id, amount) values ('00000000-0000-4000-8000-0000000000b1', 20);
+select t_err($q$ insert into payments (student_id, amount) values ('00000000-0000-4000-8000-0000000000b1', -5) $q$, 'mənfi ödəniş olmur');
+select t_err($q$ insert into lessons (student_id) values ('00000000-0000-4000-8000-0000000000b3') $q$, 'başqasının tələbəsinə dərs yazmaq olmur');
+select t_ok((select sum(fee) from lessons) - (select sum(amount) from payments) = 10, 'borc hesablanır');
+select t_ok(exists (select 1 from question_stats() where question_id = '00000000-0000-4000-8000-0000000000e2' and attempts >= 1), 'real nəticə statistikası');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+select t_ok((select count(*) from lessons) = 0 and (select count(*) from payments) = 0, 'başqa müəllim dərs və ödənişləri görmür');
+select t_ok((select count(*) from question_stats()) = 0, 'başqa müəllim statistikanı görmür');
+select t_ok((select count(*) from students where teacher_note is not null) = 0, 'başqa müəllim gizli qeydi görmür');
+set role anon;
+reset request.jwt.claim.sub;
+select t_ok((select count(*) from lessons) = 0 and (select count(*) from payments) = 0, 'anon dərs/ödəniş görmür');
+select t_ok(student_portal('AAAAAAAA')::text not like '%gizli%' and student_portal('AAAAAAAA')::text not like '%lesson_price%', 'tələbə gizli qeydi və qiyməti görmür');
+select t_ok(student_analysis('AAAAAAAA')::text not like '%gizli%' and student_mistakes('AAAAAAAA')::text not like '%gizli%', 'tələbə funksiyaları gizli qeydi qaytarmır');
+reset role;
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

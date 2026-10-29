@@ -23,6 +23,7 @@ class Query {
   then(res, rej) { try { res(this.exec()); } catch (e) { rej(e); } }
   exec() {
     const db = load();
+    if ((this.table === 'lessons' || this.table === 'payments') && !db.lessons) return { data: null, error: { message: 'relation "public.' + this.table + '" does not exist' } };
     if (this.table === 'lesson_notes' && !db.lesson_notes) return { data: null, error: { message: 'relation "public.lesson_notes" does not exist' } };
     if (this.table === 'mistakes' && !db.mistakes) return { data: null, error: { message: 'relation "public.mistakes" does not exist' } };
     let t = db[this.table] = db[this.table] || [];
@@ -85,6 +86,15 @@ export function createClient() {
       }
       if (fn === 'admin_teachers') {
         return { data: db.teacher_access.map((x) => ({ user_id: x.user_id, email: x.email, approved: x.approved, is_admin: x.is_admin, daily_limit: x.daily_limit_usd, monthly_limit: x.monthly_limit_usd, month: x.month || 0, questions: 0, students: 0, created_at: new Date().toISOString() })), error: null };
+      }
+      if (fn === 'question_stats') {
+        if (!db.lessons) return { data: null, error: { message: 'Could not find the function public.question_stats' } };
+        const m = {};
+        db.submissions.forEach((x) => { const t = db.tests.find((y) => y.id === x.test_id); if (!t) return;
+          t.question_ids.forEach((id) => { const q = db.questions.find((z) => z.id === id); if (!q || q.qtype !== 'mcq') return;
+            const o = m[id] || (m[id] = { question_id: id, attempts: 0, right_count: 0 }); o.attempts++;
+            if (String(x.answers[id] || '').trim().toLowerCase() === q.answer.trim().toLowerCase()) o.right_count++; }); });
+        return { data: Object.values(m), error: null };
       }
       if (fn.startsWith('student_')) {
         if (window.PORTAL_DOWN) return { data: null, error: { message: 'function not found' } };

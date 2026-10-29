@@ -301,7 +301,7 @@ function route() {
 
   if (page === 'book' || page === 'questions') return go(page === 'book' ? '#/pdf' : '#/bank');
   const views = {
-    '': dashboard, classes: classesView, class: classView, bank: bankView, pdf: pdfView,
+    '': dashboard, classes: classesView, class: classView, lessons: lessonsView, bank: bankView, pdf: pdfView,
     ai: aiView, tests: testsView, newtest: newTestView, auto: autoView, test: testResultsView, student: studentWorkView, analysis: classAnalysisView,
     settings: settingsView, ...(access.is_admin ? { teachers: teachersView } : {})
   };
@@ -316,7 +316,7 @@ function route() {
 }
 
 function shell(active) {
-  const items = [['', 'Ana səhifə'], ['classes', 'Siniflər'], ['questions', 'Suallar'], ['tests', 'Testlər']];
+  const items = [['', 'Ana səhifə'], ['classes', 'Siniflər'], ['questions', 'Suallar'], ['tests', 'Testlər'], ['lessons', 'Dərslər']];
   const email = session?.user?.email || '';
   $app.innerHTML = `<div class="shell">
     <nav class="nav" aria-label="Əsas menyu">
@@ -1088,8 +1088,20 @@ async function fullQuestions(ids) {
 }
 const PAGE = 50;
 
+// Sualların real nəticəsi (013): { id: { attempts, right } }; baza köhnədirsə boş
+async function loadQuestionStats() {
+  try {
+    const { data, error } = await sb.rpc('question_stats');
+    if (error || !Array.isArray(data)) return {};
+    return Object.fromEntries(data.map((r) => [r.question_id, { attempts: r.attempts, right: r.right_count }]));
+  } catch (_) { return {}; }
+}
+const REAL_MIN = 3; // ən azı neçə cavabdan sonra real çətinlik hesablanır
+const realDiff = (st) => (!st || st.attempts < REAL_MIN ? null : st.right / st.attempts >= 0.7 ? 'asan' : st.right / st.attempts >= 0.4 ? 'orta' : 'çətin');
+const statLine = (st) => (st && st.attempts ? `📊 ${Math.round(st.right / st.attempts * 100)}% düz · ${st.attempts} cavab` : '');
+
 // Bankdakı kiçik kart: toxunanda böyüyür
-function bankTile(q, n, checked) {
+function bankTile(q, n, checked, qs) {
   const st = q.teacher_approved ? ['ok', '✔ Təsdiqlənib']
     : (q.ai_status === 'passed' || (!q.ai_status && q.verified === true)) ? ['wait', 'Təsdiq gözləyir']
     : (q.ai_status === 'review' || q.ai_status === 'draft' || (!q.ai_status && q.verified === false)) ? ['bad', 'Yoxlama lazımdır'] : null;
@@ -1101,6 +1113,7 @@ function bankTile(q, n, checked) {
       <span class="qt-head"><span class="qt-n">#${n}</span>${st ? `<span class="qt-st ${st[0]}">${st[1]}</span>` : ''}</span>
       <span class="qt-text">${esc(q.body)}</span>
       ${fig}${opts}
+      ${qs && qs.attempts ? `<span class="qt-stat">${statLine(qs)}${realDiff(qs) && realDiff(qs) !== q.difficulty ? ` · <strong>real: ${realDiff(qs)}</strong>` : ''}</span>` : ''}
       <span class="qt-meta">${q.similar_to ? '<span class="qt-sim" title="Səhv dəftəri üçün bənzər">↔ bənzər</span>' : ''}${q.topic ? `<span class="qt-topic">${esc(q.topic)}</span>` : ''}${q.difficulty ? `<span>${esc(q.difficulty)}</span>` : ''}${q.exam === 'tryos' ? '<span>TR-YÖS</span>' : ''}</span>
     </button>
     <label class="qt-check"><input type="checkbox" class="check" data-id="${esc(q.id)}" ${checked ? 'checked' : ''} aria-label="Sual ${n} seç"></label>
@@ -1108,8 +1121,8 @@ function bankTile(q, n, checked) {
 }
 
 async function bankView() {
-  const data = await loadQuestionIndex();
-  let filter = { text: '', source: '', difficulty: '', exam: '', status: '' };
+  const [data, stats] = await Promise.all([loadQuestionIndex(), loadQuestionStats()]);
+  let filter = { text: '', source: '', difficulty: '', exam: '', status: '', real: '' };
   let visible = [];
   let shown = PAGE;
   const selected = new Set();
@@ -1125,7 +1138,9 @@ async function bankView() {
         <label class="field">Çətinlik<select id="fDiff"><option value="">Hamısı</option>${DIFF.map((d) => `<option>${d}</option>`).join('')}</select></label>
         <label class="field">Format<select id="fExam"><option value="">Hamısı</option><option value="tryos">TR-YÖS</option><option value="general">Ümumi</option></select></label>
         <label class="field">Status<select id="fStatus"><option value="">Hamısı</option><option value="approved">Müəllim təsdiqləyib</option><option value="passed">AI keçib, təsdiq gözləyir</option><option value="review">Yoxlama tələb edir / qaralama</option></select></label>
+        <label class="field">Real çətinlik<select id="fReal"><option value="">Hamısı</option><option value="asan">asan (70%+ düz)</option><option value="orta">orta (40–70%)</option><option value="çətin">çətin (40%-dən az)</option><option value="none">hələ az cavab</option></select></label>
       </div>
+      <div id="realBox"></div>
       <p class="small muted" id="shownInfo"></p>
       <div id="list"></div>
       <div id="more"></div>
@@ -1138,6 +1153,7 @@ async function bankView() {
     const rows = data.filter((q) => (!filter.source || (filter.source === 'similar' ? !!q.similar_to : q.source === filter.source)) && (!filter.difficulty || q.difficulty === filter.difficulty)
       && (!filter.exam || (q.exam || 'general') === filter.exam)
       && (!filter.status || (filter.status === 'approved' ? q.teacher_approved : filter.status === 'passed' ? (!q.teacher_approved && (q.ai_status === 'passed' || (!q.ai_status && q.verified === true))) : (!q.teacher_approved && (q.ai_status === 'review' || q.ai_status === 'draft' || (!q.ai_status && q.verified === false)))))
+      && (!filter.real || (filter.real === 'none' ? !realDiff(stats[q.id]) : realDiff(stats[q.id]) === filter.real))
       && (!t || (q.body + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az').includes(t)));
     visible = rows;
     const page = rows.slice(0, shown);
@@ -1147,7 +1163,7 @@ async function bankView() {
     const byId = Object.fromEntries(full.map((q) => [q.id, { ...q, teacher_approved: data.find((d) => d.id === q.id)?.teacher_approved }]));
     $('#shownInfo').textContent = rows.length > page.length ? `${rows.length} uyğun sualdan ${page.length} göstərilir` : (rows.length && rows.length !== data.length ? `${rows.length} uyğun sual` : '');
     $('#list').innerHTML = rows.length
-      ? `<div class="qgrid">${page.map((q, i) => bankTile(byId[q.id] || q, i + 1, selected.has(q.id))).join('')}</div>`
+      ? `<div class="qgrid">${page.map((q, i) => bankTile(byId[q.id] || q, i + 1, selected.has(q.id), stats[q.id])).join('')}</div>`
       : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/pdf">Kitabdan</a> və ya <a href="#/ai">AI ilə</a> sual əlavə edin.'}</div>`;
     $('#more').innerHTML = rows.length > page.length ? `<button class="btn block" id="moreBtn">Daha çox göstər (${rows.length - page.length} qalıb)</button>` : '';
     if ($('#moreBtn')) $('#moreBtn').onclick = () => { shown += PAGE; renderList(); };
@@ -1174,6 +1190,7 @@ async function bankView() {
     dlg.innerHTML = `<div class="q-dialog-in">
       <div class="row between"><h2>Sual ${idx + 1} / ${visible.length}</h2><button type="button" class="btn small" data-close aria-label="Bağla">✕ Bağla</button></div>
       ${!q.teacher_approved && (q.ai_status === 'draft' || q.ai_status === 'review') ? '<p class="notice">AI yoxlaması keçməyib. Sualı, cavabı və həlli özünüz yoxlayın; düzgündürsə təsdiqləyin.</p>' : ''}
+      ${stats[id]?.attempts ? `<p class="small"><strong>${statLine(stats[id])}</strong>${realDiff(stats[id]) ? ` · real çətinlik: <strong>${realDiff(stats[id])}</strong>` : ` · real çətinlik üçün ən azı ${REAL_MIN} cavab lazımdır`}</p>` : ''}
       <div class="dlg-q">${questionHtml(q)}</div>
       <div class="dlg-foot">
         <div class="row"><button type="button" class="btn" data-nav="-1" ${visible.length < 2 ? 'disabled' : ''}>‹ Əvvəlki</button><button type="button" class="btn" data-nav="1" ${visible.length < 2 ? 'disabled' : ''}>Sonrakı ›</button></div>
@@ -1212,6 +1229,28 @@ async function bankView() {
   $('#makeTest').onclick = () => { pendingTestIds = [...selected]; go('#/newtest'); };
   $('#fExam').onchange = (e) => { filter.exam = e.target.value; refilter(); };
   $('#fStatus').onchange = (e) => { filter.status = e.target.value; refilter(); };
+  $('#fReal').onchange = (e) => { filter.real = e.target.value; refilter(); };
+  // AI-ın qoyduğu çətinlik real nəticədən fərqlidirsə, bir düymə ilə yenilə
+  const drawReal = () => {
+    const diff = data.filter((q) => realDiff(stats[q.id]) && realDiff(stats[q.id]) !== q.difficulty);
+    const withData = data.filter((q) => realDiff(stats[q.id])).length;
+    $('#realBox').innerHTML = withData ? `<div class="real-box"><span>📊 <strong>${withData}</strong> sualın real nəticəsi var (tələbələrin cavablarından)${diff.length ? `; <strong>${diff.length}</strong> sualda çətinlik real nəticədən fərqlidir.` : ' — hamısının çətinliyi düzgündür.'}</span>
+      ${diff.length ? `<button type="button" class="btn small primary" id="realFix">Çətinliyi real nəticəyə görə yenilə (${diff.length})</button>` : ''}</div>` : '';
+    const btn = $('#realFix');
+    if (btn) btn.onclick = () => busy(btn, async () => {
+      for (const d of DIFF) {
+        const ids = diff.filter((q) => realDiff(stats[q.id]) === d).map((q) => q.id);
+        for (let i = 0; i < ids.length; i += 200) {
+          const { error } = await sb.from('questions').update({ difficulty: d }).in('id', ids.slice(i, i + 200));
+          if (error) throw error;
+        }
+      }
+      diff.forEach((q) => { q.difficulty = realDiff(stats[q.id]); fullCache.delete(q.id); });
+      toast(diff.length + ' sualın çətinliyi yeniləndi');
+      drawReal(); renderList();
+    }).catch(fail);
+  };
+  drawReal();
   $('#selAll').onclick = () => { visible.forEach((q) => selected.add(q.id)); updateBtn(); renderList(); };
   $('#makePdf').onclick = () => busy($('#makePdf'), async () => {
     // görünən sıra saxlanılır (köhnədən yeniyə)
@@ -2285,7 +2324,8 @@ async function autoView() {
       <section class="card stack"><h2><span class="step-n">2</span> Haradan?</h2>
         <div class="seg" role="tablist" aria-label="Mənbə">
           <button type="button" class="seg-b on" data-src="book" role="tab">📖 Kitabdan (PDF)</button>
-          <button type="button" class="seg-b" data-src="ai" role="tab">✨ AI yaratsın</button></div>
+          <button type="button" class="seg-b" data-src="ai" role="tab">✨ AI yaratsın</button>
+          <button type="button" class="seg-b" data-src="bank" role="tab">🗂 Bankdan</button></div>
         <div data-srcpane="book" class="stack">
           <label class="btn" style="align-self:flex-start">📄 PDF kitabı seç<input type="file" accept="application/pdf,.pdf" class="sr" id="autoPdf"></label>
           <div id="pdfInfo" class="small muted">Kitab seçilməyib.</div>
@@ -2298,6 +2338,8 @@ async function autoView() {
             <label class="choice"><input type="radio" name="out" value="benzer"><span><strong>AI ilə bənzər</strong><small>hər sualdan eyni tipdə yeni sual</small></span></label></div>
           <label class="row small" style="gap:8px"><input type="checkbox" name="fill" checked style="width:20px;height:20px"> Kitabda çatmasa, qalanını AI ilə tamamla</label>
         </div>
+        <div data-srcpane="bank" class="stack" hidden><p class="small muted">Sual bankınızdakı həmin mövzudan seçilir. Tələbələr bir sualı ən azı ${REAL_MIN} dəfə cavablayıbsa, onun <strong>real çətinliyi</strong> (neçə faizinin düz tapdığı) götürülür, yoxdursa sualın öz çətinliyi. AI işlənmir, dərhal hazır olur.</p>
+          <label class="row small" style="gap:8px"><input type="checkbox" name="fillBank" checked style="width:20px;height:20px"> Bankda çatmasa, qalanını AI ilə yarat</label></div>
         <div data-srcpane="ai" class="stack" hidden><p class="small muted">AI mövzu üzrə müxtəlif tiplərdən plan qurur, sualları yazır və hər birini ayrıca yoxlayır. Bölgü dəqiq saxlanılır.</p></div>
         <div class="run-row">${modelPicker()}<button class="btn primary" type="submit" id="autoRun">⚡ Başla</button></div>
       </section>
@@ -2353,6 +2395,8 @@ async function autoView() {
       try {
         if (src === 'ai') {
           await autoGenerate(topic, n, status);
+        } else if (src === 'bank') {
+          await runBank(topic, n, form.fillBank.checked);
         } else {
           await runBook({ pdf, topic, n, from, to, mode, fill });
         }
@@ -2363,6 +2407,32 @@ async function autoView() {
       } finally { autoState.running = false; renderAuto(); }
     }).catch((err) => { status(''); fail(err); });
   };
+
+  async function runBank(topic, n, fill) {
+    status('Bank oxunur…');
+    const [idx, stats] = await Promise.all([loadQuestionIndex(), loadQuestionStats()]);
+    const tl = topic.toLocaleLowerCase('az');
+    const match = (q) => { const t = (q.topic || '').toLocaleLowerCase('az'); return (t && (t.includes(tl) || tl.includes(t))) || (q.subtype || '').toLocaleLowerCase('az').includes(tl); };
+    const ok = (q) => q.qtype === 'mcq' && (q.teacher_approved || q.ai_status === 'passed' || (!q.ai_status && q.verified !== false));
+    const cand = { asan: [], orta: [], 'çətin': [] };
+    idx.filter((q) => ok(q) && match(q)).forEach((q) => { const d = realDiff(stats[q.id]) || (DIFF.includes(q.difficulty) ? q.difficulty : 'orta'); cand[d].push(q); });
+    const pick = []; const short = { asan: 0, orta: 0, 'çətin': 0 };
+    DIFFS.forEach(([k]) => {
+      const arr = cand[k].map((q) => [Math.random(), q]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+      const take = arr.slice(0, n[k]);
+      take.forEach((q) => pick.push([k, q]));
+      short[k] = n[k] - take.length;
+    });
+    const full = Object.fromEntries((await fullQuestions(pick.map(([, q]) => q.id))).map((q) => [q.id, q]));
+    pick.forEach(([k, q]) => { const f = full[q.id] || q; autoState.results.push({ ...f, difficulty: k, _source: 'bank', _id: q.id, _real: !!realDiff(stats[q.id]) }); });
+    const real = pick.filter(([, q]) => realDiff(stats[q.id])).length;
+    autoState.notes.push(`Bankdan ${pick.length} sual seçildi${real ? ` (${real}-nin çətinliyi tələbələrin real nəticəsinə görədir)` : ''}.`);
+    const miss = DIFFS.filter(([k]) => short[k]).map(([k, l]) => `${l.toLowerCase()} ${short[k]}`).join(', ');
+    if (miss) {
+      if (fill) { autoState.notes.push(`Bankda çatmadı (${miss}) — qalanı AI ilə yaradıldı.`); await autoGenerate(topic, short, status); }
+      else autoState.notes.push(`Bankda çatmadı: ${miss}.`);
+    }
+  }
 
   async function runBook({ pdf: doc, topic, n, from, to, mode, fill }) {
     const cand = { asan: [], orta: [], 'çətin': [] };
@@ -2444,7 +2514,7 @@ function renderAuto() {
     ${st.running ? `<p class="row small" role="status" aria-live="polite"><span class="spinner sm" aria-hidden="true"></span><span id="autoStatus">${esc(st.status)}</span></p>` : `<p class="small muted">Seçilən: <strong>${nSel}</strong>. Suala basın: tam açılır. Yoxlamadan keçməyənlər (qaralama) seçilməyib — açıb baxın, düzgündürsə təsdiqləyin.</p>`}
     ${st.notes.length ? `<ul class="warn-list">${st.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${groups.map((g) => `<h3 class="dgroup d${g.gi}">${g.l} · ${g.items.length}</h3>
-      <div class="mini-grid">${g.items.map(({ q, i }) => `<div class="mini">${miniQ(q, 'a' + i, isSel(q)).replace('<span class="mini-meta">', `<span class="mini-meta"><span class="tag ${q._source === 'book' ? 'book' : 'ai'}">${q._source === 'book' ? '📖 s.' + (q._page || '') : '✨ AI'}</span>`)}</div>`).join('')}</div>`).join('')}
+      <div class="mini-grid">${g.items.map(({ q, i }) => `<div class="mini">${miniQ(q, 'a' + i, isSel(q)).replace('<span class="mini-meta">', `<span class="mini-meta"><span class="tag ${q._source === 'ai' ? 'ai' : 'book'}">${q._source === 'book' ? '📖 s.' + (q._page || '') : q._source === 'bank' ? '🗂 bank' + (q._real ? ' · real' : '') : '✨ AI'}</span>`)}</div>`).join('')}</div>`).join('')}
   </div>`;
   bindMini(box, (key) => { const q = res[+key.slice(1)]; return { q, sample: q?._sample || null, onApprove: (on) => { if (on) q._sel = true; renderAuto(); } }; });
   $$('.check', box).forEach((c) => c.onchange = () => { res[+c.dataset.id.slice(1)]._sel = c.checked; renderAuto(); });
@@ -3054,6 +3124,138 @@ async function classAnalysisView(classId) {
 }
 
 // Müəllim üçün: bir şagirdin bütün işləri
+// ================= Dərs və ödəniş dəftəri (yalnız müəllim) =================
+const money = (n) => `${(Math.round(Number(n || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '')} ₼`;
+const ymOf = (d) => String(d || '').slice(0, 7);
+const ymLabel = (ym) => { const [y, m] = ym.split('-').map(Number); const n = AZ_MONTHS_FULL[m - 1]; return `${n[0].toLocaleUpperCase('az')}${n.slice(1)} ${y}`; };
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const shiftYm = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+let lessonsYm = '';
+
+async function loadLedger() {
+  const [st, ls, ps] = await Promise.all([
+    sb.from('students').select('id, full_name, class_id, lesson_price, classes(name)').order('full_name'),
+    sb.from('lessons').select('*').order('lesson_date', { ascending: false }),
+    sb.from('payments').select('*').order('paid_on', { ascending: false })
+  ]);
+  const err = st.error || ls.error || ps.error;
+  if (err) throw /lesson_price|lessons|payments|schema cache|does not exist/i.test(err.message || '')
+    ? Object.assign(new Error('need013'), { need013: true }) : err;
+  return { students: st.data || [], lessons: ls.data || [], payments: ps.data || [] };
+}
+function ledgerOf(sid, L, ym) {
+  const ls = L.lessons.filter((x) => x.student_id === sid), ps = L.payments.filter((x) => x.student_id === sid);
+  const fees = ls.reduce((a, x) => a + Number(x.fee || 0), 0), paid = ps.reduce((a, x) => a + Number(x.amount || 0), 0);
+  const mLs = ls.filter((x) => ymOf(x.lesson_date) === ym), mPs = ps.filter((x) => ymOf(x.paid_on) === ym);
+  return { ls, ps, balance: fees - paid, came: mLs.filter((x) => x.status === 'came').length, missed: mLs.filter((x) => x.status === 'missed').length,
+    mFees: mLs.reduce((a, x) => a + Number(x.fee || 0), 0), mPaid: mPs.reduce((a, x) => a + Number(x.amount || 0), 0) };
+}
+const balanceChip = (b) => (b > 0.004 ? `<span class="pchip low">Borc: ${money(b)}</span>` : b < -0.004 ? `<span class="pchip hi">Avans: ${money(-b)}</span>` : '<span class="pchip">Hesab bağlıdır</span>');
+
+async function lessonsView() {
+  if (!lessonsYm) lessonsYm = todayIso().slice(0, 7);
+  let L;
+  try { L = await loadLedger(); } catch (err) {
+    if (!err.need013) throw err;
+    view().innerHTML = `<div class="page-head"><div><h1>Dərslər</h1></div></div><p class="notice">Dərs və ödəniş dəftəri üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>013_lessons.sql</strong> → Run.</p>`;
+    return;
+  }
+  const ym = lessonsYm;
+  const classes = [...new Map(L.students.map((x) => [x.class_id, x.classes?.name || ''])).entries()];
+  let cls = '';
+  const draw = () => {
+    const list = L.students.filter((x) => !cls || x.class_id === cls);
+    const rows = list.map((x) => ({ x, g: ledgerOf(x.id, L, ym) }));
+    const sum = rows.reduce((a, r) => ({ came: a.came + r.g.came, fees: a.fees + r.g.mFees, paid: a.paid + r.g.mPaid, debt: a.debt + Math.max(0, r.g.balance) }), { came: 0, fees: 0, paid: 0, debt: 0 });
+    view().innerHTML = `
+      <div class="page-head"><div><h1>Dərslər</h1><p class="muted">Dərsləri və ödənişləri qeyd edin — borc özü hesablanır. Bunu yalnız siz görürsünüz.</p></div></div>
+      <div class="month-bar"><button class="btn small" data-ym="-1" aria-label="Əvvəlki ay">‹</button><strong>${esc(ymLabel(ym))}</strong><button class="btn small" data-ym="1" aria-label="Növbəti ay">›</button>
+        ${classes.length > 1 ? `<select id="lsClass" aria-label="Sinif" style="min-height:40px;width:auto;margin-left:auto"><option value="">Bütün siniflər</option>${classes.map(([id, n]) => `<option value="${id}" ${id === cls ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
+      <section class="grid res-stats ls-stats">
+        <div class="card stat"><div class="label">Keçilən dərs</div><div class="value">${sum.came}</div></div>
+        <div class="card stat"><div class="label">Hesablanıb / ödənilib</div><div class="value" style="font-size:22px">${money(sum.fees)} <span class="of">/ ${money(sum.paid)}</span></div></div>
+        <div class="card stat"><div class="label">Ümumi borc</div><div class="value" style="color:${sum.debt > 0 ? 'var(--red)' : 'var(--green)'}">${money(sum.debt)}</div></div>
+      </section>
+      <div class="card ls-quick">
+        <label class="row small" style="gap:8px">Tarix <input type="date" id="lsDate" value="${todayIso()}" style="min-height:40px;width:auto"></label>
+        <label class="row small" style="gap:8px;flex:1;min-width:200px">Mövzu <input type="text" id="lsTopic" maxlength="200" placeholder="istəyə bağlı, məs. Fonksiyonlar" style="min-height:40px"></label>
+        <span class="small muted">"✓ Dərs" və "✗ Gəlmədi" bu tarixlə yazılır.</span>
+      </div>
+      ${rows.length ? `<section class="card ls-list">${rows.map(({ x, g }) => `<div class="ls-row" data-sid="${x.id}">
+          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="small muted">${esc(x.classes?.name || '')} · bu ay: ${g.came} dərs${g.missed ? `, ${g.missed} buraxıb` : ''}</span></div>
+          <label class="ls-price" title="Bir dərsin qiyməti">₼<input type="number" min="0" step="0.5" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="qiymət" data-price="${x.id}" aria-label="${esc(x.full_name)}: dərs qiyməti"></label>
+          <span class="ls-bal">${balanceChip(g.balance)}</span>
+          <span class="ls-act"><button class="btn small ok" data-came="${x.id}">✓ Dərs</button><button class="btn small" data-miss="${x.id}">✗ Gəlmədi</button>
+            <button class="btn small primary" data-pay="${x.id}">+ Ödəniş</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
+        </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/classes">Siniflər</a> bölməsindən əlavə edin.</div></div>'}`;
+    $$('[data-ym]').forEach((b) => b.onclick = () => { lessonsYm = shiftYm(ym, +b.dataset.ym); route(); });
+    $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = e.target.value; draw(); });
+    const byId = Object.fromEntries(L.students.map((x) => [x.id, x]));
+    const reload = async () => { L = await loadLedger(); draw(); };
+    $$('[data-price]').forEach((inp) => inp.onchange = async () => {
+      const v = inp.value === '' ? null : Math.max(0, Number(inp.value));
+      const { error } = await sb.from('students').update({ lesson_price: v }).eq('id', inp.dataset.price);
+      if (error) return fail(error);
+      byId[inp.dataset.price].lesson_price = v;
+      toast('Qiymət yadda saxlandı');
+    });
+    const addLesson = (sid, status, btn) => busy(btn, async () => {
+      const x = byId[sid];
+      if (status === 'came' && (x.lesson_price === null || x.lesson_price === undefined || x.lesson_price === '')) {
+        if (!confirm(`${x.full_name} üçün dərs qiyməti yazılmayıb. Pulsuz dərs kimi yazılsın? (Qiyməti sətirdə ₼ xanasına yazın.)`)) return;
+      }
+      const row = { student_id: sid, status, lesson_date: $('#lsDate').value || todayIso(), fee: status === 'came' ? Number(x.lesson_price || 0) : 0, topic: $('#lsTopic').value.trim() || null };
+      const { error } = await sb.from('lessons').insert(row);
+      if (error) throw error;
+      toast(status === 'came' ? `${x.full_name}: dərs yazıldı (${money(row.fee)})` : `${x.full_name}: gəlmədi`);
+      await reload();
+    }).catch(fail);
+    $$('[data-came]').forEach((b) => b.onclick = () => addLesson(b.dataset.came, 'came', b));
+    $$('[data-miss]').forEach((b) => b.onclick = () => addLesson(b.dataset.miss, 'missed', b));
+    $$('[data-pay]').forEach((b) => b.onclick = () => {
+      const x = byId[b.dataset.pay]; const g = ledgerOf(x.id, L, ym);
+      const raw = prompt(`${x.full_name} — ödəniş məbləği (₼):`, g.balance > 0 ? String(Math.round(g.balance * 100) / 100) : String(x.lesson_price || ''));
+      if (raw === null) return;
+      const amount = Number(String(raw).replace(',', '.'));
+      if (!(amount > 0)) return toast('Məbləğ düzgün deyil', true);
+      busy(b, async () => {
+        const { error } = await sb.from('payments').insert({ student_id: x.id, amount, paid_on: $('#lsDate').value || todayIso() });
+        if (error) throw error;
+        toast(`${x.full_name}: ${money(amount)} ödəniş yazıldı`);
+        await reload();
+      }).catch(fail);
+    });
+    $$('[data-hist]').forEach((b) => b.onclick = () => openHistory(byId[b.dataset.hist], L, ym, reload));
+  };
+  draw();
+}
+
+function openHistory(x, L, ym, reload) {
+  const g = ledgerOf(x.id, L, ym);
+  const items = [...g.ls.map((l) => ({ d: l.lesson_date, t: l.created_at, kind: 'l', l })), ...g.ps.map((p) => ({ d: p.paid_on, t: p.created_at, kind: 'p', p }))]
+    .sort((a, b) => (a.d === b.d ? (a.t < b.t ? 1 : -1) : a.d < b.d ? 1 : -1));
+  const report = `${x.full_name} · ${ymLabel(ym)}: ${g.came} dərs${g.missed ? ` (${g.missed} dəfə gəlməyib)` : ''}, hesablanıb ${money(g.mFees)}, ödənilib ${money(g.mPaid)}. `
+    + (g.balance > 0.004 ? `Ümumi borc: ${money(g.balance)}.` : g.balance < -0.004 ? `Avans: ${money(-g.balance)}.` : 'Hesab bağlıdır.');
+  openDialog(esc(x.full_name) + ' · dərslər və ödənişlər', `
+    <div class="row between"><span>${balanceChip(g.balance)}</span><button type="button" class="btn small" id="hCopy">Valideyn üçün hesabatı kopyala</button></div>
+    <p class="small muted pre">${esc(report)}</p>
+    ${items.length ? `<div class="h-list">${items.map((it) => it.kind === 'l'
+      ? `<div class="h-row"><span class="h-d">${esc(fmtDayAz(it.d))}</span><span class="h-k ${it.l.status === 'came' ? 'came' : 'miss'}">${it.l.status === 'came' ? '✓ Dərs' : '✗ Gəlmədi'}</span><span class="h-t">${esc(it.l.topic || '')}</span><span class="h-m">${it.l.status === 'came' ? money(it.l.fee) : ''}</span><button class="btn small danger" data-hdl="${it.l.id}" aria-label="Sil">Sil</button></div>`
+      : `<div class="h-row"><span class="h-d">${esc(fmtDayAz(it.d))}</span><span class="h-k pay">💳 Ödəniş</span><span class="h-t">${esc(it.p.note || '')}</span><span class="h-m">+${money(it.p.amount)}</span><button class="btn small danger" data-hdp="${it.p.id}" aria-label="Sil">Sil</button></div>`).join('')}</div>`
+      : '<div class="empty">Hələ qeyd yoxdur.</div>'}`);
+  const dlg = document.getElementById('rvDialog');
+  $('#hCopy', dlg).onclick = () => copyText(report, 'Hesabat kopyalandı');
+  const del = (table, id) => async () => {
+    if (!confirm('Bu qeyd silinsin?')) return;
+    const { error } = await sb.from(table).delete().eq('id', id);
+    if (error) return fail(error);
+    dlg.close();
+    await reload();
+  };
+  $$('[data-hdl]', dlg).forEach((b) => b.onclick = del('lessons', b.dataset.hdl));
+  $$('[data-hdp]', dlg).forEach((b) => b.onclick = del('payments', b.dataset.hdp));
+}
+
 async function studentWorkView(id) {
   const { data: st, error } = await sb.from('students').select('*, classes(name)').eq('id', id).single();
   if (error) throw error;
@@ -3083,6 +3285,11 @@ async function studentWorkView(id) {
       <div class="card stat"><div class="label">Suallar</div><div class="value" style="font-size:20px"><span style="color:var(--green)">✓ ${tot.right}</span> · <span style="color:var(--red)">✗ ${tot.wrong}</span> · — ${tot.empty}</div></div>
     </section>
     <div class="split">
+      <section class="card stack secret-note"><div class="row between"><h2>🔒 Gizli qeyd</h2><span class="small muted" id="noteState">yalnız siz görürsünüz</span></div>
+        <textarea id="tNote" rows="5" maxlength="20000" placeholder="məs. Üslü sayılarda zəifdir · valideynlə danışıldı · növbəti dərsdə Kümeler">${esc(st.teacher_note || '')}</textarea></section>
+      <section class="card stack" id="ledgerCard"><h2>💳 Dərslər və ödəniş</h2><p class="muted small">Yüklənir…</p></section>
+    </div>
+    <div class="split">
       <section class="card stack"><h2>Mövzular</h2>${topicBarsHtml(topicStats(done.map((r) => ({ sub: r.sub, questions: r.questions }))), 'Hələ test yazmayıb.')}</section>
       <section class="card stack"><h2>Nəticələr</h2>${trendHtml([...done].sort((a, b) => (a.sub.created_at < b.sub.created_at ? -1 : 1)).map((r) => ({ label: r.t.title, pct: subPct(r.sub) })))}</section>
     </div>
@@ -3096,6 +3303,28 @@ async function studentWorkView(id) {
           <td>${r.sub ? `<button type="button" class="btn small" data-row="${i}">Ətraflı</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">Bu sinfin hələ testi yoxdur.</div>'}
     </section>`;
+  // gizli qeyd: yazdıqca avtomatik saxlanılır
+  let noteTimer = null;
+  $('#tNote').oninput = () => {
+    $('#noteState').textContent = 'yazılır…';
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(async () => {
+      const { error: e1 } = await sb.from('students').update({ teacher_note: $('#tNote').value.trim() || null }).eq('id', id);
+      const el = $('#noteState'); if (!el) return;
+      if (e1) { el.textContent = /teacher_note|schema cache/i.test(e1.message || '') ? 'saxlanılmadı: bazada 013_lessons.sql işə salın' : 'saxlanılmadı: ' + e1.message; el.style.color = 'var(--red)'; }
+      else { el.textContent = '✓ yadda saxlandı'; el.style.color = 'var(--green)'; }
+    }, 700);
+  };
+  loadLedger().then((L) => {
+    const box = $('#ledgerCard'); if (!box) return;
+    const g = ledgerOf(id, L, todayIso().slice(0, 7));
+    const last = g.ls.slice(0, 3);
+    box.innerHTML = `<h2>💳 Dərslər və ödəniş</h2>
+      <div class="row between">${balanceChip(g.balance)}<span class="small muted">dərs qiyməti: ${st.lesson_price === null || st.lesson_price === undefined ? '—' : money(st.lesson_price)}</span></div>
+      <p class="small">Bu ay: <strong>${g.came}</strong> dərs${g.missed ? `, ${g.missed} dəfə gəlməyib` : ''} · hesablanıb ${money(g.mFees)} · ödənilib ${money(g.mPaid)}</p>
+      ${last.length ? `<div class="small muted">Son dərslər: ${last.map((l) => `${esc(fmtDayAz(l.lesson_date))}${l.status === 'missed' ? ' (gəlmədi)' : ''}${l.topic ? ' — ' + esc(l.topic) : ''}`).join(' · ')}</div>` : ''}
+      <a class="btn small" href="#/lessons" style="align-self:flex-start">Dərslər səhifəsi ›</a>`;
+  }).catch((err) => { const box = $('#ledgerCard'); if (box) box.innerHTML = err.need013 ? '<h2>💳 Dərslər və ödəniş</h2><p class="notice">Bazada <strong>013_lessons.sql</strong> işə salın.</p>' : `<p class="notice">${esc(err.message)}</p>`; });
   $$('[data-row]').forEach((b) => b.onclick = () => {
     const r = rows[+b.dataset.row];
     openDialog(esc(st.full_name) + ' · ' + esc(r.t.title), submissionDetailHtml(r.questions, r.sub));
