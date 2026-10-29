@@ -799,6 +799,25 @@ async function fullQuestions(ids) {
 }
 const PAGE = 50;
 
+// Bankdakı kiçik kart: toxunanda böyüyür
+function bankTile(q, n, checked) {
+  const st = q.teacher_approved ? ['ok', '✔ Təsdiqlənib']
+    : (q.ai_status === 'passed' || (!q.ai_status && q.verified === true)) ? ['wait', 'Təsdiq gözləyir']
+    : (q.ai_status === 'review' || q.ai_status === 'draft' || (!q.ai_status && q.verified === false)) ? ['bad', 'Yoxlama lazımdır'] : null;
+  const opts = q.qtype === 'mcq' && Array.isArray(q.options) && q.options.length && !hasOptionFigures(q)
+    ? `<span class="qt-opts">${q.options.slice(0, 6).map((o, i) => `<span>${'ABCDEF'[i]}) ${esc(String(o).slice(0, 40))}</span>`).join('')}</span>` : '';
+  const fig = q.figure ? `<span class="qt-fig">${safeSvg(q.figure)}</span>` : hasOptionFigures(q) ? '<span class="qt-figtag">şəkilli variantlar</span>' : '';
+  return `<div class="qtile${checked ? ' picked' : ''}">
+    <button type="button" class="qt-open" data-open="${esc(q.id)}" aria-label="Sual ${n} — böyüt">
+      <span class="qt-head"><span class="qt-n">#${n}</span>${st ? `<span class="qt-st ${st[0]}">${st[1]}</span>` : ''}</span>
+      <span class="qt-text">${esc(q.body)}</span>
+      ${fig}${opts}
+      <span class="qt-meta">${q.topic ? `<span class="qt-topic">${esc(q.topic)}</span>` : ''}${q.difficulty ? `<span>${esc(q.difficulty)}</span>` : ''}${q.exam === 'tryos' ? '<span>TR-YÖS</span>' : ''}</span>
+    </button>
+    <label class="qt-check"><input type="checkbox" class="check" data-id="${esc(q.id)}" ${checked ? 'checked' : ''} aria-label="Sual ${n} seç"></label>
+  </div>`;
+}
+
 async function bankView() {
   const data = await loadQuestionIndex();
   let filter = { text: '', source: '', difficulty: '', exam: '', status: '' };
@@ -807,12 +826,12 @@ async function bankView() {
   const selected = new Set();
 
   view().innerHTML = `
-    <div class="page-head"><div><h1>Sual bankı</h1><p class="muted">${data.length} sual. Seçib test yarada bilərsiniz.</p></div>
+    <div class="page-head"><div><h1>Sual bankı</h1><p class="muted">${data.length} sual. Suala basın — böyüyəcək. Küncdəki qutu ilə seçin.</p></div>
       <div class="row"><button class="btn" id="toggleManual">+ Əl ilə sual</button><button class="btn" id="selAll">Görünənləri seç</button><button class="btn" id="makePdf" disabled>PDF (0)</button><button class="btn primary" id="makeTest" disabled>Seçilənlərdən test (0)</button></div></div>
     <form class="card stack" id="manual" hidden></form>
     <div class="card stack">
-      <div class="form-grid">
-        <label class="field">Axtar<input type="search" id="fText" placeholder="mətn və ya mövzu"></label>
+      <div class="form-grid bank-filters">
+        <label class="field search">Axtar<input type="search" id="fText" placeholder="mətn və ya mövzu"></label>
         <label class="field">Mənbə<select id="fSource"><option value="">Hamısı</option><option value="ai">AI</option><option value="book">Kitabdan</option><option value="manual">Əl ilə</option></select></label>
         <label class="field">Çətinlik<select id="fDiff"><option value="">Hamısı</option>${DIFF.map((d) => `<option>${d}</option>`).join('')}</select></label>
         <label class="field">Format<select id="fExam"><option value="">Hamısı</option><option value="tryos">TR-YÖS</option><option value="general">Ümumi</option></select></label>
@@ -839,26 +858,59 @@ async function bankView() {
     const byId = Object.fromEntries(full.map((q) => [q.id, { ...q, teacher_approved: data.find((d) => d.id === q.id)?.teacher_approved }]));
     $('#shownInfo').textContent = rows.length > page.length ? `${rows.length} uyğun sualdan ${page.length} göstərilir` : (rows.length && rows.length !== data.length ? `${rows.length} uyğun sual` : '');
     $('#list').innerHTML = rows.length
-      ? page.map((q) => questionHtml(byId[q.id] || q, { selectable: true, checked: selected.has(q.id), actions: `<button class="btn small" data-approve="${q.id}">${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button><button class="btn small danger" data-del="${q.id}">Sil</button>` })).join('')
+      ? `<div class="qgrid">${page.map((q, i) => bankTile(byId[q.id] || q, i + 1, selected.has(q.id))).join('')}</div>`
       : `<div class="empty">${data.length ? 'Uyğun sual tapılmadı.' : 'Bank boşdur. <a href="#/pdf">Kitabdan</a> və ya <a href="#/ai">AI ilə</a> sual əlavə edin.'}</div>`;
     $('#more').innerHTML = rows.length > page.length ? `<button class="btn block" id="moreBtn">Daha çox göstər (${rows.length - page.length} qalıb)</button>` : '';
     if ($('#moreBtn')) $('#moreBtn').onclick = () => { shown += PAGE; renderList(); };
-    $$('#list .check').forEach((c) => c.onchange = () => { c.checked ? selected.add(c.dataset.id) : selected.delete(c.dataset.id); updateBtn(); });
-    $$('#list [data-approve]').forEach((b) => b.onclick = async () => {
-      const q = data.find((x) => x.id === b.dataset.approve);
-      const { error: err } = await sb.from('questions').update({ teacher_approved: !q.teacher_approved }).eq('id', q.id);
+    $$('#list .check').forEach((c) => c.onchange = () => { c.checked ? selected.add(c.dataset.id) : selected.delete(c.dataset.id); c.closest('.qtile').classList.toggle('picked', c.checked); updateBtn(); });
+    $$('#list [data-open]').forEach((b) => b.onclick = () => openBankQ(b.dataset.open).catch(fail));
+  };
+  // Böyük pəncərə: bir sual, əvvəlki/sonrakı, təsdiq, seçim, silmə
+  const openBankQ = async (id) => {
+    const idx = visible.findIndex((q) => q.id === id);
+    if (idx < 0) return;
+    const [full] = await fullQuestions([id]);
+    const meta = data.find((x) => x.id === id);
+    const q = { ...(full || meta), teacher_approved: meta.teacher_approved };
+    let dlg = document.getElementById('bankDlg');
+    if (!dlg) {
+      dlg = document.createElement('dialog');
+      dlg.id = 'bankDlg';
+      dlg.className = 'q-dialog';
+      $app.appendChild(dlg);
+      dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+    }
+    dlg.onclose = () => renderList();
+    const sel = selected.has(id);
+    dlg.innerHTML = `<div class="q-dialog-in">
+      <div class="row between"><h2>Sual ${idx + 1} / ${visible.length}</h2><button type="button" class="btn small" data-close aria-label="Bağla">✕ Bağla</button></div>
+      ${!q.teacher_approved && (q.ai_status === 'draft' || q.ai_status === 'review') ? '<p class="notice">AI yoxlaması keçməyib. Sualı, cavabı və həlli özünüz yoxlayın; düzgündürsə təsdiqləyin.</p>' : ''}
+      <div class="dlg-q">${questionHtml(q)}</div>
+      <div class="dlg-foot">
+        <div class="row"><button type="button" class="btn" data-nav="-1" ${visible.length < 2 ? 'disabled' : ''}>‹ Əvvəlki</button><button type="button" class="btn" data-nav="1" ${visible.length < 2 ? 'disabled' : ''}>Sonrakı ›</button></div>
+        <div class="row"><button type="button" class="btn danger" data-del>Sil</button>
+          <button type="button" class="btn ${q.teacher_approved ? '' : 'ok'}" data-approve>${q.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button>
+          <button type="button" class="btn primary" data-pick>${sel ? '✓ Seçilib' : 'Seç'}</button></div>
+      </div></div>`;
+    $('[data-close]', dlg).onclick = () => dlg.close();
+    $$('[data-nav]', dlg).forEach((b) => b.onclick = () => openBankQ(visible[(idx + +b.dataset.nav + visible.length) % visible.length].id).catch(fail));
+    $('[data-pick]', dlg).onclick = () => { sel ? selected.delete(id) : selected.add(id); updateBtn(); openBankQ(id).catch(fail); };
+    $('[data-approve]', dlg).onclick = async () => {
+      const { error: err } = await sb.from('questions').update({ teacher_approved: !meta.teacher_approved }).eq('id', id);
       if (err) return fail(/column|schema cache/i.test(err.message || '') ? new Error('Baza yenilənməyib: supabase/004_status.sql faylını işə salın.') : err);
-      q.teacher_approved = !q.teacher_approved;
-      renderList();
-    });
-    $$('#list [data-del]').forEach((b) => b.onclick = async () => {
+      meta.teacher_approved = !meta.teacher_approved;
+      toast(meta.teacher_approved ? 'Təsdiqləndi' : 'Təsdiq götürüldü');
+      openBankQ(id).catch(fail);
+    };
+    $('[data-del]', dlg).onclick = async () => {
       if (!confirm('Sual silinsin?')) return;
-      const { error: err } = await sb.from('questions').delete().eq('id', b.dataset.del);
+      const { error: err } = await sb.from('questions').delete().eq('id', id);
       if (err) return fail(err);
-      data.splice(data.findIndex((q) => q.id === b.dataset.del), 1);
-      selected.delete(b.dataset.del);
-      updateBtn(); renderList();
-    });
+      data.splice(data.findIndex((x) => x.id === id), 1);
+      selected.delete(id);
+      updateBtn(); dlg.close();
+    };
+    if (!dlg.open) dlg.showModal();
   };
   const updateBtn = () => {
     const b = $('#makeTest'); b.disabled = !selected.size; b.textContent = `Seçilənlərdən test (${selected.size})`;

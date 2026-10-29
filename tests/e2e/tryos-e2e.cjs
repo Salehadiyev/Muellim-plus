@@ -47,7 +47,7 @@ const mkQ=(it,i)=>{ n++; const fig = it.visual!=='yok';
  await p.click('#pDownload'); await p.waitForFunction(()=>window.__pdf); console.log('download:', JSON.stringify(await p.evaluate(()=>window.__pdf)), 'captures:', await p.evaluate(()=>window.__cap));
  await p.selectOption('#pPer','6'); await p.waitForTimeout(1500); console.log('sheets (6/page):', await p.$$eval('.sheet',x=>x.length));
  await p.click('[data-pm=solutions]'); await p.waitForTimeout(300); await p.evaluate(()=>{window.__pdf=null}); await p.click('#pDownload'); await p.waitForFunction(()=>window.__pdf); console.log('solutions download:', JSON.stringify(await p.evaluate(()=>window.__pdf))); console.log('solutions items:', await p.$$eval('.sol-item',x=>x.length));
- await p.click('.print-toolbar a'); await p.waitForSelector('#list .q'); await p.click('#selAll');
+ await p.click('.print-toolbar a'); await p.waitForSelector('#list .qtile'); await p.click('#selAll');
  // student page shows figures
  await p.click('#makeTest'); await p.waitForSelector('#newTest'); await p.fill('#newTest input[name=title]','YÖS'); await p.click('#newTest button[type=submit]'); await p.waitForSelector('#copy');
  const id=p.url().split('/test/')[1]; const sp=await ctx.newPage(); sp.on('pageerror',e=>errors.push(e.message));
