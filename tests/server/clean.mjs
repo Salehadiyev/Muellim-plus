@@ -1,0 +1,24 @@
+process.env.ANTHROPIC_API_KEY='a'; process.env.SUPABASE_URL='https://x'; process.env.SUPABASE_ANON_KEY='a';
+const mod = await import(new URL('../../api/ai.js', import.meta.url).href + '?' + Date.now());
+let replies=[]; const sent=[];
+globalThis.fetch = async (url, opt) => {
+  if (url.includes('/auth/')) return { ok: true, json: async () => ({ id: 'u' }) };
+  if (url.includes('/rpc/ai_gate')) return { ok: false, status: 404, text: async () => 'PGRST202' };
+  if (url.includes('/rest/v1/')) return { ok: true, text: async()=>'' };
+  sent.push(JSON.parse(opt.body)); const text=replies.shift();
+  return { ok:true, json: async()=>({content:[{type:'text',text}],usage:{}}) };
+};
+const call = (b) => new Promise(r => mod.default({ method:'POST', headers:{authorization:'Bearer t'}, body:b }, { status(c){this.c=c;return this}, json(d){r([this.c,d])} }));
+const img='data:image/jpeg;base64,QUJD';
+const svg=(k)=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="${k}" cy="5" r="3"/></svg>`;
+replies=[JSON.stringify({question:{body:'$2x+3=11$ ise $x$ kaçtır?',options:['2','3','4','5'],correct_index:2,solution:'x=4'},unreadable:['alt sətir bulanıq']})];
+let [c,d]=await call({action:'clean_copy',model:'opus',image:img,text:'t',analysis:{topic:'Denklem',section:'matematik'}});
+const t=JSON.stringify(sent[0]);
+console.log('4-option clean copy:', c, d.questions?.[0]?.answer, d.questions?.[0]?.options.length, d.questions?.[0]?.unreadable, '| img sent', t.includes('QUJD'), '| model', sent[0].model, '| has original rule', t.includes('ORİJİNAL TƏMİZ NÜSXƏ'));
+replies=[JSON.stringify({question:{body:'q',options:['A','B','C','D','E'],option_figures:[svg(1),svg(2)],correct_index:0}})];
+[c,d]=await call({action:'clean_copy',model:'opus',image:img,analysis:{options_are_figures:true}});
+console.log('incomplete option figs:', c, d.error);
+[c,d]=await call({action:'clean_copy',model:'opus'}); console.log('no image:', c, d.error);
+sent.length=0; replies=[JSON.stringify({questions:[{sample:0,body:'q',options:['1','2','3','4'],correct_index:0}]})];
+[c,d]=await call({action:'tryos_from_examples',model:'opus',mode:'original',perSample:1,samples:[{text:'t'}]});
+console.log('generation still requires 5 options:', c, d.error, '| mode original ignored→', JSON.stringify(sent[0]).includes('Rejim: BƏNZƏR'));

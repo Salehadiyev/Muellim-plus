@@ -1,0 +1,12 @@
+{
+  "name": "muellim-plus-tests",
+  "private": true,
+  "description": "Müəllim+ avtomatik sınaqları (sayta yüklənmir)",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "4.10.38",
+    "playwright": "1.63.0"
+  }
+}

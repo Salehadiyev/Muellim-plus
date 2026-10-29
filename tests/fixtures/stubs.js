@@ -1,0 +1,2 @@
+window.html2canvas = async (el, o) => { const r = el.getBoundingClientRect(); const c = document.createElement('canvas'); c.width = Math.round(r.width * o.scale); c.height = Math.round(r.height * o.scale); window.__cap = (window.__cap||0)+1; return c; };
+window.jspdf = { jsPDF: function () { this.pages = 1; this.images = 0; this.addPage = () => { this.pages++; }; this.addImage = () => { this.images++; }; this.save = (n) => { window.__pdf = { pages: this.pages, images: this.images, name: n }; }; } };

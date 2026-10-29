@@ -1,0 +1,43 @@
+name: Sınaqlar
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Asılılıqlar
+        run: npm install --prefix tests --no-audit --no-fund
+      - name: Brauzer
+        run: npx --prefix tests playwright install --with-deps chromium
+      - name: Baza sınaqları (miqrasiyalar + təhlükəsizlik)
+        run: tests/sql/run.sh
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+      - name: Brauzer və server sınaqları
+        run: node tests/run.mjs
+      - name: Ekran şəkilləri (uğursuz olanda)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ekranlar
+          path: tests/out
+          retention-days: 3
