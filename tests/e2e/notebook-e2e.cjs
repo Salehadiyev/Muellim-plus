@@ -19,6 +19,10 @@ const DB = {
     if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : '' });
     if (u.hostname !== 'app.test') return route.abort();
     if (u.pathname === '/api/config') return route.fulfill({ json: { supabaseUrl: 'x', supabaseAnonKey: 'k', models: [] } });
+    if (u.pathname === '/api/ai') { const bd = JSON.parse(route.request().postData());
+      if (bd.action === 'tryos_from_examples') return route.fulfill({ json: { questions: [{ body: 'AI bənzər: 2+3=?', qtype: 'mcq', options: ['4', '5', '6', '7', '8'], answer: '5', solution: 's', exam: 'tryos', section: 'matematik', topic: 'Sayılar', difficulty: 'asan' }], rejected: [] } });
+      if (bd.action === 'verify') return route.fulfill({ json: { results: [{ ok: false, correct: { ok: false, issues: ['kor həll başqa cavab tapdı'] }, fit: { ok: true, issues: [] } }] } });
+      return route.fulfill({ json: {} }); }
     const f = path.join(ROOT, u.pathname === '/' ? 'index.html' : u.pathname); route.fulfill({ contentType: f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html', body: fs.readFileSync(f) }); });
   const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept());
   const db = () => p.evaluate(() => JSON.parse(localStorage.getItem('mockdb')));
@@ -60,6 +64,18 @@ const DB = {
   console.log('teacher stats:', await p.$$eval('#mkPane .stat .value', (x) => x.map((e) => e.textContent.trim()).join(' | ')), '| gen btn:', (await p.textContent('#mkGen')).trim());
   console.log('teacher rows:', await p.$$eval('#mkPane .srow', (x) => x.map((e) => e.textContent.replace(/\s+/g, ' ').trim()).join(' || ')));
   await p.screenshot({ path: path.join(T, 'nb3-teacher.png'), fullPage: true });
+  await p.click('#mkGen'); await p.waitForSelector('#mkPane .warn-list li', { timeout: 20000 });
+  console.log('gen note:', (await p.textContent('#mkPane .warn-list li')).trim());
+  console.log('tile label:', (await p.textContent('#mkPane .qstat .qs-p')).trim(), '| draft notice:', await p.isVisible('#mkPane .notice'));
+  await p.click('#mkPane .qstat'); await p.waitForSelector('#rvDialog[open] .pair-view');
+  console.log('pair:', await p.$$eval('#rvDialog .pair-view .q-text', (x) => x.map((e) => e.textContent.trim()).join(' || ')));
+  await p.screenshot({ path: path.join(T, 'nb4-pair.png') });
+  await p.click('#rvDialog [data-sapp]'); await p.waitForSelector('#rvDialog >> text=Təsdiqi götür'); await p.click('#rvDialog [data-close]');
+  await p.waitForFunction(() => (document.querySelector('#mkPane .qstat .qs-p')?.textContent || '').includes('bənzəri var'));
+  console.log('after approve:', (await p.textContent('#mkPane .qstat .qs-p')).trim());
+  await p.goto('http://app.test/#/bank'); await p.waitForSelector('#list .qtile'); await p.selectOption('#fSource', 'similar');
+  await p.waitForFunction(() => document.querySelectorAll('#list .qtile').length === 2);
+  console.log('bank similar:', await p.$$eval('#list .qtile', (x) => x.map((e) => e.querySelector('.qt-text').textContent.trim() + (e.querySelector('.qt-sim') ? ' [↔]' : '')).join(' | ')));
   // 5) 010 olmayan baza: portal və müəllim bölməsi sınmır
   d = await db(); delete d.mistakes; await setDb(d);
   await p.goto('http://app.test/#/class/c1'); await p.reload(); await p.click('[data-ctab=mk]'); await p.waitForSelector('#mkPane .notice');

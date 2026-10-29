@@ -603,3 +603,7 @@ a.seg-b { text-decoration: none; }
 .student .opt-choice.wrong, .student .opt-choice.wrong:has(input:checked) { border: 2px solid var(--red); background: var(--red-soft); }
 .student .brand-mark { background: var(--nav); color: #fff !important; }
 .res-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.qt-sim { background: #EFEDFC; color: #4C3DB5; border-radius: 6px; padding: 3px 8px; font-weight: 700; }
+.pair-view { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.pair-view > div { border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px; }
+.pair-lbl { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding-top: 10px; }

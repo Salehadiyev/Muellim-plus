@@ -748,7 +748,7 @@ const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => CODE_ABC[b % 31]).join('');
 
 // Sinfin səhv dəftəri (müəllim): kimdə neçə sual, ən çox səhv edilənlər, AI ilə bənzər hazırlamaq
-async function classMistakes(box, students) {
+async function classMistakes(box, students, notes = []) {
   if (!students.length) { box.innerHTML = '<div class="empty">Sinifdə şagird yoxdur.</div>'; return; }
   const { data: rows, error } = await sb.from('mistakes').select('id, student_id, question_id, status, attempts, due_at').in('student_id', students.map((x) => x.id));
   if (error) {
@@ -767,39 +767,72 @@ async function classMistakes(box, students) {
   const qIds = Object.keys(qCount);
   const [qs, { data: sims }] = await Promise.all([
     qIds.length ? fullQuestions(qIds) : [],
-    qIds.length ? sb.from('questions').select('id, similar_to').in('similar_to', qIds) : { data: [] }
+    qIds.length ? sb.from('questions').select('id, similar_to, ai_status, verified, teacher_approved').in('similar_to', qIds) : { data: [] }
   ]);
-  const hasSim = new Set((sims || []).map((x) => x.similar_to));
+  // hər orijinal üçün: 'ok' (şagirdə verilə bilən bənzər var) | 'draft' (yalnız təsdiq gözləyən)
+  const simState = {};
+  (sims || []).forEach((x) => {
+    const good = x.teacher_approved || x.ai_status === 'passed' || (!x.ai_status && x.verified === true);
+    if (good) simState[x.similar_to] = 'ok'; else if (!simState[x.similar_to]) simState[x.similar_to] = 'draft';
+  });
   const top = qs.slice().sort((a, b) => qCount[b.id] - qCount[a.id]);
-  const need = top.filter((q) => !hasSim.has(q.id) && q.qtype === 'mcq');
+  const need = top.filter((q) => !simState[q.id] && q.qtype === 'mcq');
+  const drafts = top.filter((q) => simState[q.id] === 'draft').length;
   const name = Object.fromEntries(students.map((x) => [x.id, x.full_name]));
+  const SIM_LABEL = { ok: ['hi', '✓ bənzəri var'], draft: ['mid', 'bənzəri təsdiq gözləyir'] };
   box.innerHTML = `
-    <p class="small muted" style="margin:0">Şagird testdə səhv etdiyi sual avtomatik dəftərinə düşür. Bir gün sonra öz linkində ona <strong>bənzər sual</strong> çıxır: düz tapsa dəftərdən silinir, səhv etsə 2 gün sonra başqa bənzəri gəlir. Bənzərlər bankdan götürülür: əvvəl AI ilə hazırladığınız bənzərlər, sonra eyni mövzudakı suallar.</p>
+    <p class="small muted" style="margin:0">Şagird testdə səhv etdiyi sual avtomatik dəftərinə düşür. Bir gün sonra öz linkində ona <strong>bənzər sual</strong> çıxır: düz tapsa dəftərdən silinir, səhv etsə 2 gün sonra başqa bənzəri gəlir. Bənzərlər bankdan götürülür: əvvəl AI ilə hazırladığınız (yoxlanmış və ya təsdiqlədiyiniz) bənzərlər, sonra eyni mövzudakı suallar.</p>
     <div class="grid res-stats">
       <div class="card stat"><div class="label">Dəftərdə</div><div class="value">${open.length}</div></div>
       <div class="card stat"><div class="label">Düzəldilib</div><div class="value" style="color:var(--green)">${cleared}</div></div>
       <div class="card stat"><div class="label">Bənzəri yoxdur</div><div class="value">${need.length}</div></div>
     </div>
+    ${notes.length ? `<div class="card stack" style="background:#FFFBF5"><strong>Son hazırlama</strong><ul class="warn-list">${notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
     ${need.length ? `<div class="nb-gen"><span><strong>${need.length}</strong> sualın hələ AI ilə hazırlanmış bənzəri yoxdur (indi eyni mövzudan və ya sualın özü verilir).</span>
       <button class="btn primary" id="mkGen">✨ Bənzərləri AI ilə hazırla (${need.length})</button></div><p class="small muted" id="mkProg" role="status" aria-live="polite"></p>` : ''}
+    ${drafts ? `<p class="notice"><strong>${drafts}</strong> sualın bənzəri yoxlamadan keçməyib və qaralama kimi saxlanılıb. Aşağıda "bənzəri təsdiq gözləyir" yazılan suala basın, bənzərə baxın: düzgündürsə <strong>✔ Təsdiqlə</strong>, deyilsə <strong>Sil</strong> (sonra yenidən hazırlaya bilərsiniz). Təsdiqlənməyən qaralama şagirdə verilmir.</p>` : ''}
     <h3>Şagirdlər</h3>
     ${rows.length ? `<div class="slist">${students.filter((x) => per[x.id]).sort((a, b) => per[b.id].open - per[a.id].open).map((x) => `<div class="srow">
         <a class="s-name" href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a>
         <span class="row" style="gap:8px">${per[x.id].open ? `<span class="pchip low">${per[x.id].open} dəftərdə</span>` : ''}${per[x.id].cleared ? `<span class="pchip hi">✓ ${per[x.id].cleared}</span>` : ''}</span></div>`).join('')}</div>`
       : '<div class="empty">Dəftər boşdur: hələ heç kim səhv etməyib (və ya test yazılmayıb).</div>'}
-    ${top.length ? `<h3>Ən çox səhv edilən suallar</h3><div class="qstat-grid">${top.slice(0, 12).map((q, i) => `<button type="button" class="qstat" data-mq="${i}">
-        <span class="qs-head"><strong>${qCount[q.id]} şagird</strong>${hasSim.has(q.id) ? '<span class="qs-p hi">bənzəri var</span>' : '<span class="qs-p mid">bənzəri yoxdur</span>'}</span>
-        <span class="qs-text">${esc(q.body)}</span></button>`).join('')}</div>` : ''}`;
-  $$('[data-mq]', box).forEach((b) => b.onclick = () => {
-    const q = top[+b.dataset.mq];
+    ${top.length ? `<div class="row between"><h3>Dəftərdəki suallar</h3><span class="small muted">Basın: sual və bənzərləri açılır</span></div><div class="qstat-grid">${top.map((q, i) => { const sl = SIM_LABEL[simState[q.id]] || ['low', 'bənzəri yoxdur']; return `<button type="button" class="qstat" data-mq="${i}">
+        <span class="qs-head"><strong>${qCount[q.id]} şagird</strong><span class="qs-p ${sl[0]}">${sl[1]}</span></span>
+        <span class="qs-text">${esc(q.body)}</span></button>`; }).join('')}</div>` : ''}`;
+  const refresh = () => classMistakes(box, students).catch(fail);
+  const openPair = async (q) => {
+    const { data: list, error: e2 } = await sb.from('questions').select('*').eq('similar_to', q.id).order('created_at', { ascending: false });
+    if (e2) return fail(e2);
     const who = open.filter((r) => r.question_id === q.id).map((r) => esc(name[r.student_id] || '')).join(', ');
-    openDialog('Dəftərdəki sual', `<p class="small muted">Səhv edənlər: ${who}</p>` + questionHtml(q));
-  });
+    openDialog('Dəftərdəki sual və bənzərləri', `<p class="small muted">Səhv edənlər: ${who}</p>
+      <div class="pair-view"><div><div class="pair-lbl">Orijinal (testdəki sual)</div>${questionHtml(q, { actions: '' })}</div>
+      <div><div class="pair-lbl">Bənzərlər${list.length ? ` · ${list.length}` : ''}</div>${list.length ? list.map((x) => questionHtml(x, { actions: `<button class="btn small ${x.teacher_approved ? '' : 'ok'}" data-sapp="${x.id}">${x.teacher_approved ? 'Təsdiqi götür' : '✔ Təsdiqlə'}</button><button class="btn small danger" data-sdel="${x.id}">Sil</button>` })).join('')
+        : '<div class="empty">Hələ bənzər yoxdur. "✨ Bənzərləri AI ilə hazırla" düyməsini basın.</div>'}</div></div>`);
+    const dlg = document.getElementById('rvDialog');
+    $$('[data-sapp]', dlg).forEach((btn) => btn.onclick = async () => {
+      const x = list.find((y) => y.id === btn.dataset.sapp);
+      const { error: e3 } = await sb.from('questions').update({ teacher_approved: !x.teacher_approved }).eq('id', x.id);
+      if (e3) return fail(e3);
+      fullCache.delete(x.id);
+      toast(x.teacher_approved ? 'Təsdiq götürüldü' : 'Təsdiqləndi — şagirdə veriləcək');
+      await openPair(q); refresh();
+    });
+    $$('[data-sdel]', dlg).forEach((btn) => btn.onclick = async () => {
+      if (!confirm('Bu bənzər sual bankdan silinsin?')) return;
+      const { error: e3 } = await sb.from('questions').delete().eq('id', btn.dataset.sdel);
+      if (e3) return fail(e3);
+      toast('Silindi');
+      await openPair(q); refresh();
+    });
+  };
+  $$('[data-mq]', box).forEach((b) => b.onclick = () => openPair(top[+b.dataset.mq]).catch(fail));
   const gen = $('#mkGen', box);
   if (gen) gen.onclick = () => {
     if (!confirm(`${need.length} sual üçün AI bənzər sual hazırlayacaq (hər biri yoxlanılır). Davam edilsin?`)) return;
     busy(gen, async () => {
-      let ok = 0, bad = 0, done = 0;
+      let ok = 0, draft = 0, done = 0;
+      const report = [];
+      const short = (t) => String(t || '').replace(/\s+/g, ' ').slice(0, 50) + (String(t || '').length > 50 ? '…' : '');
       const q = makeQueue(3);
       await Promise.all(need.map((orig) => q(async () => {
         try {
@@ -807,17 +840,24 @@ async function classMistakes(box, students) {
           const text = orig.body + '\n' + (orig.options || []).map((o, j) => `${'ABCDE'[j]}) ${o}`).join('\n');
           const r = await callAI('tryos_from_examples', { samples: [{ text, image: img, topic: orig.topic || '', section: orig.section || 'matematik' }], mode: 'benzer', perSample: 1 });
           const nq = r.questions?.[0];
-          if (!nq) throw new Error('boş cavab');
+          if (!nq) throw new Error('AI sual qaytarmadı' + (r.rejected?.length ? ': ' + r.rejected.map((x) => x.reason).join('; ') : ''));
           const passed = await checkQuestion(nq, { mode: 'benzer', sample: { text, image: img } });
-          if (!passed) { bad++; return; }
+          if (!passed) {
+            nq.ai_status = 'draft';
+            draft++;
+            report.push(`«${short(orig.body)}» — bənzəri yoxlamadan keçmədi, qaralama kimi saxlandı: ${[nq.verify_note, nq.fit_note].filter(Boolean).join('; ') || 'səbəb göstərilməyib'}`);
+          } else ok++;
           await saveQuestions([{ ...nq, topic: nq.topic || orig.topic, subtype: orig.subtype || nq.subtype, difficulty: orig.difficulty || nq.difficulty, similar_to: orig.id }], 'ai');
-          ok++;
-        } catch (err) { if (err.expected) throw err; bad++; }
+        } catch (err) {
+          if (err.expected) throw err;
+          report.push(`«${short(orig.body)}» — alınmadı: ${err.message}`);
+        }
         done++;
         const pr = $('#mkProg'); if (pr) pr.textContent = `Hazırlanır: ${done} / ${need.length}…`;
       })));
-      toast(`${ok} bənzər sual hazırlanıb banka əlavə olundu${bad ? `, ${bad} alınmadı` : ''}`, !ok && bad > 0);
-      classMistakes(box, students).catch(fail);
+      const failed = need.length - ok - draft;
+      toast(`${ok} bənzər hazırdır${draft ? `, ${draft} qaralama (baxıb təsdiqləyin)` : ''}${failed ? `, ${failed} alınmadı` : ''}`, !ok);
+      classMistakes(box, students, report).catch(fail);
     }).catch(fail);
   };
 }
@@ -938,10 +978,15 @@ async function classView(id) {
 
 // ---- Böyük bank üçün: əvvəl yüngül indeks (şəkilsiz), görünən suallar üçün tam sətir ----
 const Q_LIGHT = 'id, body, topic, subtype, source, difficulty, exam, qtype, options, answer, ai_status, verified, teacher_approved, created_at';
+let hasSimilarCol = true; // 010 işlədilməyibsə similar_to sütunu yoxdur
 async function loadQuestionIndex() {
   const out = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('questions').select(Q_LIGHT).order('created_at', { ascending: false }).range(from, from + 999);
+    let { data, error } = await sb.from('questions').select(Q_LIGHT + (hasSimilarCol ? ', similar_to' : '')).order('created_at', { ascending: false }).range(from, from + 999);
+    if (error && hasSimilarCol && /similar_to/.test(error.message || '')) {
+      hasSimilarCol = false;
+      ({ data, error } = await sb.from('questions').select(Q_LIGHT).order('created_at', { ascending: false }).range(from, from + 999));
+    }
     if (error) throw error;
     out.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -973,7 +1018,7 @@ function bankTile(q, n, checked) {
       <span class="qt-head"><span class="qt-n">#${n}</span>${st ? `<span class="qt-st ${st[0]}">${st[1]}</span>` : ''}</span>
       <span class="qt-text">${esc(q.body)}</span>
       ${fig}${opts}
-      <span class="qt-meta">${q.topic ? `<span class="qt-topic">${esc(q.topic)}</span>` : ''}${q.difficulty ? `<span>${esc(q.difficulty)}</span>` : ''}${q.exam === 'tryos' ? '<span>TR-YÖS</span>' : ''}</span>
+      <span class="qt-meta">${q.similar_to ? '<span class="qt-sim" title="Səhv dəftəri üçün bənzər">↔ bənzər</span>' : ''}${q.topic ? `<span class="qt-topic">${esc(q.topic)}</span>` : ''}${q.difficulty ? `<span>${esc(q.difficulty)}</span>` : ''}${q.exam === 'tryos' ? '<span>TR-YÖS</span>' : ''}</span>
     </button>
     <label class="qt-check"><input type="checkbox" class="check" data-id="${esc(q.id)}" ${checked ? 'checked' : ''} aria-label="Sual ${n} seç"></label>
   </div>`;
@@ -993,7 +1038,7 @@ async function bankView() {
     <div class="card stack">
       <div class="form-grid bank-filters">
         <label class="field search">Axtar<input type="search" id="fText" placeholder="mətn və ya mövzu"></label>
-        <label class="field">Mənbə<select id="fSource"><option value="">Hamısı</option><option value="ai">AI</option><option value="book">Kitabdan</option><option value="manual">Əl ilə</option></select></label>
+        <label class="field">Mənbə<select id="fSource"><option value="">Hamısı</option><option value="ai">AI</option><option value="book">Kitabdan</option><option value="manual">Əl ilə</option><option value="similar">Səhv dəftəri bənzərləri</option></select></label>
         <label class="field">Çətinlik<select id="fDiff"><option value="">Hamısı</option>${DIFF.map((d) => `<option>${d}</option>`).join('')}</select></label>
         <label class="field">Format<select id="fExam"><option value="">Hamısı</option><option value="tryos">TR-YÖS</option><option value="general">Ümumi</option></select></label>
         <label class="field">Status<select id="fStatus"><option value="">Hamısı</option><option value="approved">Müəllim təsdiqləyib</option><option value="passed">AI keçib, təsdiq gözləyir</option><option value="review">Yoxlama tələb edir / qaralama</option></select></label>
@@ -1007,7 +1052,7 @@ async function bankView() {
   const renderList = async () => {
     const seq = ++renderSeq;
     const t = filter.text.toLocaleLowerCase('az');
-    const rows = data.filter((q) => (!filter.source || q.source === filter.source) && (!filter.difficulty || q.difficulty === filter.difficulty)
+    const rows = data.filter((q) => (!filter.source || (filter.source === 'similar' ? !!q.similar_to : q.source === filter.source)) && (!filter.difficulty || q.difficulty === filter.difficulty)
       && (!filter.exam || (q.exam || 'general') === filter.exam)
       && (!filter.status || (filter.status === 'approved' ? q.teacher_approved : filter.status === 'passed' ? (!q.teacher_approved && (q.ai_status === 'passed' || (!q.ai_status && q.verified === true))) : (!q.teacher_approved && (q.ai_status === 'review' || q.ai_status === 'draft' || (!q.ai_status && q.verified === false)))))
       && (!t || (q.body + ' ' + (q.topic || '') + ' ' + (q.subtype || '')).toLocaleLowerCase('az').includes(t)));
