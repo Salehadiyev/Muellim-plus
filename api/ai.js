@@ -96,7 +96,7 @@ export default async function handler(req, res) {
       verify: () => verify(body),
       tryos_analyze: () => tryosAnalyze(body),
       tryos_from_examples: async () => tag(await tryosFromExamples(body)),
-      clean_copy: async () => tag(await cleanCopy(body))
+      clean_copy: () => cleanCopy(body)
     };
     if (!actions[action]) return res.status(400).json({ error: 'Naməlum əməliyyat' });
     const store = { calls: [], genModel: body._model };
@@ -303,13 +303,14 @@ ${TRYOS_MODES.original}
 - Oxunmayan hissə varsa uydurma: "unreadable" siyahısına yaz.
 ${feedback ? 'Əvvəlki cəhd yoxlamadan keçmədi. Bu problemləri düzəlt (orijinaldan uzaqlaşmadan):\n' + feedback : ''}
 Bu formada qaytar: {"question": ${TRYOS_QUESTION_SHAPE}, "unreadable": []}` }];
-  const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 16000, model: b._model });
+  // Təmiz nüsxəni (şəkil çəkmə daxil) köməkçi model hazırlayır: Claude Sonnet, o işləməsə başqa qoşulu model
+  const data = await askJSON(content, { system: TRYOS_SYSTEM, maxTokens: 16000 });
   const res = normalizeTryos(data.question, {
     topic: a.topic || '', section: a.section || 'matematik', subtype: '', difficulty: a.difficulty || 'orta'
   }, { figureRequired: a.figure_required === true, optionsAreFigures: a.options_are_figures === true, optionCounts: [4, 5] });
   if (res.error) throw publicError('Təmiz nüsxə alınmadı: ' + res.error, 502);
   const unreadable = (Array.isArray(data.unreadable) ? data.unreadable : []).map((x) => String(x).slice(0, 200)).filter(Boolean).slice(0, 6);
-  return { questions: [{ ...res.q, unreadable }] };
+  return { questions: [{ ...res.q, unreadable, model: usageStore.getStore()?.lastHelper || 'sonnet' }] };
 }
 
 async function extract(b) {
@@ -689,7 +690,9 @@ async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HE
   let last;
   for (const m of chain) {
     try {
-      return await askOnce(m, system, content, maxTokens);
+      const out = await askOnce(m, system, content, maxTokens);
+      if (store) store.lastHelper = m.key;
+      return out;
     } catch (err) {
       last = err;
       // balans/açar problemi olan provayder bu sorğuda bir daha sınanmasın

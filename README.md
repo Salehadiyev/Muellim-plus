@@ -73,7 +73,7 @@ Supabase → **Authentication → URL Configuration** → **Site URL** yerinə V
 
 ## Testə PDF-dən sual
 - Testlər → Yeni test → **Kitabdan / PDF-dən sual**: istənilən PDF və ya şəkil açılır, sual çərçivəyə alınır, aşağıda seçim çıxır:
-  - **Orijinalı təmiz çıxart** (`clean_copy`): sual dəyişmədən, kitabın dilində yenidən yazılır, şəkillər SVG ilə çəkilir, cavab tapılır (4–5 variant).
+  - **Orijinalı təmiz çıxart** (`clean_copy`, həmişə köməkçi model — Claude Sonnet, o işləməsə başqası): sual dəyişmədən, kitabın dilində yenidən yazılır, şəkillər SVG ilə çəkilir, cavab tapılır (4–5 variant).
   - **AI ilə yarat**: **Bənzər** və ya **Yeni quruluş**, 1–3 sual (`tryos_from_examples`).
 - Hər ikisində əvvəl analiz (natamam kəsik dayandırılır), sonra yoxlama; keçməyən bir dəfə yenidən yaradılır, yenə keçməsə qaralama (avtomatik seçilmir).
 - Seçilən suallar **Testi yarat** basılanda banka yazılır və testə əlavə olunur.
