@@ -72,8 +72,8 @@ export default async function handler(req, res) {
     const user = await verifyTeacher(req);
     if (!user) return res.status(401).json({ error: 'Əvvəlcə daxil olun' });
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({ error: 'ANTHROPIC_API_KEY qurulmayıb' });
+    if (!Object.values(PROVIDER_KEY).some((k) => process.env[k])) {
+      return res.status(500).json({ error: 'Heç bir AI açarı qurulmayıb' });
     }
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
@@ -99,7 +99,7 @@ export default async function handler(req, res) {
       clean_copy: async () => tag(await cleanCopy(body))
     };
     if (!actions[action]) return res.status(400).json({ error: 'Naməlum əməliyyat' });
-    const store = { calls: [] };
+    const store = { calls: [], genModel: body._model };
     try {
       const out = await usageStore.run(store, actions[action]);
       const made = (out.questions ? out.questions.length : 0) + (out.question ? 1 : 0);
@@ -659,12 +659,46 @@ async function saveUsage(req, action, calls, questions, forModel) {
 }
 
 // content: Anthropic formatında bloklar ({type:'text'} və {type:'image'}); digər provayderlər üçün çevrilir
-async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HELPER } = {}) {
+async function askOnce(model, system, content, maxTokens) {
   let text;
   if (model.provider === 'google') text = await callGemini(model, system, content, maxTokens);
   else if (model.provider === 'openai') text = await callOpenAI(model, system, content, maxTokens);
   else text = await callAnthropic(model, system, content, maxTokens);
   return parseJSON(text);
+}
+
+// Köməkçi işlər (oxuma, analiz, yoxlama) üçün modellər sırası:
+// əvvəl Claude Sonnet; o işləməsə (balans, açar, xəta) — qoşulu başqa provayder
+// (mümkünsə sualı yazan modeldən fərqli, yoxlama müstəqil olsun), ən sonda sualı yazan modelin özü.
+function helperChain() {
+  const store = usageStore.getStore() || {};
+  const gen = store.genModel;
+  const has = (m) => Boolean(process.env[PROVIDER_KEY[m.provider]]) && !(store.badProviders || new Set()).has(m.provider);
+  const asHelper = (m) => ({ ...m, helper: true });
+  const others = [MODELS['gemini-flash'], MODELS['gpt-sol']].filter((m) => m.provider !== gen?.provider);
+  const list = [HELPER, ...others, ...(gen && gen.provider !== 'anthropic' ? [gen] : [])].filter(has).map(asHelper);
+  const seen = new Set();
+  return list.filter((m) => (seen.has(m.provider) ? false : seen.add(m.provider)));
+}
+
+async function askJSON(content, { system = SYSTEM, maxTokens = 12000, model = HELPER } = {}) {
+  if (!model.helper) return askOnce(model, system, content, maxTokens);
+  const chain = helperChain();
+  if (!chain.length) throw publicError('Köməkçi model üçün işləyən API açarı yoxdur (Claude balansı bitib və başqa açar qoşulmayıb)', 402);
+  const store = usageStore.getStore();
+  let last;
+  for (const m of chain) {
+    try {
+      return await askOnce(m, system, content, maxTokens);
+    } catch (err) {
+      last = err;
+      // balans/açar problemi olan provayder bu sorğuda bir daha sınanmasın
+      if ([401, 402, 403].includes(err.status) || /balans|açarı/.test(err.publicMessage || "")) {
+        if (store) (store.badProviders = store.badProviders || new Set()).add(m.provider);
+      }
+    }
+  }
+  throw last;
 }
 
 function aiError(name, status, data) {
