@@ -2129,9 +2129,11 @@ function pdfQuestions(pickerRoot, out) {
   // Yoxla; keçməsə bir dəfə yenidən cəhd; yenə keçməsə qaralama
   const settle = async (job, q, remake) => {
     let cur = q;
+    job.lap?.('yazma');
     job.step = 'yoxlanılır';
     render();
     let ok = await checkQuestion(cur, { mode: job.mode, sample: job.sample });
+    job.lap?.('yoxlama');
     render();
     if (!ok) {
       const fb = [cur.verify_note, cur.fit_note].filter(Boolean).join('; ');
@@ -2154,11 +2156,15 @@ function pdfQuestions(pickerRoot, out) {
   const prep = (x, job) => ({ ...x, _uid: ++qSeq, _source: job.mode === 'original' ? 'book' : 'ai', ai_status: 'checking' });
 
   function startJob(image, mode, n) {
-    const job = { id: ++qSeq, image, mode, n, state: 'reading', step: 'şəkil oxunur', t0: Date.now(), questions: [], errors: [], warnings: [], sample: null, helper: '' };
+    const job = { id: ++qSeq, image, mode, n, state: 'reading', step: 'şəkil oxunur', t0: Date.now(), times: {}, questions: [], errors: [], warnings: [], sample: null, helper: '' };
+    let tStep = Date.now();
+    const lap = (name) => { job.times[name] = (job.times[name] || 0) + (Date.now() - tStep); tStep = Date.now(); };
+    job.lap = lap;
     jobs.push(job);
     render();
     run(async () => {
       const d = await callAI('tryos_analyze', { image, text: '' });
+      lap('oxuma');
       job.helper = d._helper || '';
       const a = d.analysis;
       job.sample = { text: d.text, image, topic: a.topic, section: a.section, analysis: a };
@@ -2198,8 +2204,9 @@ function pdfQuestions(pickerRoot, out) {
         if (job.questions.length < n) job.errors.push(`${n} sual istənildi, ${job.questions.length} alındı`);
       }
       job.state = 'done';
+      job.total = Date.now() - job.t0;
       render();
-    }).catch((err) => { job.state = 'error'; job.errors.push(err.message); render(); });
+    }).catch((err) => { job.state = 'error'; job.total = Date.now() - job.t0; job.errors.push(err.message); render(); });
   }
 
   const allQs = () => jobs.flatMap((j) => j.questions);
@@ -2215,7 +2222,8 @@ function pdfQuestions(pickerRoot, out) {
         <img src="${j.image}" alt="Kitabdakı sual">
         <div class="stack" style="gap:6px;flex:1;min-width:0">
           <div class="row"><span class="tag book">${MODE_LABEL[j.mode]}${j.mode === 'original' ? '' : ' · ' + j.n}</span><span class="tag ${cls}">${txt}</span>
-            ${j.state === 'reading' || j.state === 'working' ? `<span class="small muted" data-elapsed="${j.t0}">${esc(j.step)} · ${fmtElapsed(j.t0)}</span>` : ''}
+            ${j.state === 'reading' || j.state === 'working' ? `<span class="small muted" data-elapsed="${j.t0}">${esc(j.step)} · ${fmtElapsed(j.t0)}</span>`
+              : j.total ? `<span class="small muted">${fmtElapsed(Date.now() - j.total)}${Object.keys(j.times).length ? ' · ' + Object.entries(j.times).map(([k, v]) => `${k} ${Math.round(v / 1000)}s`).join(', ') : ''}</span>` : ''}
             <button type="button" class="btn small" data-rmjob="${j.id}" style="margin-left:auto">Sil</button></div>
           ${j.helper && j.helper !== 'sonnet' ? `<p class="small" style="color:#8A5A00">Claude əlçatan deyil (balans?) — köməkçi işləri ${esc(HELPER_NAME[j.helper] || j.helper)} görür, daha yavaş ola bilər.</p>` : ''}
           ${j.state === 'incomplete' ? '<p class="small" style="color:var(--red)">Kəsik natamamdır: şərt, şəkil və ya variantlar çatışmır. Sualı tam çərçivəyə alıb yenidən seçin.</p>' : ''}

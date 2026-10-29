@@ -849,7 +849,9 @@ async function callOpenAI(model, system, content, maxTokens) {
       : { type: 'input_text', text: c.text })
       .concat([{ type: 'input_text', text: 'Return the answer as a single valid JSON object (json).' }])
   }];
-  const r = await fetchRetry('https://api.openai.com/v1/responses', {
+  // Düşünmə səviyyəsi: standart "medium" çox yavaşdır. Köməkçi işlər və yaratma "low" (OPENAI_EFFORT ilə dəyişmək olar).
+  const effort = model.helper ? (process.env.OPENAI_EFFORT_HELPER || 'low') : (process.env.OPENAI_EFFORT || 'low');
+  const send = (withEffort) => fetchRetry('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.OPENAI_API_KEY },
     body: JSON.stringify({
@@ -857,10 +859,17 @@ async function callOpenAI(model, system, content, maxTokens) {
       instructions: system + '\nCavabı JSON formatında qaytar.',
       input,
       max_output_tokens: Math.max(maxTokens, 16000),
-      text: { format: { type: 'json_object' } }
+      text: { format: { type: 'json_object' } },
+      ...(withEffort ? { reasoning: { effort } } : {})
     })
   });
-  const data = await r.json().catch(() => ({}));
+  let r = await send(true);
+  let data = await r.json().catch(() => ({}));
+  // model bu ayarı qəbul etməsə — ayarsız təkrar
+  if (!r.ok && r.status === 400 && /reasoning|effort/i.test(JSON.stringify(data))) {
+    r = await send(false);
+    data = await r.json().catch(() => ({}));
+  }
   if (!r.ok) throw aiError('OpenAI', r.status, data);
   recordUsage(model, data.usage);
   if (typeof data.output_text === 'string' && data.output_text) return data.output_text;
