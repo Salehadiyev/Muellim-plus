@@ -255,4 +255,23 @@ reset request.jwt.claim.sub;
 select t_ok(student_notes('AAAAAAAA')::text like '%https://youtu.be/abc%', 'tələbə video linkini görür');
 reset role;
 
+-- ---------- 015: tələbənin həll şəkli ----------
+set role anon;
+reset request.jwt.claim.sub;
+select t_ok(student_save_drawings('AAAAAAAA', '00000000-0000-4000-8000-0000000000f1', '{"00000000-0000-4000-8000-0000000000e1":"data:image/jpeg;base64,QUJD","00000000-0000-4000-8000-0000000000e3":"data:image/jpeg;base64,QUJD"}') = 1, 'yalnız testdəki suala şəkil yazılır');
+select t_err($q$ select student_save_drawings('AAAAAAAA', '00000000-0000-4000-8000-0000000000f1', '{"00000000-0000-4000-8000-0000000000e2":"data:image/svg+xml;base64,PHN2Zz4="}') $q$, 'SVG qəbul edilmir');
+select t_err($q$ select student_save_drawings('CCCCCCCC', '00000000-0000-4000-8000-0000000000f1', '{}') $q$, 'testi yazmayan şəkil göndərə bilmir');
+select t_ok((select count(*) from submission_drawings) = 0, 'anon şəkilləri görmür');
+reset role;
+update submissions set created_at = now() - interval '2 hours' where student_id = '00000000-0000-4000-8000-0000000000b1' and test_id = '00000000-0000-4000-8000-0000000000f1';
+set role anon;
+select t_err($q$ select student_save_drawings('AAAAAAAA', '00000000-0000-4000-8000-0000000000f1', '{}') $q$, '30 dəqiqədən sonra göndərmək olmur');
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+select t_ok((select count(*) from submission_drawings) = 0, 'başqa müəllim şəkli görmür');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+select t_ok((select count(*) from submission_drawings) = 1, 'müəllim öz tələbəsinin həllini görür');
+select t_err($q$ insert into submission_drawings (submission_id, question_id, image) select id, id, 'data:image/png;base64,QQ==' from submissions limit 1 $q$, 'müəllim birbaşa yaza bilmir');
+reset role;
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

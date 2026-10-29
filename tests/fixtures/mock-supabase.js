@@ -23,6 +23,7 @@ class Query {
   then(res, rej) { try { res(this.exec()); } catch (e) { rej(e); } }
   exec() {
     const db = load();
+    if (this.table === 'submission_drawings' && !db.submission_drawings) return { data: null, error: { message: 'relation "public.submission_drawings" does not exist' } };
     if ((this.table === 'lessons' || this.table === 'payments') && !db.lessons) return { data: null, error: { message: 'relation "public.' + this.table + '" does not exist' } };
     if (this.table === 'lesson_notes' && !db.lesson_notes) return { data: null, error: { message: 'relation "public.lesson_notes" does not exist' } };
     if (this.table === 'mistakes' && !db.mistakes) return { data: null, error: { message: 'relation "public.mistakes" does not exist' } };
@@ -144,6 +145,15 @@ export function createClient() {
           if (ok) { m.status = 'cleared'; m.cleared_at = new Date().toISOString(); } else { m.practice_id = null; m.due_at = new Date(now + 2 * 864e5).toISOString(); }
           save(db);
           return { data: { correct: ok, answer: q.answer, solution: q.solution || null }, error: null };
+        }
+        if (fn === 'student_save_drawings') {
+          if (!Array.isArray(db.submission_drawings)) return { data: null, error: { message: 'Could not find the function public.student_save_drawings' } };
+          const tt = st && db.tests.find((x) => x.id === a.p_test_id); const sub = tt && mine(tt);
+          if (!sub) return { data: null, error: { message: 'Əvvəlcə testi göndərin' } };
+          let n = 0;
+          Object.entries(a.p_drawings || {}).forEach(([k, v]) => { if (!tt.question_ids.includes(k) || !/^data:image\/(jpeg|png|webp);base64,/.test(v)) return;
+            db.submission_drawings = db.submission_drawings.filter((d) => !(d.submission_id === sub.id && d.question_id === k)); db.submission_drawings.push({ submission_id: sub.id, question_id: k, image: v }); n++; });
+          save(db); return { data: n, error: null };
         }
         if (fn === 'student_portal') {
           if (!st) return { data: null, error: null };

@@ -686,3 +686,24 @@ details.nt-item[open] { border-color: var(--accent); }
 .ccard-wrap .ccard { flex: 1; }
 .cc-more { position: absolute; right: 12px; bottom: 12px; }
 .cc-more .more-menu { bottom: calc(100% + 6px); top: auto; }
+
+/* ---------- Qaralama (qələmlə yazmaq) ---------- */
+.ink-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ink-open-btn { min-height: 40px; }
+.ink-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #6D5BD0; margin-left: 4px; }
+body.ink-open { overflow: hidden; }
+.ink-modal { position: fixed; inset: 0; z-index: 1000; background: #eef1f5; display: flex; flex-direction: column; }
+.ink-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px; padding-top: max(8px, env(safe-area-inset-top)); background: #fff; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.ink-colors { display: flex; gap: 6px; margin-right: 6px; }
+.ink-c { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px #cbd2db; cursor: pointer; }
+.ink-c.on { box-shadow: 0 0 0 3px var(--accent); }
+.ink-t { min-width: 44px; min-height: 40px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; font: inherit; font-size: 16px; cursor: pointer; padding: 0 10px; }
+.ink-t.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); }
+.ink-sp { flex: 1; }
+.ink-area { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.ink-stage { position: relative; background: #fff; box-shadow: 0 4px 18px rgba(20, 32, 48, .15); border-radius: 6px; overflow: hidden; }
+.ink-stage canvas { position: absolute; inset: 0; }
+.ink-c2 { touch-action: none; cursor: crosshair; }
+.rv-ink { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.rv-ink img { max-width: 360px; width: 100%; border: 1px solid var(--line); border-radius: 10px; cursor: zoom-in; background: #fff; }
+.rv-ink img.big { max-width: 100%; cursor: zoom-out; }

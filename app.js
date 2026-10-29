@@ -3001,7 +3001,7 @@ function reviewQuestionHtml(q, given, i, { you = 'Sənin cavabın' } = {}) {
         return `<li class="${isRight ? 'correct' : ''} ${isGiven && !isRight ? 'wrong' : ''}"><span class="opt-l">${'ABCDEF'[j]})</span>${figs ? `<span class="opt-fig">${safeSvg(q.option_figures[j])}</span>` : `<span>${esc(o)}</span>`}${isGiven ? `<span class="rv-mark">← ${esc(you.toLowerCase())}</span>` : ''}</li>`;
       }).join('')}</ul>`
     : `<div class="small"><strong>${esc(you)}:</strong> ${given ? esc(given) : '—'}</div>${q.answer ? `<div class="small"><strong>Gözlənilən cavab:</strong> ${esc(q.answer)}</div>` : ''}`;
-  return `<div class="rv-q rv-${st}">
+  return `<div class="rv-q rv-${st}" data-rq="${esc(q.id)}">
     <div class="row"><strong>${i + 1}.</strong><span class="tag ${cls}">${txt}</span></div>
     <div class="q-text">${esc(q.body)}</div>
     ${q.figure ? `<div class="q-fig">${safeSvg(q.figure)}</div>` : ''}
@@ -3040,6 +3040,29 @@ function openDialog(title, html) {
 }
 
 // Müəllim üçün: bir tələbənin bir testdəki işi
+// Tələbənin sual üzərində yazdığı həlləri pəncərəyə əlavə et (015 yoxdursa heç nə)
+async function attachDrawings(dlg, subId) {
+  const { data, error } = await sb.from('submission_drawings').select('question_id, image').eq('submission_id', subId);
+  if (error || !data || !dlg) return;
+  let n = 0;
+  data.forEach((d) => {
+    if (!/^data:image\/(jpeg|png|webp);base64,/.test(d.image)) return;
+    const box = dlg.querySelector(`[data-rq="${CSS.escape(d.question_id)}"]`);
+    if (!box) return;
+    const w = document.createElement('div');
+    w.className = 'rv-ink';
+    w.innerHTML = '<div class="small"><strong>✏️ Tələbənin həlli</strong> <span class="muted">— basın, böyüsün</span></div>';
+    const img = document.createElement('img');
+    img.src = d.image; img.alt = 'Tələbənin həlli'; img.loading = 'lazy';
+    img.onclick = () => img.classList.toggle('big');
+    w.appendChild(img);
+    box.appendChild(w);
+    n++;
+  });
+  const p = dlg.querySelector('p.muted');
+  if (n && p) p.insertAdjacentHTML('beforeend', ` · <span class="tag deneme">✏️ ${n} sualda həll yazıb</span>`);
+}
+
 function submissionDetailHtml(questions, sub) {
   const c = countStates(questions, sub.answers);
   return `<p class="muted">${fmtDate(sub.created_at)} · bal <strong>${sub.score}/${sub.total}</strong> ·
@@ -3549,6 +3572,7 @@ async function studentWorkView(id) {
   $$('[data-row]').forEach((b) => b.onclick = () => {
     const r = rows[+b.dataset.row];
     openDialog(esc(st.full_name) + ' · ' + esc(r.t.title), submissionDetailHtml(r.questions, r.sub));
+    attachDrawings(document.getElementById('rvDialog'), r.sub.id).catch(() => {});
   });
   practiceSection(st, done);
   reportSection(st, rows);
@@ -3773,7 +3797,7 @@ async function testResultsView(id) {
   $('#copy').onclick = () => copyText(link);
   $$('[data-sub]').forEach((b) => b.onclick = () => {
     const sub = subs.find((x) => x.id === b.dataset.sub);
-    if (sub) openDialog(esc(sub.student_name) + ' · ' + esc(test.title), submissionDetailHtml(questions, sub));
+    if (sub) { openDialog(esc(sub.student_name) + ' · ' + esc(test.title), submissionDetailHtml(questions, sub)); attachDrawings(document.getElementById('rvDialog'), sub.id).catch(() => {}); }
   });
   $('#rvMode').onchange = async (e) => {
     const { error: err } = await sb.from('tests').update({ review_mode: e.target.value }).eq('id', id);
@@ -3793,7 +3817,7 @@ async function testResultsView(id) {
 
 // ================= Tələbə test səhifəsi =================
 
-const studentQuestionsHtml = (test) => test.questions.map((q, i) => `<fieldset class="card stack" style="margin:0">
+const studentQuestionsHtml = (test) => test.questions.map((q, i) => `<fieldset class="card stack" style="margin:0" data-q="${esc(q.id)}">
       <legend class="sr">Sual ${i + 1}</legend>
       <div class="muted small">Sual ${i + 1} / ${test.questions.length}</div>
       <div class="q-text pre" style="font-size:17px">${esc(q.body)}</div>
@@ -3842,7 +3866,181 @@ const fmtDue = (iso) => {
 };
 
 // Test formu: qaralama yaddaşı, vaxt bitəndə avtomatik göndərmə
-function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline = null, onSubmit }) {
+// ================= Qaralama: sualın üstündə/yanında qələmlə yazmaq (Apple Pencil, barmaq) =================
+// Hər sual üçün xətlər məntiqi ölçüdə saxlanılır (W×H), ekrana sığdırılır. Arxa fon — sualın özünün şəkli.
+const INK_COLORS = [['#111827', 'Qara'], ['#1d4ed8', 'Göy'], ['#dc2626', 'Qırmızı'], ['#16a34a', 'Yaşıl']];
+const inkBg = new Map(); // sual id → { img, w, h } (sualın şəkli; yalnız yaddaşda)
+
+async function captureQuestion(el) {
+  try {
+    await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+    const c = await window.html2canvas(el, { scale: 1.5, backgroundColor: '#ffffff', logging: false,
+      ignoreElements: (n) => n.classList && (n.classList.contains('ink-bar') || n.classList.contains('ink-thumb')) });
+    return c;
+  } catch (_) { return null; }
+}
+
+// Ehtiyat fon: şəkil çəkilə bilməsə, sualın mətni və variantları sadə yazı ilə
+function textQuestionCanvas(q) {
+  const W = 1000, pad = 28, lh = 34;
+  const c = document.createElement('canvas'); const ctx = c.getContext('2d');
+  ctx.font = '26px Arial, sans-serif';
+  const wrap = (t) => { const out = []; String(t || '').replace(/\$+/g, '').split('\n').forEach((para) => { let line = '';
+    para.split(/\s+/).forEach((w) => { const tt = line ? line + ' ' + w : w; if (ctx.measureText(tt).width > W - pad * 2 && line) { out.push(line); line = w; } else line = tt; }); out.push(line); }); return out; };
+  const lines = [...wrap(q.body), '', ...(q.options || []).map((o, i) => `${'ABCDEF'[i]}) ${String(o).replace(/\$+/g, '')}`)];
+  c.width = W; c.height = pad * 2 + lines.length * lh;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, c.height);
+  ctx.fillStyle = '#111827'; ctx.font = '26px Arial, sans-serif';
+  lines.forEach((l, i) => ctx.fillText(l, pad, pad + 26 + i * lh));
+  return c;
+}
+
+function drawStrokes(ctx, strokes, k = 1) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of strokes) {
+    ctx.globalCompositeOperation = s.e ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = s.c; ctx.lineWidth = s.w * k;
+    ctx.beginPath();
+    s.p.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+    if (s.p.length === 1) ctx.lineTo(s.p[0][0] * k + 0.1, s.p[0][1] * k);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// Sualın şəkli + xətlər → JPEG (müəllimə göndərmək üçün)
+function inkComposite(data, bg, outW = 900) {
+  const k = outW / data.W;
+  const out = document.createElement('canvas');
+  out.width = outW; out.height = Math.round(data.H * k);
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+  if (bg) { const r = inkBgRect(data, bg); ctx.drawImage(bg.img, r.x * k, r.y * k, r.w * k, r.h * k); }
+  const ink = document.createElement('canvas');
+  ink.width = out.width; ink.height = out.height;
+  drawStrokes(ink.getContext('2d'), data.s, k);
+  ctx.drawImage(ink, 0, 0);
+  return out.toDataURL('image/jpeg', 0.72);
+}
+// sualın şəkli yuxarıda, eni W, hündürlüyü H-in ən çox 45%-i
+function inkBgRect(data, bg) {
+  const sc = Math.min(data.W / bg.w, (data.H * 0.45) / bg.h, 1.6);
+  const w = bg.w * sc, h = bg.h * sc;
+  return { x: (data.W - w) / 2, y: 0, w, h };
+}
+
+function openInk(q, fieldset, data, onSave) {
+  const dlg = document.createElement('div');
+  dlg.className = 'ink-modal';
+  dlg.setAttribute('role', 'dialog'); dlg.setAttribute('aria-label', 'Sualın üstündə yaz');
+  dlg.innerHTML = `<div class="ink-tools">
+      <div class="ink-colors">${INK_COLORS.map(([c, n], i) => `<button type="button" class="ink-c ${i ? '' : 'on'}" data-c="${c}" style="background:${c}" aria-label="${n}"></button>`).join('')}</div>
+      <button type="button" class="ink-t" data-w="3" aria-label="Nazik">✎</button><button type="button" class="ink-t on" data-w="6" aria-label="Qalın"><b>✎</b></button>
+      <button type="button" class="ink-t" data-er aria-label="Pozan">⌫ pozan</button>
+      <button type="button" class="ink-t" data-undo aria-label="Geri al">↶</button>
+      <button type="button" class="ink-t" data-clear aria-label="Hamısını sil">🗑</button>
+      <span class="ink-sp"></span>
+      <button type="button" class="btn primary" data-done>Hazır</button></div>
+    <div class="ink-area"><div class="ink-stage"><canvas class="ink-bgc"></canvas><canvas class="ink-c2"></canvas></div></div>`;
+  document.body.appendChild(dlg);
+  document.body.classList.add('ink-open');
+  const area = $('.ink-area', dlg), stage = $('.ink-stage', dlg), bgc = $('.ink-bgc', dlg), cv = $('.ink-c2', dlg);
+  let color = INK_COLORS[0][0], width = 6, eraser = false, penSeen = false;
+  let k = 1;
+  const fit = () => {
+    const aw = area.clientWidth, ah = area.clientHeight;
+    if (!data.W) { data.W = 1000; data.H = Math.round(Math.max(1000, Math.min(2200, 1000 * ah / Math.max(1, aw)))); }
+    const sc = Math.min(aw / data.W, ah / data.H);
+    const dw = Math.floor(data.W * sc), dh = Math.floor(data.H * sc);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    [bgc, cv].forEach((c) => { c.width = Math.round(dw * dpr); c.height = Math.round(dh * dpr); c.style.width = dw + 'px'; c.style.height = dh + 'px'; });
+    stage.style.width = dw + 'px'; stage.style.height = dh + 'px';
+    k = (dw * dpr) / data.W;
+    const b = bgc.getContext('2d');
+    b.fillStyle = '#fff'; b.fillRect(0, 0, bgc.width, bgc.height);
+    const bg = inkBg.get(q.id);
+    if (bg) { const r = inkBgRect(data, bg); b.drawImage(bg.img, r.x * k, r.y * k, r.w * k, r.h * k);
+      b.strokeStyle = '#e5e7eb'; b.setLineDash([8, 8]); b.beginPath(); b.moveTo(0, (r.h + 6) * k); b.lineTo(bgc.width, (r.h + 6) * k); b.stroke(); b.setLineDash([]); }
+    redraw();
+    return k;
+  };
+  const redraw = () => { const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); drawStrokes(c, data.s, k); };
+  const pos = (ev) => { const r = cv.getBoundingClientRect(); return [Math.round((ev.clientX - r.left) / r.width * data.W), Math.round((ev.clientY - r.top) / r.height * data.H)]; };
+  let cur = null;
+  cv.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'pen') penSeen = true;
+    if (penSeen && ev.pointerType === 'touch') return; // qələm varsa, ovuc ekrana toxunanda xətt çəkilmir
+    ev.preventDefault(); cv.setPointerCapture(ev.pointerId);
+    cur = { c: color, w: eraser ? 28 : width, e: eraser, p: [pos(ev)] };
+    data.s.push(cur); redraw();
+  });
+  cv.addEventListener('pointermove', (ev) => {
+    if (!cur) return;
+    const evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
+    evs.forEach((e) => { const p = pos(e); const l = cur.p[cur.p.length - 1]; if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 2) cur.p.push(p); });
+    redraw();
+  });
+  const end = () => { if (cur) { cur = null; onSave(data); } };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  $$('[data-c]', dlg).forEach((b) => b.onclick = () => { color = b.dataset.c; eraser = false; $$('[data-c]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
+  $$('[data-w]', dlg).forEach((b) => b.onclick = () => { width = +b.dataset.w; eraser = false; $$('[data-w]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
+  $('[data-er]', dlg).onclick = (e) => { eraser = !eraser; e.currentTarget.classList.toggle('on', eraser); };
+  $('[data-undo]', dlg).onclick = () => { data.s.pop(); redraw(); onSave(data); };
+  $('[data-clear]', dlg).onclick = () => { if (data.s.length && confirm('Bu sualdakı bütün yazılar silinsin?')) { data.s.length = 0; redraw(); onSave(data); } };
+  const close = () => { window.removeEventListener('resize', onResize); dlg.remove(); document.body.classList.remove('ink-open'); onSave(data, true); };
+  $('[data-done]', dlg).onclick = close;
+  const onResize = () => { k = fit(); };
+  window.addEventListener('resize', onResize);
+  // fon: sualın şəkli (bir dəfə çəkilir)
+  k = fit();
+  if (!inkBg.has(q.id)) captureQuestion(fieldset).then((c) => { c = c || textQuestionCanvas(q); inkBg.set(q.id, { img: c, w: c.width, h: c.height }); if (dlg.isConnected) fit(); });
+}
+
+// Test formuna qoşulur: hər suala "✏️ Yaz" düyməsi; xətlər yerli yaddaşda; göndərəndə şəkillər hazırlanır
+function setupInk(form, test, key) {
+  let store = {};
+  try { store = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (_) { store = {}; }
+  const persist = () => { try { localStorage.setItem(key, JSON.stringify(store)); } catch (_) { /* yaddaş dolubsa — yalnız bu sessiyada qalır */ } };
+  const qById = Object.fromEntries(test.questions.map((q) => [q.id, q]));
+  const mark = (fs, qid) => {
+    const has = (store[qid]?.s || []).length > 0;
+    const b = $('.ink-open-btn', fs);
+    if (b) b.innerHTML = has ? '✏️ Yazdıqlarım <span class="ink-dot"></span>' : '✏️ Üstündə yaz';
+  };
+  $$('fieldset[data-q]', form).forEach((fs) => {
+    const qid = fs.dataset.q;
+    const bar = document.createElement('div');
+    bar.className = 'ink-bar';
+    bar.innerHTML = '<button type="button" class="btn small ink-open-btn">✏️ Üstündə yaz</button><span class="small muted">qələm və ya barmaqla həll et — müəllimin görəcək</span>';
+    fs.insertBefore(bar, fs.children[1] || null);
+    mark(fs, qid);
+    $('.ink-open-btn', bar).onclick = () => {
+      const data = store[qid] || (store[qid] = { W: 0, H: 0, s: [] });
+      openInk(qById[qid], fs, data, (d, closed) => { store[qid] = d; persist(); if (closed) mark(fs, qid); });
+    };
+  });
+  return {
+    // göndərmək üçün: { sual id: JPEG data URL }
+    async export() {
+      const out = {};
+      for (const [qid, d] of Object.entries(store)) {
+        if (!d || !(d.s || []).length || !qById[qid]) continue;
+        if (!inkBg.has(qid)) {
+          const fs = form.querySelector(`fieldset[data-q="${CSS.escape(qid)}"]`);
+          const c = (fs ? await captureQuestion(fs) : null) || textQuestionCanvas(qById[qid]);
+          inkBg.set(qid, { img: c, w: c.width, h: c.height });
+        }
+        let img = inkComposite(d, inkBg.get(qid));
+        if (img.length > 650000) img = inkComposite(d, inkBg.get(qid), 650);
+        if (img.length <= 680000) out[qid] = img;
+      }
+      return out;
+    },
+    clear() { try { localStorage.removeItem(key); } catch (_) { /* */ } }
+  };
+}
+
+function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline = null, ink = false, onSubmit }) {
   $app.innerHTML = `<form class="student" id="st">
     ${top}
     <h1>${esc(test.title)}</h1>
@@ -3866,6 +4064,7 @@ function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline
     form.addEventListener('change', save);
     form.addEventListener('input', save);
   }
+  const inkApi = ink && draftKey ? setupInk(form, test, draftKey + '_ink') : null;
   let sent = false;
   let timer = null;
   const submit = async (auto) => {
@@ -3877,9 +4076,12 @@ function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline
     btn.disabled = true;
     btn.textContent = 'Göndərilir…';
     try {
-      await onSubmit(answers, auto, new FormData(form));
+      let drawings = {};
+      if (inkApi) { btn.textContent = 'Həllər hazırlanır…'; try { drawings = await inkApi.export(); } catch (_) { drawings = {}; } btn.textContent = 'Göndərilir…'; }
+      await onSubmit(answers, auto, new FormData(form), drawings);
       clearInterval(timer);
       try { if (draftKey) localStorage.removeItem(draftKey); } catch (_) { /* */ }
+      if (inkApi) inkApi.clear();
     } catch (err) {
       sent = false;
       btn.disabled = false;
@@ -4145,10 +4347,14 @@ async function studentPortal(rawCode, testId, sub) {
     const shown = test.shuffle ? shuffleTest(test, String(test.seed) + testId) : test;
     const top = `<div class="row between"><a class="muted" href="${home}">‹ Testlərim</a><span class="muted">${esc(test.name)}</span></div>`;
     const run = (deadline) => mountTestForm(shown, {
-      top, deadline, draftKey: 'mp_draft_' + code + '_' + testId,
-      onSubmit: async (answers) => {
+      top, deadline, draftKey: 'mp_draft_' + code + '_' + testId, ink: true,
+      onSubmit: async (answers, _auto, _fd, drawings) => {
         const { data, error: err } = await sb.rpc('student_submit_test', { p_code: code, p_test_id: testId, p_answers: answers });
         if (err) throw new Error(err.message);
+        if (drawings && Object.keys(drawings).length) {
+          const { error: e2 } = await sb.rpc('student_save_drawings', { p_code: code, p_test_id: testId, p_drawings: drawings });
+          if (e2) toast('Cavablar göndərildi, amma yazdığın həllər göndərilmədi', true);
+        }
         const now = test.review_mode === 'after_submit';
         studentDone(shown, { ...data, name: test.name }, home, now ? `${home}/${testId}/review` : '', now ? '' : reviewNoteOf(test.review_mode));
       }
