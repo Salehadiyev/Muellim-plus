@@ -1338,7 +1338,7 @@ async function bankView() {
 
   view().innerHTML = `
     <div class="page-head"><div><h1>Sual bankı</h1><p class="muted">${data.length} sual. Suala basın — böyüyəcək. Küncdəki qutu ilə seçin.</p></div>
-      <div class="row"><button class="btn" id="toggleManual">+ Əl ilə sual</button><button class="btn" id="selAll">Görünənləri seç</button><button class="btn" id="makePdf" disabled>PDF (0)</button><button class="btn primary" id="makeTest" disabled>Seçilənlərdən test (0)</button></div></div>
+      <div class="row"><button class="btn" id="toggleManual">+ Əl ilə sual</button><button class="btn" id="selAll">Görünənləri seç</button><button class="btn" id="selNone" hidden>Seçimi təmizlə</button><button class="btn danger" id="delSel" hidden>🗑 Sil (0)</button><button class="btn" id="makePdf" disabled>PDF (0)</button><button class="btn primary" id="makeTest" disabled>Seçilənlərdən test (0)</button></div></div>
     <form class="card stack" id="manual" hidden></form>
     <div class="card stack">
       <div class="form-grid bank-filters">
@@ -1430,6 +1430,8 @@ async function bankView() {
   const updateBtn = () => {
     const b = $('#makeTest'); b.disabled = !selected.size; b.textContent = `Seçilənlərdən test (${selected.size})`;
     const pdf = $('#makePdf'); pdf.disabled = !selected.size; pdf.textContent = `PDF (${selected.size})`;
+    const del = $('#delSel'); del.hidden = !selected.size; del.textContent = `🗑 Sil (${selected.size})`;
+    $('#selNone').hidden = !selected.size;
   };
   const refilter = () => { shown = PAGE; renderList(); };
   $('#fText').oninput = (e) => { filter.text = e.target.value; refilter(); };
@@ -1461,6 +1463,25 @@ async function bankView() {
   };
   drawReal();
   $('#selAll').onclick = () => { visible.forEach((q) => selected.add(q.id)); updateBtn(); renderList(); };
+  $('#selNone').onclick = () => { selected.clear(); updateBtn(); renderList(); };
+  $('#delSel').onclick = () => busy($('#delSel'), async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    const { data: ts } = await sb.from('tests').select('id, question_ids');
+    const inTests = ids.filter((id) => (ts || []).some((t) => (t.question_ids || []).includes(id))).length;
+    if (!confirm(`${ids.length} sual bankdan silinsin?${inTests ? `\n\n${inTests} sual testlərdə istifadə olunur — həmin testlərdən də çıxacaq (nəticələr qalır).` : ''}\nBunu geri qaytarmaq olmur.`)) return;
+    for (let i = 0; i < ids.length; i += 200) {
+      const { error: err } = await sb.from('questions').delete().in('id', ids.slice(i, i + 200));
+      if (err) throw err;
+    }
+    const gone = new Set(ids);
+    for (let i = data.length - 1; i >= 0; i--) if (gone.has(data[i].id)) data.splice(i, 1);
+    ids.forEach((id) => fullCache.delete(id));
+    selected.clear();
+    toast(ids.length + ' sual silindi');
+    updateBtn(); renderList();
+    const h = $('.page-head p'); if (h) h.textContent = `${data.length} sual. Suala basın — böyüyəcək. Küncdəki qutu ilə seçin.`;
+  }).catch(fail);
   $('#makePdf').onclick = () => busy($('#makePdf'), async () => {
     // görünən sıra saxlanılır (köhnədən yeniyə)
     const ids = data.filter((q) => selected.has(q.id)).map((q) => q.id).reverse();

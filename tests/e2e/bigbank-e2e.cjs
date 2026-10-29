@@ -23,6 +23,10 @@ const DB = { classes: [], students: [], tests: [], submissions: [], ai_usage: []
   console.log('search one:', await p.textContent('#list .qtile .qt-text'));
   await p.fill('#fText', ''); await p.click('#selAll'); console.log('select all visible:', await p.textContent('#makeTest'));
   await p.click('#list .qt-open >> nth=0'); await p.waitForSelector('#bankDlg[open]'); console.log('bank dlg:', await p.textContent('#bankDlg h2')); await p.click('#bankDlg [data-nav="1"]'); await p.waitForFunction(() => document.querySelector('#bankDlg h2').textContent.startsWith('Sual 2 /')); console.log('bank next:', await p.textContent('#bankDlg h2')); await p.click('#bankDlg [data-close]');
+  await p.click('#selNone'); console.log('cleared:', await p.isHidden('#delSel'));
+  await p.check('#list .qtile >> nth=0 >> .check'); await p.check('#list .qtile >> nth=1 >> .check'); console.log('del btn:', (await p.textContent('#delSel')).trim());
+  await p.click('#delSel'); await p.waitForSelector('text=2 sual silindi');
+  console.log('after bulk delete:', (await p.textContent('.page-head p')).trim().split('.')[0], '| db:', await p.evaluate(() => JSON.parse(localStorage.getItem('mockdb')).questions.length));
   console.log('✓ big bank paged');
   await p.goto('http://app.test/#/newtest'); await p.waitForSelector('#tqList .mini');
   console.log('newtest cards:', await p.$$eval('#tqList .mini', (x) => x.length));
