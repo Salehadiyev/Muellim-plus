@@ -9,7 +9,7 @@ const OK = /NO ERRORS/;
 const tests = {
   // brauzer (Playwright + saxta Supabase / AI)
   'e2e/access-e2e.cjs': [OK, /admin approves and sets limits/, /unapproved: waiting screen/, /without 008: works as before/],
-  'e2e/rules-e2e.cjs': [OK, /shuffle stable per student/, /auto-submit when time runs out/, /overdue test blocked/, /tests list: personal tag/],
+  'e2e/rules-e2e.cjs': [/tests delete: (\d+) → \d+ \| 2 test seçilib/, OK, /shuffle stable per student/, /auto-submit when time runs out/, /overdue test blocked/, /tests list: personal tag/],
   'e2e/pr-e2e.cjs': [OK, /personal test: Fərdi tapşırıq · .* 3 after_submit/, /Hörmətli valideyn/, /Fonksiyonlar 17%/],
   'e2e/an-e2e.cjs': [OK, /topics: Fonksiyonlar 17%/, /3 testdə/],
   'e2e/review-e2e.cjs': [/qstat dialog: Sual 1/, OK, /after_close: hidden while open/, /mode never → student review blocked/, /student page stats: 2 \/ 2 \| 17%/],

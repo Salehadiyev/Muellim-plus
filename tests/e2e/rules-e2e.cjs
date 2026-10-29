@@ -66,6 +66,11 @@ const errs = []; const ok = (m) => console.log('✓', m); const fail = (m) => { 
   db = await st.evaluate(() => JSON.parse(localStorage.getItem('mockdb'))); await te.evaluate((d) => localStorage.setItem('mockdb', JSON.stringify(d)), db);
   await te.goto('http://app.test/#/tests'); await te.waitForSelector('text=fərdi: Əli Həsənov'); ok('tests list: personal tag');
   await te.screenshot({ path: path.join(T, 'r4-list.png') });
+  { const n0 = (await te.evaluate(() => JSON.parse(localStorage.getItem('mockdb')).tests.length));
+    await te.click('[data-f=all]'); await te.click('.tcard >> nth=0 >> [data-tdel]'); await te.waitForSelector('text=Test silindi');
+    await te.waitForSelector('.tcard'); await te.click('[data-f=all]'); await te.check('.tcard >> nth=0 >> [data-tsel]'); await te.check('.tcard >> nth=1 >> [data-tsel]');
+    const bar = (await te.textContent('#tBulk')).replace(/\s+/g, ' ').trim(); await te.click('#tBulkDel'); await te.waitForSelector('text=2 test silindi');
+    console.log('  tests delete:', n0, '→', await te.evaluate(() => JSON.parse(localStorage.getItem('mockdb')).tests.length), '|', bar.slice(0, 16)); }
   console.log('  submissions late flags:', db.submissions.map((x) => x.student_name + ':' + x.late).join(', '));
   console.log(errs.length ? errs : 'NO ERRORS'); await b.close();
 })().catch((e) => { console.error('FAIL', e.message, errs); process.exit(1); });

@@ -2796,6 +2796,7 @@ async function testsView() {
   (subs || []).forEach((s) => { subCount[s.test_id] = (subCount[s.test_id] || 0) + 1; });
   const nOpen = tests.filter((t) => t.is_open).length;
   let tab = nOpen ? 'open' : 'all';
+  const tsel = new Set(); let visibleTests = [];
 
   const card = (t) => {
     const sent = subCount[t.id] || 0;
@@ -2808,7 +2809,8 @@ async function testsView() {
       t.time_limit_min ? `<span>⏱ ${t.time_limit_min} dəq</span>` : '',
       t.due_at ? `<span class="${overdue ? 'tc-late' : ''}">son: ${esc(fmtDue(t.due_at))}${overdue ? ' · keçib' : ''}</span>` : ''
     ].filter(Boolean).join('');
-    return `<article class="tcard${t.is_open ? ' is-open' : ''}">
+    return `<article class="tcard${t.is_open ? ' is-open' : ''}${tsel.has(t.id) ? ' picked' : ''}">
+      <label class="tc-check"><input type="checkbox" data-tsel="${t.id}" ${tsel.has(t.id) ? 'checked' : ''} aria-label="${esc(t.title)} seç"></label>
       <div class="tc-main">
         <div class="tc-top"><span class="tc-status">${t.is_open ? 'Açıq' : 'Bağlı'}</span>${t.kind === 'deneme' ? '<span class="tag deneme">🎯 Deneme</span>' : ''}<span class="small muted">${esc(fmtDue(t.created_at))}</span></div>
         <a class="tc-title" href="#/test/${t.id}">${esc(t.title)}</a>
@@ -2820,6 +2822,7 @@ async function testsView() {
       <div class="tc-act">
         <a class="btn small primary" href="#/test/${t.id}">Nəticələr ›</a>
         <button class="btn small" data-toggle="${t.id}" data-open="${t.is_open}" title="${t.is_open ? 'Tələbələr artıq yaza bilməyəcək' : 'Tələbələr yenə yaza biləcək'}">${t.is_open ? 'Bağla' : 'Yenidən aç'}</button>
+        <button class="btn small danger" data-tdel="${t.id}" aria-label="${esc(t.title)} sil">🗑 Sil</button>
       </div>
     </article>`;
   };
@@ -2833,9 +2836,22 @@ async function testsView() {
         <button type="button" class="seg-b" data-f="all" role="tab">Hamısı <span class="seg-c">${tests.length}</span></button>
       </div>
       <p class="small muted tl-help"><strong>Açıq</strong> — tələbələr testi öz linkində görür və yaza bilir. <strong>Bağlı</strong> — test yazılmağa bağlanır, yeni cavab qəbul edilmir; yazılmış nəticələr qalır. Cavabları "test bağlananda göstər" olan testdə tələbələr düzgün cavabları bağlayanda görür. İstədiyiniz vaxt <strong>Yenidən aç</strong> edə bilərsiniz.</p>
+      <div class="bulk-bar" id="tBulk" hidden><span><strong id="tBulkN">0</strong> test seçilib</span><span class="row" style="gap:8px"><button class="btn small" id="tSelAll">Görünənləri seç</button><button class="btn small" id="tSelNone">Seçimi təmizlə</button><button class="btn small danger" id="tBulkDel">🗑 Seçilənləri sil</button></span></div>
       <div class="tlist" id="tlist"></div>` : `<div class="card"><div class="empty">Hələ test yoxdur. <a href="#/newtest">İlk testi yaradın</a>.</div></div>`}`;
+  const delTests = async (ids) => {
+    const ts = tests.filter((t) => ids.includes(t.id));
+    const subsN = ts.reduce((a, t) => a + (subCount[t.id] || 0), 0);
+    const who = ts.length === 1 ? `«${ts[0].title}» testi` : `${ts.length} test`;
+    if (!confirm(`${who} silinsin?${subsN ? `\n\n${subsN} göndərilmiş nəticə də silinəcək.` : ''} Suallar bankda qalır.\nBunu geri qaytarmaq olmur.`)) return;
+    const { error } = await sb.from('tests').delete().in('id', ids);
+    if (error) throw error;
+    toast(ts.length === 1 ? 'Test silindi' : `${ts.length} test silindi`);
+    route();
+  };
+  const syncBulk = () => { const bar = $('#tBulk'); if (!bar) return; bar.hidden = !tsel.size; $('#tBulkN').textContent = tsel.size; };
   const draw = () => {
     const list = tests.filter((t) => tab === 'all' || (tab === 'open') === !!t.is_open);
+    visibleTests = list;
     $$('[data-f]').forEach((b) => { b.classList.toggle('on', b.dataset.f === tab); b.setAttribute('aria-selected', b.dataset.f === tab); });
     $('#tlist').innerHTML = list.length ? list.map(card).join('') : `<div class="card"><div class="empty">${tab === 'open' ? 'Açıq test yoxdur.' : 'Bağlı test yoxdur.'}</div></div>`;
     $$('[data-toggle]').forEach((b) => b.onclick = async () => {
@@ -2843,8 +2859,17 @@ async function testsView() {
       if (err) return fail(err);
       route();
     });
+    $$('[data-tdel]').forEach((b) => b.onclick = () => delTests([b.dataset.tdel]).catch(fail));
+    $$('[data-tsel]').forEach((c) => c.onchange = () => { c.checked ? tsel.add(c.dataset.tsel) : tsel.delete(c.dataset.tsel); c.closest('.tcard').classList.toggle('picked', c.checked); syncBulk(); });
+    syncBulk();
   };
-  if (tests.length) { $$('[data-f]').forEach((b) => b.onclick = () => { tab = b.dataset.f; draw(); }); draw(); }
+  if (tests.length) {
+    $$('[data-f]').forEach((b) => b.onclick = () => { tab = b.dataset.f; draw(); });
+    $('#tSelAll').onclick = () => { visibleTests.forEach((t) => tsel.add(t.id)); draw(); };
+    $('#tSelNone').onclick = () => { tsel.clear(); draw(); };
+    $('#tBulkDel').onclick = () => busy($('#tBulkDel'), () => delTests([...tsel])).catch(fail);
+    draw();
+  }
 }
 
 // Yeni test: 1) əsas məlumat 2) suallar (bankdan və ya PDF-dən) 3) yarat

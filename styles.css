@@ -726,3 +726,7 @@ body.ink-open { overflow: hidden; }
 .nav a.item.active .nav-count { background: var(--accent-soft); color: var(--accent-dark); }
 .nav-count:empty { display: none; }
 @media (max-width: 900px) { .ls-stats4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tc-check { display: flex; align-items: center; justify-content: center; width: 32px; align-self: stretch; cursor: pointer; }
+.tc-check input { width: 22px; height: 22px; accent-color: var(--accent); }
+.tcard.picked { border-color: var(--accent); background: #F7FCFD; }
+.tcard { flex-wrap: wrap; }
