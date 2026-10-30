@@ -5075,7 +5075,7 @@ ${studentInsightsHtml(an, notes, home)}
       toast(value ? 'Tamamlandı kimi qeyd edildi' : 'Qeyd ləğv edildi');
     }
   });
-  if (!hub) $app.querySelector('.student').insertAdjacentHTML('afterbegin', `<a class="btn primary" href="${home}/ask">Sualını soruş · Sol</a>`);
+  if (!hub) $app.querySelector('.student').insertAdjacentHTML('afterbegin', `<a class="btn primary" href="${home}/ask">Sualını soruş</a>`);
   // "Dərs qeydinə bax": səhifə daxilində aç (hash marşrutu dəyişməsin)
   $$('[data-nt]').forEach((l) => l.onclick = (e) => {
     e.preventDefault();

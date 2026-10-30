@@ -4,7 +4,7 @@ export function mountStudentSolver(root,{code,home,allowance,refreshAllowance}) 
   let remaining=allowance?.remaining??0;
   let image='', result=null, count=0, playing=false, timer=null, controller=null, disposed=false, imageVersion=0;
   const $=s=>root.querySelector(s);
-  root.innerHTML=`<div class="row between"><a class="btn small" href="${esc(home)}">‹ Ana səhifə</a><span class="tag ai">Sol</span></div>
+  root.innerHTML=`<div class="row between"><a class="btn small" href="${esc(home)}">‹ Ana səhifə</a></div>
     <header class="solver-heading"><span class="solver-eyebrow">MATH SALEH HOCA</span><h1>Sualını soruş</h1><p class="muted">Həll edə bilmədiyin sualın şəklini yüklə. Həll lövhədə addım-addım açılsın.</p></header>
     <p id="solverQuota" class="notice" role="status"></p><section class="card stack solver-upload"><label class="field">Sualın şəkli<input id="solverFile" type="file" accept="image/*"></label>
     <p class="small muted">Bir şəkildə bir sual olsun; şərt və şəkil tam görünsün.</p>
@@ -14,9 +14,9 @@ export function mountStudentSolver(root,{code,home,allowance,refreshAllowance}) 
     <section id="solverResult" class="stack" hidden>
       <div class="solver-toolbar"><button type="button" class="btn" id="solverPause">Dayandır</button><button type="button" class="btn" id="solverNext">Növbəti addım</button><button type="button" class="btn" id="solverReplay">Yenidən göstər</button><button type="button" class="btn" id="solverAll">Tam həlli göstər</button></div>
       <div id="solverBoard" class="solver-board"><div class="solver-board-head"><strong>Həll lövhəsi</strong><span id="solverCounter" role="status" aria-live="polite"></span></div><div id="solverQuestion" class="solver-question"></div><div id="solverSteps"></div><div id="solverAnswer" class="solver-answer" hidden></div></div>
-      <p class="small muted">AI həllində səhv ola bilər. Anlaşılmayan addımı müəlliminlə dəqiqləşdir.</p>
+      <p class="small muted">Anlaşılmayan addımı müəlliminlə dəqiqləşdir.</p>
     </section>`;
-  function quota(){if(disposed)return;$('#solverQuota').textContent=`Bu gün ${remaining} / 3 sual haqqın qalıb. Hər “Həll et” sorğusu sayılır. Bakı vaxtı ilə 00:00-da yenilənir.`;$('#solverStart').disabled=!image||remaining<=0;}
+  function quota(){if(disposed)return;$('#solverQuota').textContent=remaining>0?`Bu gün daha ${remaining} sual göndərə bilərsən. Hər göndərilən sual gündəlik saya daxildir.`:'Bugünkü 3 sualını göndərmisən. Bakı vaxtı ilə 00:00-dan sonra yenidən sual göndərə bilərsən.';$('#solverStart').disabled=!image||remaining<=0;}
   quota();
   function error(message){$('#solverError').textContent=message;$('#solverError').hidden=false;}
   function stop(){playing=false;clearTimeout(timer);timer=null;update();}
@@ -66,7 +66,7 @@ export function mountStudentSolver(root,{code,home,allowance,refreshAllowance}) 
   };
   $('#solverStart').onclick=async()=>{
     if(!image||controller||remaining<=0)return;
-    stop();result=null;$('#solverError').hidden=true;$('#solverResult').hidden=true;$('#solverStart').disabled=true;$('#solverFile').disabled=true;$('#solverStatus').textContent='Sol sualı həll edir…';
+    stop();result=null;$('#solverError').hidden=true;$('#solverResult').hidden=true;$('#solverStart').disabled=true;$('#solverFile').disabled=true;$('#solverStatus').textContent='Sualın həlli hazırlanır…';
     const req=new AbortController();controller=req;const timeout=setTimeout(()=>req.abort(),185000);
     try{
       const response=await fetch('/api/student-solve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code,image}),signal:req.signal});

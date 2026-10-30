@@ -16,7 +16,7 @@ globalThis.fetch=async(url,opt)=>{
  return {ok:true,json:async()=>({status:mode==='incomplete'?'incomplete':'completed',output_text:mode==='badjson'?'bad':JSON.stringify(output),usage:{input_tokens:100,output_tokens:200,input_tokens_details:{cached_tokens:50}}})};
 };
 const call=async b=>{let status=0,value;await handler({method:'POST',body:b},{setHeader(){},status(n){status=n;return this;},json(v){value=v;}});return {status,value};};
-let r=await call(valid);assert.equal(r.status,200);assert.equal(r.value.model,'Sol');assert.equal(r.value.steps.length,1);assert(!JSON.stringify(r.value).includes('private-ticket'));
+let r=await call(valid);assert.equal(r.status,200);assert.equal(r.value.model,undefined);assert.equal(r.value.steps.length,1);assert(!JSON.stringify(r.value).includes('private-ticket'));
 const modelCall=calls.find(x=>x.url.includes('openai'));assert.equal(modelCall.body.model,'configured-sol');assert.equal(modelCall.body.store,false);assert.equal(modelCall.body.text.format.strict,true);assert(!JSON.stringify(modelCall.body).includes('ALI23456'));assert.equal(finishes.length,1);
 console.log('Sol only, structured steps, private ticket and usage ok');
 for(const [m,status] of [['denied',403],['limit',429],['missing',503]]){mode=m;calls=[];r=await call(valid);assert.equal(r.status,status);assert(!calls.some(x=>x.url.includes('openai')));}

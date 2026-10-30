@@ -24,7 +24,8 @@ questions:[{id:'q1',teacher_id:'u1',body:'2+2=?',topic:'Sayılar',qtype:'mcq',op
 
   const assert=require('node:assert/strict');
   await p.goto('http://app.test/#/s/ALI23456');await p.waitForSelector('.hub-solver-link');await p.click('.hub-solver-link');
-  await p.waitForSelector('#solverQuota');assert.match(await p.locator('#solverQuota').textContent(),/3 \/ 3/);
+  await p.waitForSelector('#solverQuota');assert.match(await p.locator('#solverQuota').textContent(),/daha 3 sual/);
+  assert.doesNotMatch(await p.locator('.solver-page').innerText(),/\bSol\b|\bAI\b/);
   const solve=async()=>{await p.setInputFiles('#solverFile',path.join(FX,'page.jpg'));await p.waitForFunction(()=>!document.querySelector('#solverStart').disabled);await p.click('#solverStart');await p.waitForSelector('.solver-step');await p.waitForFunction(()=>!document.querySelector('#solverFile').disabled);};
   await solve();await p.click('#solverPause');assert.equal(await p.locator('.solver-step').count(),1);await p.waitForTimeout(3700);assert.equal(await p.locator('.solver-step').count(),1);
   await p.click('#solverNext');assert.equal(await p.locator('.solver-step').count(),2);await p.click('#solverAll');assert.equal(await p.locator('.solver-step').count(),3);assert.equal(await p.locator('#solverAnswer').isVisible(),true);
@@ -33,9 +34,9 @@ questions:[{id:'q1',teacher_id:'u1',body:'2+2=?',topic:'Sayılar',qtype:'mcq',op
   await p.screenshot({path:path.join(T,'student-solver-board.png'),fullPage:true});
   await p.click('#solverReplay');assert.equal(await p.locator('.solver-step').count(),1);
   console.log('board: pause, next, full solution, replay and responsive layout ok');
-  await solve();await solve();assert.match(await p.locator('#solverQuota').textContent(),/0 \/ 3/);assert.equal(await p.locator('#solverStart').isDisabled(),true);
-  await p.reload();await p.waitForSelector('#solverQuota');assert.match(await p.locator('#solverQuota').textContent(),/0 \/ 3/);
-  await p.goto('http://app.test/#/s/NRG23456/ask');await p.waitForFunction(()=>document.querySelector('#solverQuota')?.textContent.includes('3 / 3'));
+  await solve();await solve();assert.match(await p.locator('#solverQuota').textContent(),/Bugünkü 3 sualını/);assert.equal(await p.locator('#solverStart').isDisabled(),true);
+  await p.reload();await p.waitForSelector('#solverQuota');assert.match(await p.locator('#solverQuota').textContent(),/Bugünkü 3 sualını/);
+  await p.goto('http://app.test/#/s/NRG23456/ask');await p.waitForFunction(()=>document.querySelector('#solverQuota')?.textContent.includes('daha 3 sual'));
   console.log('quota: three requests, reload persistence and student isolation ok');
   const d=await db();delete d.student_ai_counts;await setDb(d);await p.reload();await p.waitForSelector('text=Bölmə hazırda açılmır');
   assert.deepEqual(errs,[]);console.log('NO ERRORS');await b.close();

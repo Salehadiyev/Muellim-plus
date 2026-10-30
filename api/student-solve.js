@@ -19,8 +19,8 @@ async function rpc(name, body, signal) {
   if(!r.ok){
     if(r.status===404 || /PGRST202/.test(data?.code||''))throw fail(503,'Müəllim bazada 020_student_solver.sql yeniləməsini işə salmalıdır.');
     if(/3 sual/.test(data?.message||''))throw fail(429,'Gündəlik 3 sual limitin dolub. Bakı vaxtı ilə 00:00-da yenilənəcək.');
-    if(/limit/i.test(data?.message||''))throw fail(429,'AI xərc limiti dolub. Müəlliminizlə əlaqə saxlayın.');
-    throw fail(403,'Tələbə linki etibarsızdır və ya AI istifadəsi aktiv deyil.');
+    if(/limit/i.test(data?.message||''))throw fail(429,'Hazırda sual göndərmək mümkün deyil. Müəlliminizlə əlaqə saxlayın.');
+    throw fail(403,'Tələbə linki etibarsızdır və ya bu bölmə aktiv deyil.');
   }
   return data;
 }
@@ -59,13 +59,13 @@ export default async function handler(req,res) {
     } else if(!r.ok && [400,401,403,404,429].includes(r.status)) {
       await rpc('student_ai_finish',{p_ticket:ticket,p_input:0,p_output:0,p_cost:0},AbortSignal.timeout(10000)).catch(()=>{});
     }
-    if(!r.ok)throw fail(r.status===429?429:502,r.status===429?'Sol hazırda məşğuldur. Bir az sonra yenidən yoxlayın.':'Sol cavab verə bilmədi. Bir az sonra yenidən yoxlayın.');
+    if(!r.ok)throw fail(r.status===429?429:502,r.status===429?'Hazırda çox sorğu var. Bir az sonra yenidən yoxlayın.':'Həll hazırlanmadı. Bir az sonra yenidən yoxlayın.');
     if(data?.status==='incomplete')throw fail(502,'Həll yarımçıq qaldı. Yenidən yoxlayın.');
     const text=data?.output_text||(data?.output||[]).flatMap(o=>o.content||[]).filter(c=>c.type==='output_text').map(c=>c.text).join('');
     let out;try{out=JSON.parse(text);}catch(_){throw fail(502,'Həll oxunmadı. Yenidən yoxlayın.');}
     if(typeof out.readable!=='boolean'||typeof out.notice!=='string')throw fail(502,'Həllin formatı düzgün deyil.');
     if(!out.readable)return res.status(200).json({readable:false,notice:out.notice.slice(0,600)||'Bir sualın aydın şəklini yükləyin.'});
     if(typeof out.question!=='string'||!out.question.trim()||out.question.length>4000||typeof out.answer!=='string'||!out.answer.trim()||out.answer.length>2000||!Array.isArray(out.steps)||!out.steps.length||out.steps.length>12||out.steps.some(s=>typeof s.math!=='string'||typeof s.explanation!=='string'||(!s.math.trim()&&!s.explanation.trim())||s.math.length>2000||s.explanation.length>1200))throw fail(502,'Həll tam alınmadı. Yenidən yoxlayın.');
-    return res.status(200).json({readable:true,question:out.question,steps:out.steps,answer:out.answer,model:'Sol'});
+    return res.status(200).json({readable:true,question:out.question,steps:out.steps,answer:out.answer});
   }catch(err){return res.status(err.status||504).json({error:err.status?err.message:'Həll üçün vaxt bitdi və ya bağlantı kəsildi. Yenidən yoxlayın.'});}
 }
