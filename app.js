@@ -1,5 +1,5 @@
 import { mountStudentHub, rememberStudent } from './student-hub.js';
-// Müəllim+ · əsas tətbiq (heç bir quraşdırma tələb etmir)
+// Math Saleh Hoca · əsas tətbiq (heç bir quraşdırma tələb etmir)
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
 const $app = document.getElementById('app');
@@ -264,7 +264,7 @@ async function boot() {
 // Şifrə bərpası: e-poçtdakı linkdən gələndə yeni şifrə
 function newPasswordView() {
   $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="newPw">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Yeni şifrə</h1></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><h1>Yeni şifrə</h1></div>
     <label class="field">Yeni şifrə<span class="hint">Ən azı 8 simvol</span><input type="password" name="p1" required minlength="8" autocomplete="new-password"></label>
     <label class="field">Təkrar<input type="password" name="p2" required minlength="8" autocomplete="new-password"></label>
     <button class="btn primary block" type="submit">Şifrəni dəyiş</button>
@@ -321,7 +321,7 @@ function shell(active) {
   const email = session?.user?.email || '';
   $app.innerHTML = `<div class="shell">
     <nav class="nav" aria-label="Əsas menyu">
-      <a class="brand" href="#/"><span class="brand-mark">M+</span><span class="brand-name">Müəllim+</span></a>
+      <a class="brand" href="#/"><span class="brand-mark">SH</span><span class="brand-name">Math Saleh Hoca</span></a>
       ${items.map(([k, label]) => `<a class="item ${k === active ? 'active' : ''}" href="#/${k}">${label}${k === 'students' ? '<span class="nav-count" id="navStCount"></span>' : ''}</a>`).join('')}
       <div class="spacer"></div>
       <a class="item ${active === 'settings' ? 'active' : ''}" href="#/settings">Ayarlar</a>
@@ -340,7 +340,7 @@ const view = () => document.getElementById('view');
 
 function forgotView() {
   $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="forgotForm">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Şifrə bərpası</h1></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><h1>Şifrə bərpası</h1></div>
     <p class="muted">E-poçtunuzu yazın, şifrəni yeniləmək üçün link göndərəcəyik.</p>
     <label class="field">E-poçt<input type="email" name="email" required autocomplete="email"></label>
     <button class="btn primary block" type="submit">Link göndər</button>
@@ -354,7 +354,7 @@ function forgotView() {
       const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBase() });
       if (error && !/rate|limit/i.test(error.message)) throw error;
       // e-poçtun qeydiyyatda olub-olmadığını açıqlamırıq
-      $('#forgotForm').innerHTML = `<div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Poçtu yoxlayın</h1></div>
+      $('#forgotForm').innerHTML = `<div class="row"><span class="brand-mark" style="color:#fff">SH</span><h1>Poçtu yoxlayın</h1></div>
         <p>Bu ünvanla hesab varsa, bir neçə dəqiqəyə şifrə bərpası linki gələcək. Spam qovluğuna da baxın.</p>
         ${error ? '<p class="notice">Çox tez-tez sorğu göndərildi. Bir saat sonra yenidən yoxlayın.</p>' : ''}
         <button class="btn block" type="button" id="back2">‹ Girişə qayıt</button>`;
@@ -366,7 +366,7 @@ function forgotView() {
 // Yalnız giriş: platforma müəllimin özü üçündür (yeni qeydiyyat yoxdur; tələbələr şəxsi linklə girir)
 function loginView() {
   $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="auth">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Müəllim+</h1></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><h1 class="brand-title">Math Saleh Hoca</h1></div>
     <p class="muted">Hesabınıza daxil olun.</p>
     <label class="field">E-poçt<input type="email" name="email" required autocomplete="email"></label>
     <label class="field">Şifrə<input type="password" name="password" required minlength="6" autocomplete="current-password"></label>
@@ -408,7 +408,7 @@ function limitLine() {
 function pendingView() {
   const email = session?.user?.email || '';
   $app.innerHTML = `<div class="center-screen"><div class="card auth-card stack">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><h1>Təsdiq gözlənilir</h1></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><h1>Təsdiq gözlənilir</h1></div>
     <p>Hesabınız (<strong>${esc(email)}</strong>) yaradıldı, amma hələ təsdiqlənməyib.</p>
     <p class="muted">Platformanın admini hesabınızı təsdiq edəndən sonra daxil ola biləcəksiniz. Təsdiqdən sonra bu səhifəni yeniləyin.</p>
     <div class="row"><button class="btn primary" id="recheck">Yenidən yoxla</button><button class="btn" id="logout2">Çıxış</button></div>
@@ -611,7 +611,7 @@ async function fetchAll(table, cols = '*') {
 async function exportMyData() {
   const [classes, students, questions, tests, submissions] = await Promise.all(
     ['classes', 'students', 'questions', 'tests', 'submissions'].map((t) => fetchAll(t)));
-  const dump = { app: 'Müəllim+', version: 1, exported_at: new Date().toISOString(), teacher: session?.user?.email || '',
+  const dump = { app: 'Math Saleh Hoca', version: 1, exported_at: new Date().toISOString(), teacher: session?.user?.email || '',
     counts: { classes: classes.length, students: students.length, questions: questions.length, tests: tests.length, submissions: submissions.length },
     classes, students, questions, tests, submissions };
   const blob = new Blob([JSON.stringify(dump, null, 1)], { type: 'application/json' });
@@ -627,7 +627,7 @@ async function exportMyData() {
 // Məxfilik siyasəti (girişsiz açılır)
 function privacyView() {
   $app.innerHTML = `<div class="student privacy">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><span class="muted">Math Saleh Hoca</span></div>
     <h1>Məxfilik siyasəti</h1>
     <p class="muted small">Son yenilənmə: 29 oktyabr 2026</p>
     <section class="card stack">
@@ -1106,7 +1106,7 @@ async function ensureNoGroup() {
   if (error) throw error;
   return row.id;
 }
-const studentMsg2 = (s) => `${s.full_name}, bu sənin şəxsi Müəllim+ linkindir. Testləri buradan yaz, nəticələrini, dərs materiallarını və səhv dəftərini də burada görəcəksən:\n${studentLink(s.access_code)}`;
+const studentMsg2 = (s) => `${s.full_name}, bu sənin şəxsi Math Saleh Hoca linkindir. Testləri buradan yaz, nəticələrini, dərs materiallarını və səhv dəftərini də burada görəcəksən:\n${studentLink(s.access_code)}`;
 
 // Yalnız tanınan YouTube ünvanlarından təhlükəsiz video pəncərəsi yaradır.
 function materialVideoUrl(raw) {
@@ -1464,7 +1464,7 @@ async function classView(id) {
   $('#showAdd').onclick = () => { $('#addStudents').hidden = false; $('textarea', $('#addStudents')).focus(); };
   $('#hideAdd') && ($('#hideAdd').onclick = () => { $('#addStudents').hidden = true; });
   const byId = Object.fromEntries(students.map((s) => [s.id, s]));
-  const msgFor = (s) => `${s.full_name}, bu sənin şəxsi Müəllim+ linkindir. Testləri buradan yaz, nəticələrini də burada görəcəksən:\n${studentLink(s.access_code)}`;
+  const msgFor = (s) => `${s.full_name}, bu sənin şəxsi Math Saleh Hoca linkindir. Testləri buradan yaz, nəticələrini də burada görəcəksən:\n${studentLink(s.access_code)}`;
   $$('[data-share]').forEach((b) => b.onclick = () => shareText(msgFor(byId[b.dataset.share]), 'Link kopyalandı'));
   $('#allLinks') && ($('#allLinks').onclick = () => copyText(
     `${cls.name} · şəxsi linklər\n\n` + students.map((s) => `${s.full_name}: ${studentLink(s.access_code)}`).join('\n'), 'Bütün linklər kopyalandı'));
@@ -4778,7 +4778,7 @@ async function studentTest(id) {
   const nameField = `<div class="card stack">${students.length
     ? `<label class="field">Adınızı seçin<select name="name" required><option value="">— seçin —</option>${students.map((s) => `<option>${esc(s)}</option>`).join('')}</select></label>`
     : '<label class="field">Ad və soyadınız<input type="text" name="name" required maxlength="80" autocomplete="name"></label>'}</div>`;
-  const top = '<div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>';
+  const top = '<div class="row"><span class="brand-mark" style="color:#fff">SH</span><span class="muted">Math Saleh Hoca</span></div>';
 
   const run = (name, deadline) => mountTestForm(test, {
     top, draftKey: 'mp_draft_' + id, deadline,
@@ -4829,7 +4829,7 @@ const pct = (r) => (r.total ? Math.round(r.score / r.total * 100) : 0);
 
 function studentCodeForm(note = '') {
   $app.innerHTML = `<div class="center-screen"><form class="card auth-card stack" id="codeForm">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><span class="muted">Math Saleh Hoca</span></div>
     <h1>tələbə girişi</h1>
     ${note ? `<p class="notice">${note}</p>` : '<p class="muted">Müəlliminizin göndərdiyi linki açın və ya kodu yazın.</p>'}
     <label class="field">Kod<input name="code" required maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="məs. K7M2QX9A" style="text-transform:uppercase;letter-spacing:2px"></label>
@@ -5028,7 +5028,7 @@ async function studentPortal(rawCode, testId, sub) {
   const done = me.tests.filter((t) => t.result);
   const avg = done.length ? Math.round(done.reduce((a, t) => a + pct(t.result), 0) / done.length) : null;
   $app.innerHTML = `<div class="student">
-    <div class="row"><span class="brand-mark" style="color:#fff">M+</span><span class="muted">Müəllim+</span></div>
+    <div class="row"><span class="brand-mark" style="color:#fff">SH</span><span class="muted">Math Saleh Hoca</span></div>
     <div><h1>Salam, ${esc(me.name)}</h1><p class="muted">${esc(me.class || '')}</p></div>
     ${an?.exam_date ? `<div class="exam-chip">🎓 <span>${esc(daysLeftText(an.exam_date))}</span><small>${esc(fmtDayAz(an.exam_date))}</small></div>` : ''}
     <section class="card stack"><h2>Yazılacaq testlər${todo.length ? ` (${todo.length})` : ''}</h2>
