@@ -347,3 +347,32 @@ do $$ begin for i in 1..18 loop perform student_ask('AAAAAAAA','Təkrar sual',nu
 select t_err($q$ select student_ask('AAAAAAAA','21-ci',null,null,'00000000-0000-4000-8000-000000001901') $q$,'gündəlik limit');
 reset role;
 \echo 'NO ERRORS: tələbə portalının izolyasiyası keçdi'
+
+-- 020: server AI rezervi, tələbə başına gündə 3 sual və Bakı gecə sərhədi
+reset role;
+update teacher_access set daily_limit_usd=100,monthly_limit_usd=100 where user_id='00000000-0000-4000-8000-0000000000a1';
+set role anon;
+select t_ok((student_ai_allowance('AAAAAAAA')->>'remaining')::int=3,'yeni gündə 3 sual');
+select student_ai_reserve('AAAAAAAA')->>'ticket' as solver_ticket \gset
+select student_ai_reserve('AAAAAAAA');
+select student_ai_reserve('AAAAAAAA');
+select t_ok((student_ai_allowance('AAAAAAAA')->>'remaining')::int=0,'3 sorğudan sonra limit sıfır');
+select t_err($q$ select student_ai_reserve('AAAAAAAA') $q$,'4-cü sual bloklanır');
+select t_ok((student_ai_allowance('BBBBBBBB')->>'remaining')::int=3,'hər tələbənin limiti ayrıdır');
+select student_ai_finish(:'solver_ticket',100,200,0.0022);
+select t_err(format('select student_ai_finish(%L,100,200,0)',:'solver_ticket'),'eyni rezerv iki dəfə bağlanmır');
+select t_err('select * from student_ai_tickets','rezerv tokenləri tələbəyə görünmür');
+select t_err($q$ select student_ai_reserve('INVALID') $q$,'etibarsız kod AI xərci yaratmır');
+select t_err($q$ select student_ai_allowance('INVALID') $q$,'etibarsız kod sayğacı oxumur');
+reset role;
+select t_ok((select count(*) from ai_usage where action='student_solve' and teacher_id='00000000-0000-4000-8000-0000000000a1')=3,'bütün cəhdlərin müəllim xərci yazılır');
+update student_ai_tickets set created_at=(date_trunc('day',now() at time zone 'Asia/Baku') at time zone 'Asia/Baku')-interval '1 second';
+set role anon;
+select t_ok((student_ai_allowance('AAAAAAAA')->>'remaining')::int=3,'Bakı gecə sərhədindən əvvəlki sorğular sayılmır');
+reset role;
+update teacher_access set daily_limit_usd=0 where user_id='00000000-0000-4000-8000-0000000000a1';
+set role anon;
+select t_err($q$ select student_ai_reserve('BBBBBBBB') $q$,'müəllim xərc limiti də qorunur');
+select t_ok((student_ai_allowance('BBBBBBBB')->>'remaining')::int=3,'rədd edilmiş rezerv tələbənin haqqını azaltmır');
+reset role;
+\echo 'NO ERRORS: tələbə Sol limiti keçdi'

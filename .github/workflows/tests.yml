@@ -34,8 +34,8 @@ jobs:
           PGPASSWORD: postgres
       - name: Brauzer və server sınaqları
         run: node tests/run.mjs
-      - name: Ekran şəkilləri (uğursuz olanda)
-        if: failure()
+      - name: Ekran şəkilləri
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ekranlar

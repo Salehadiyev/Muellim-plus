@@ -1,3 +1,5 @@
+import { mountStudentSolver } from './student-solver.js';
+let cleanupStudentSolver = null;
 import { mountStudentHub, rememberStudent } from './student-hub.js';
 // Math Saleh Hoca · əsas tətbiq (heç bir quraşdırma tələb etmir)
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
@@ -286,6 +288,7 @@ function newPasswordView() {
 }
 
 function route() {
+  if (cleanupStudentSolver) { cleanupStudentSolver(); cleanupStudentSolver = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const [page, id] = parts;
   if (page === 't' && id) return studentTest(id);
@@ -4957,6 +4960,15 @@ async function studentPortal(rawCode, testId, sub) {
 
   const hubPage = ['home','tasks','lessons','results','notebook'].includes(testId) ? testId : 'home';
   if (hubPage !== 'home' || testId === 'home') testId = null;
+  if (testId === 'ask') {
+    const {data:me,error}=await sb.rpc('student_portal',{p_code:code});
+    if(error||!me)return studentCodeForm('Tələbə linki açılmadı. Yenidən yoxlayın.');
+    $app.innerHTML='<div class="student solver-page"></div>';
+    const refreshAllowance=async()=>{const {data,error}=await sb.rpc('student_ai_allowance',{p_code:code});if(error||!data)throw new Error(error?.message||'Limit oxunmadı');return data;};
+    try { const allowance=await refreshAllowance();cleanupStudentSolver=mountStudentSolver($app.querySelector('.solver-page'),{code,home,allowance,refreshAllowance}); }
+    catch (_) { $app.querySelector('.solver-page').innerHTML=`<a class="btn" href="${esc(home)}">‹ Ana səhifə</a><h1>Sualını soruş</h1><p class="notice">Bölmə hazırda açılmır. Müəllim bazada 020_student_solver.sql yeniləməsini yoxlamalıdır.</p>`; }
+    return;
+  }
   if (testId === 'defter') return mistakesView(code, home);
 
   if (testId && sub === 'review') {
@@ -5063,6 +5075,7 @@ ${studentInsightsHtml(an, notes, home)}
       toast(value ? 'Tamamlandı kimi qeyd edildi' : 'Qeyd ləğv edildi');
     }
   });
+  if (!hub) $app.querySelector('.student').insertAdjacentHTML('afterbegin', `<a class="btn primary" href="${home}/ask">Sualını soruş · Sol</a>`);
   // "Dərs qeydinə bax": səhifə daxilində aç (hash marşrutu dəyişməsin)
   $$('[data-nt]').forEach((l) => l.onclick = (e) => {
     e.preventDefault();
