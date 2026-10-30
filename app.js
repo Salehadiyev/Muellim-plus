@@ -4208,6 +4208,7 @@ function inkBgRect(data, bg) {
 }
 
 function openInk(q, fieldset, data, onSave) {
+  const radios = fieldset ? [...fieldset.querySelectorAll('input[type=radio]')] : [];
   const dlg = document.createElement('div');
   dlg.className = 'ink-modal';
   dlg.setAttribute('role', 'dialog'); dlg.setAttribute('aria-label', 'Sualın üstündə yaz');
@@ -4221,8 +4222,15 @@ function openInk(q, fieldset, data, onSave) {
       <span class="ink-sp"></span>
       <button type="button" class="btn primary" data-done>Hazır</button></div>
     <div class="ink-hint small" hidden></div>
-    <div class="ink-area"><div class="ink-stage"><canvas class="ink-bgc"></canvas><canvas class="ink-c2"></canvas></div></div>`;
+    <div class="ink-area"><div class="ink-stage"><canvas class="ink-bgc"></canvas><canvas class="ink-c2"></canvas></div></div>
+    ${radios.length ? `<div class="ink-ans" role="group" aria-label="Cavabın"><span class="ink-ans-l">Cavabın:</span>${radios.map((r, j) => `<button type="button" class="ink-a ${r.checked ? 'on' : ''}" data-a="${j}" aria-pressed="${r.checked}">${'ABCDEF'[j]}</button>`).join('')}</div>` : ''}`;
   document.body.appendChild(dlg);
+  // cavabı lövhədən də işarələmək olur — aşağıdakı testdəki variant seçilir
+  $$('[data-a]', dlg).forEach((btn) => btn.onclick = () => {
+    const r = radios[+btn.dataset.a]; if (!r) return;
+    r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true }));
+    $$('[data-a]', dlg).forEach((x) => { const on = x === btn; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
+  });
   document.body.classList.add('ink-open');
   const area = $('.ink-area', dlg), stage = $('.ink-stage', dlg), bgc = $('.ink-bgc', dlg), cv = $('.ink-c2', dlg), hint = $('.ink-hint', dlg);
   let color = INK_COLORS[0][0], width = 6, eraser = false, moveMode = false;

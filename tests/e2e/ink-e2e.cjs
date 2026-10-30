@@ -61,6 +61,9 @@ const H2C = `window.html2canvas = async (el, o) => { const r = el.getBoundingCli
   console.log('trimmed bg dark:', await p.evaluate(() => { const c = document.querySelector('.ink-bgc'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 60) n++; return n / (d.length / 4) > 0.03; }));
   console.log('zoom:', b1.w > b2.w, '| moved:', b3.x - b2.x, b3.y - b2.y, '| no stroke while moving:', (await inkData()).s.length === nS);
   await p.screenshot({ path: path.join(T, 'ink1-draw.png') });
+  // cavabı lövhədən işarələ
+  await p.click('.ink-modal [data-a="1"]');
+  console.log('ink answer:', await p.$$eval('.ink-modal .ink-a', (x) => x.map((b) => b.textContent + (b.classList.contains('on') ? '*' : '')).join('')), '| form:', await p.$eval('#st fieldset', (f) => f.querySelector('input:checked')?.value));
   await p.click('.ink-modal [data-done]'); await p.waitForSelector('.ink-modal', { state: 'detached' });
   console.log('label after:', (await p.textContent('#st fieldset >> nth=0 >> .ink-open-btn')).trim());
   // yenilə — yazılar qalır
