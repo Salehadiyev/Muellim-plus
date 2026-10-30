@@ -108,6 +108,7 @@ export function createClient() {
         const overdue = (t) => !!t.due_at && Date.now() > new Date(t.due_at).getTime() + 120000;
         const vis = (t) => t.class_id === st?.class_id && (!t.student_id || t.student_id === st.id);
         const rvOk = (t) => (t.review_mode || 'never') === 'after_submit' || (t.review_mode === 'after_close' && !t.is_open);
+        if(fn==='student_ai_allowance') { if(!st)return {data:null,error:{message:'Link etibarsızdır'}}; if(!db.student_ai_counts)return {data:null,error:{message:'Could not find function'}};return {data:{remaining:Math.max(0,3-(db.student_ai_counts[st.id]||0)),limit:3},error:null}; }
         if (['student_hub','student_material_done','student_ask'].includes(fn)) {
           if (!db.student_questions || !db.material_progress) return {data:null,error:{message:'Could not find the function '+fn}};
           if (!st) return {data:null,error:{message:'Link etibarsızdır'}};
