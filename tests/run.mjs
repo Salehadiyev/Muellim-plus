@@ -7,6 +7,7 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OK = /NO ERRORS/;
 const tests = {
+  'e2e/material-video-e2e.cjs': [OK, /teacher: embeds and timestamp ok/, /student: inline video, mobile layout and external fallback ok/],
   // brauzer (Playwright + saxta Supabase / AI)
   'e2e/access-e2e.cjs': [OK, /admin approves and sets limits/, /unapproved: waiting screen/, /without 008: works as before/],
   'e2e/rules-e2e.cjs': [/tests delete: (\d+) → \d+ \| 2 test seçilib/, OK, /shuffle stable per student/, /auto-submit when time runs out/, /overdue test blocked/, /tests list: personal tag/],

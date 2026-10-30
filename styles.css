@@ -772,3 +772,7 @@ body.ink-open { overflow: hidden; }
 .ag-b { min-height: 40px; }
 .ag-b.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ag-b.miss:not(.on) { border-color: #F3B4AE; background: #FFF5F4; }
+
+/* Material videosu telefon və iPad ölçüsünə uyğunlaşır. */
+.material-video { width: 100%; aspect-ratio: 16 / 9; margin: 12px 0; }
+.material-video iframe { display: block; width: 100%; height: 100%; border: 0; border-radius: 12px; }
