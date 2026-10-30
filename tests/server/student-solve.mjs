@@ -26,3 +26,8 @@ output={...solved,steps:[]};assert.equal((await call(valid)).status,502);
 output=solved;mode='incomplete';assert.equal((await call(valid)).status,502);mode='badjson';assert.equal((await call(valid)).status,502);
 mode='';calls=[];assert.equal((await call({...valid,image:'data:image/jpeg;base64,QUJD'})).status,400);assert.equal(calls.length,0);
 console.log('unreadable image, incomplete solution and invalid image handled');
+
+output={...solved,steps:[{...solved.steps[0],highlights:[{x:20,y:30,width:10,height:15,label:'nöqtə',unsafe:'ignored'},{x:-1,y:0,width:20,height:20},{x:99,y:0,width:20,height:20}]}]};mode='';
+r=await call(valid);assert.equal(r.status,200);assert.deepEqual(r.value.steps[0].highlights,[{x:20,y:30,width:10,height:15,label:'nöqtə'}]);
+assert(modelCall.body.text.format.schema.properties.steps.items.required.includes('highlights'));
+console.log('bounded graph highlights and schema ok');
