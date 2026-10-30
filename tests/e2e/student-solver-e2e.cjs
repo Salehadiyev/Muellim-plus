@@ -9,6 +9,7 @@ questions:[{id:'q1',teacher_id:'u1',body:'2+2=?',topic:'Sayılar',qtype:'mcq',op
   const b = await chromium.launch(); const errs = [];
   const ctx = await b.newContext({ viewport: { width: 1024, height: 1300 } });
   await ctx.route('**/*', (route) => { const u = new URL(route.request().url());
+    if(u.hostname==='cdn.jsdelivr.net'&&u.pathname.includes('/katex@')){const rel=u.pathname.split('/dist/')[1];const f=path.join(__dirname,'../node_modules/katex/dist',rel);return route.fulfill({contentType:rel.endsWith('.css')?'text/css':rel.endsWith('.js')?'text/javascript':'font/woff2',body:fs.readFileSync(f)});}
     if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : '' });
     if (u.hostname === 'files.test') return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' });
     if (u.hostname === 'www.youtube-nocookie.com') return route.fulfill({ contentType: 'text/html', body: '<p>Video test</p>' });
@@ -28,6 +29,7 @@ questions:[{id:'q1',teacher_id:'u1',body:'2+2=?',topic:'Sayılar',qtype:'mcq',op
   await solve();await p.click('#solverPause');assert.equal(await p.locator('.solver-step').count(),1);await p.waitForTimeout(3700);assert.equal(await p.locator('.solver-step').count(),1);
   await p.click('#solverNext');assert.equal(await p.locator('.solver-step').count(),2);await p.click('#solverAll');assert.equal(await p.locator('.solver-step').count(),3);assert.equal(await p.locator('#solverAnswer').isVisible(),true);
   for(const width of [390,768,1024]){await p.setViewportSize({width,height:1000});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+  await p.waitForSelector('#solverBoard .katex');
   await p.screenshot({path:path.join(T,'student-solver-board.png'),fullPage:true});
   await p.click('#solverReplay');assert.equal(await p.locator('.solver-step').count(),1);
   console.log('board: pause, next, full solution, replay and responsive layout ok');

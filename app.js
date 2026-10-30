@@ -4966,7 +4966,7 @@ async function studentPortal(rawCode, testId, sub) {
     $app.innerHTML='<div class="student solver-page"></div>';
     const refreshAllowance=async()=>{const {data,error}=await sb.rpc('student_ai_allowance',{p_code:code});if(error||!data)throw new Error(error?.message||'Limit oxunmadı');return data;};
     try { const allowance=await refreshAllowance();cleanupStudentSolver=mountStudentSolver($app.querySelector('.solver-page'),{code,home,allowance,refreshAllowance}); }
-    catch (_) { $app.querySelector('.solver-page').innerHTML=`<a class="btn" href="${home}">‹ Ana səhifə</a><h1>Sualını soruş</h1><p class="notice">Bölmə hazırda açılmır. Müəllim bazada 020_student_solver.sql yeniləməsini yoxlamalıdır.</p>`; }
+    catch (_) { $app.querySelector('.solver-page').innerHTML=`<a class="btn" href="${esc(home)}">‹ Ana səhifə</a><h1>Sualını soruş</h1><p class="notice">Bölmə hazırda açılmır. Müəllim bazada 020_student_solver.sql yeniləməsini yoxlamalıdır.</p>`; }
     return;
   }
   if (testId === 'defter') return mistakesView(code, home);
