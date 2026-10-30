@@ -780,6 +780,120 @@ const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => CODE_ABC[b % 31]).join('');
 
 // Qrupun səhv dəftəri (müəllim): kimdə neçə sual, ən çox səhv edilənlər, AI ilə bənzər hazırlamaq
+// ================= Mövzu planı (qrup) =================
+// classes.plan = { topics: [{ t: 'Mövzu', done: 'YYYY-MM-DD' | null }] } — ardıcıllıq siyahının sırasıdır.
+const topicKey = (t) => String(t || '').toLocaleLowerCase('tr').replace(/[^a-zəğıöşüçâîû0-9]+/gi, '');
+const topicMatch = (a, b) => { const x = topicKey(a), y = topicKey(b); return !!x && !!y && (x === y || (Math.min(x.length, y.length) >= 5 && (x.includes(y) || y.includes(x)))); };
+const localYmd = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const shortDay = (d) => `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+// Qrupun testlərindən mövzu üzrə nəticə: { mövzu: { r, n, st: { tələbə id: { r, n } } } }
+async function groupTopicStats(tests) {
+  const tids = (tests || []).map((t) => t.id);
+  if (!tids.length) return {};
+  const { data: subs, error } = await sb.from('submissions').select('test_id, student_id, answers').in('test_id', tids);
+  if (error) throw error;
+  const qids = [...new Set((tests || []).flatMap((t) => t.question_ids || []))];
+  const qs = {};
+  for (let i = 0; i < qids.length; i += 200) {
+    const { data, error: e2 } = await sb.from('questions').select('id, topic, answer, qtype').in('id', qids.slice(i, i + 200));
+    if (e2) throw e2;
+    (data || []).forEach((q) => { qs[q.id] = q; });
+  }
+  const tq = Object.fromEntries((tests || []).map((t) => [t.id, t.question_ids || []]));
+  const out = {};
+  (subs || []).forEach((x) => (tq[x.test_id] || []).forEach((id) => {
+    const q = qs[id];
+    if (!q || q.qtype !== 'mcq' || !String(q.topic || '').trim()) return;
+    const ok = String((x.answers || {})[id] ?? '').trim().toLowerCase() === String(q.answer || '').trim().toLowerCase();
+    const o = out[q.topic] || (out[q.topic] = { r: 0, n: 0, st: {} });
+    o.n++; if (ok) o.r++;
+    if (x.student_id) { const s = o.st[x.student_id] || (o.st[x.student_id] = { r: 0, n: 0 }); s.n++; if (ok) s.r++; }
+  }));
+  return out;
+}
+
+// Həftəlik plan: qalan mövzular imtahana qədər bölünür, son həftələr zəif mövzuların təkrarı + deneme
+function buildWeeks(topics, examDate, weakNames) {
+  if (!examDate) return null;
+  const today = new Date(new Date().toDateString());
+  const days = Math.round((new Date(examDate + 'T00:00:00') - today) / 864e5);
+  if (days < 0) return { past: true, weeks: [] };
+  const n = Math.max(1, Math.ceil((days + 1) / 7));
+  const rev = n >= 6 ? 2 : n >= 3 ? 1 : 0;
+  const left = topics.filter((x) => !x.done).map((x) => x.t);
+  const study = n - rev;
+  const weeks = [];
+  const per = study > 0 ? Math.ceil(left.length / study) : 0;
+  for (let i = 0; i < n; i++) {
+    const a = new Date(today); a.setDate(a.getDate() + i * 7);
+    const b = new Date(a); b.setDate(b.getDate() + 6);
+    const end = new Date(examDate + 'T00:00:00');
+    const label = `${i + 1}-ci həftə · ${shortDay(a)}–${shortDay(b > end ? end : b)}`;
+    if (i < study) weeks.push({ label, items: left.slice(Math.round(i * left.length / study), Math.round((i + 1) * left.length / study)), rev: false });
+    else weeks.push({ label, items: i === n - 1 ? [...weakNames.slice(0, 3), 'Son deneme'] : [...weakNames, 'Deneme'], rev: true });
+  }
+  if (study <= 0 && left.length) weeks[0].items.unshift(...left);
+  return { past: false, weeks, per, left: left.length };
+}
+
+async function classPlan(box, cls, students, tests) {
+  const stats = await groupTopicStats(tests);
+  const plan = cls.plan && Array.isArray(cls.plan.topics) ? cls.plan : null;
+  let topics = plan ? plan.topics.map((x) => ({ t: String(x.t || '').slice(0, 120), done: x.done || null })).filter((x) => x.t)
+    : [...TRYOS_TOPICS.matematik, ...TRYOS_TOPICS.sayisal].map((t) => ({ t, done: null }));
+  // testlərdə olan, amma siyahıda olmayan mövzular sona əlavə olunur
+  Object.keys(stats).forEach((t) => { if (!topics.some((x) => topicMatch(x.t, t))) topics.push({ t, done: null }); });
+  const byStu = Object.fromEntries(students.map((s) => [s.id, s.full_name]));
+  const statOf = (t) => {
+    const keys = Object.keys(stats).filter((k) => topicMatch(k, t));
+    if (!keys.length) return null;
+    const o = { r: 0, n: 0, st: {} };
+    keys.forEach((k) => { const s = stats[k]; o.r += s.r; o.n += s.n; Object.entries(s.st).forEach(([id, v]) => { const z = o.st[id] || (o.st[id] = { r: 0, n: 0 }); z.r += v.r; z.n += v.n; }); });
+    return o;
+  };
+  const save = async () => {
+    const { error } = await sb.from('classes').update({ plan: { topics } }).eq('id', cls.id);
+    if (error) throw needSql(error, '017_plan.sql');
+    cls.plan = { topics };
+  };
+  const draw = () => {
+    const done = topics.filter((x) => x.done).length;
+    const rows = topics.map((x) => ({ ...x, s: statOf(x.t) }));
+    const weak = rows.filter((x) => x.s && x.s.n >= 5 && x.s.r / x.s.n < 0.5).sort((a, b) => a.s.r / a.s.n - b.s.r / b.s.n);
+    const wk = buildWeeks(topics, cls.exam_date, weak.map((x) => x.t));
+    const pctDone = topics.length ? Math.round(done / topics.length * 100) : 0;
+    box.innerHTML = `
+      <div class="row between"><h2>Mövzu planı</h2><span class="small muted">${cls.exam_date ? esc(daysLeftText(cls.exam_date)) : 'İmtahan tarixini yuxarıda yazın — həftəlik plan qurulacaq'}</span></div>
+      <div class="plan-prog"><div class="row between small"><span><strong>${done}</strong> / ${topics.length} mövzu keçilib</span><span>${pctDone}%</span></div>
+        <div class="pbar"><span style="width:${pctDone}%"></span></div></div>
+      ${weak.length ? `<p class="notice small" style="margin:0">Qrup zəifdir: ${weak.slice(0, 5).map((x) => `<strong>${esc(x.t)}</strong> ${Math.round(x.s.r / x.s.n * 100)}%`).join(' · ')}</p>` : ''}
+      ${wk ? (wk.past ? '<p class="muted small">İmtahan tarixi keçib.</p>' : `<details class="plan-weeks" open><summary><strong>📅 Həftəlik plan</strong> <span class="small muted">· qalan ${wk.left} mövzu, ${wk.weeks.length} həftə${wk.per ? `, həftədə ~${wk.per}` : ''}</span></summary>
+        <ol class="pw-list">${wk.weeks.map((w) => `<li class="${w.rev ? 'rev' : ''}"><span class="pw-l">${esc(w.label)}${w.rev ? ' · təkrar' : ''}</span><span class="pw-i">${w.items.length ? w.items.map(esc).join(' · ') : '<span class="muted">boş həftə — təkrar və ya deneme</span>'}</span></li>`).join('')}</ol></details>`) : ''}
+      <div class="plan-list">${rows.map((x, i) => { const p = x.s ? Math.round(x.s.r / x.s.n * 100) : null;
+        const ws = x.s ? Object.entries(x.s.st).filter(([id, v]) => byStu[id] && v.n >= 3 && v.r / v.n < 0.5).map(([id, v]) => `${esc(byStu[id])} ${Math.round(v.r / v.n * 100)}%`) : [];
+        return `<div class="prow ${x.done ? 'done' : ''}">
+          <label class="pr-chk"><input type="checkbox" data-pdone="${i}" ${x.done ? 'checked' : ''} aria-label="${esc(x.t)} keçildi"></label>
+          <div class="pr-main"><span class="pr-t">${esc(x.t)}</span>
+            <span class="small muted">${x.done ? `keçildi · ${esc(x.done.split('-').reverse().join('.'))}` : 'keçilməyib'}${x.s ? ` · ${x.s.n} cavab` : ''}</span>
+            ${ws.length ? `<span class="small pr-weak">zəif: ${ws.join(', ')}</span>` : ''}</div>
+          ${pctChip(p)}
+          <span class="pr-act"><button type="button" class="btn small" data-pup="${i}" aria-label="Yuxarı" ${i ? '' : 'disabled'}>↑</button><button type="button" class="btn small" data-pdn="${i}" aria-label="Aşağı" ${i < rows.length - 1 ? '' : 'disabled'}>↓</button><button type="button" class="btn small" data-pdel="${i}" aria-label="${esc(x.t)} sil">✕</button></span>
+        </div>`; }).join('')}</div>
+      <form class="row" id="pAdd"><input name="t" maxlength="120" placeholder="Yeni mövzu (məs. Problemler)" aria-label="Yeni mövzu" style="flex:1;min-width:180px;min-height:44px"><button class="btn">+ Əlavə et</button></form>
+      <p class="small muted" style="margin:0">Faiz — bu qrupun testlərindəki həmin mövzu sualları üzrə düz cavab payı. «Zəif» — ən azı 3 cavabda 50%-dən aşağı olan tələbələr. Ardıcıllığı ↑↓ ilə dəyiş.</p>`;
+    const act = (fn) => async () => { const old = topics.map((x) => ({ ...x })); fn(); draw(); try { await save(); } catch (e) { topics = old; draw(); fail(e); } };
+    $$('[data-pdone]', box).forEach((c) => c.onchange = act(() => { const x = topics[+c.dataset.pdone]; x.done = c.checked ? localYmd() : null; }));
+    $$('[data-pup]', box).forEach((b) => b.onclick = act(() => { const i = +b.dataset.pup; [topics[i - 1], topics[i]] = [topics[i], topics[i - 1]]; }));
+    $$('[data-pdn]', box).forEach((b) => b.onclick = act(() => { const i = +b.dataset.pdn; [topics[i + 1], topics[i]] = [topics[i], topics[i + 1]]; }));
+    $$('[data-pdel]', box).forEach((b) => b.onclick = () => { const x = topics[+b.dataset.pdel]; if (confirm(`«${x.t}» plandan silinsin?`)) act(() => { topics.splice(topics.indexOf(x), 1); })(); });
+    $('#pAdd', box).onsubmit = (e) => { e.preventDefault(); const t = new FormData(e.target).get('t').trim().slice(0, 120);
+      if (!t) return; if (topics.some((x) => topicKey(x.t) === topicKey(t))) return toast('Bu mövzu artıq var', true);
+      act(() => topics.push({ t, done: null }))(); };
+  };
+  draw();
+}
+
 async function classMistakes(box, students, notes = []) {
   if (!students.length) { box.innerHTML = '<div class="empty">Qrupda tələbə yoxdur.</div>'; return; }
   const { data: rows, error } = await sb.from('mistakes').select('id, student_id, question_id, status, attempts, due_at').in('student_id', students.map((x) => x.id));
@@ -1187,6 +1301,7 @@ async function classView(id) {
     <div class="seg tseg" role="tablist" aria-label="Qrup bölmələri">
       <button type="button" class="seg-b on" data-ctab="st" role="tab">Tələbələr <span class="seg-c">${students.length}</span></button>
       <button type="button" class="seg-b" data-ctab="ts" role="tab">Testlər <span class="seg-c">${(tests || []).length}</span></button>
+      <button type="button" class="seg-b" data-ctab="pl" role="tab">🗺️ Plan</button>
       <button type="button" class="seg-b" data-ctab="mk" role="tab">📒 Səhv dəftəri</button>
       <button type="button" class="seg-b" data-ctab="nt" role="tab">📚 Materiallar</button>
     </div>
@@ -1215,20 +1330,24 @@ async function classView(id) {
         : '<div class="empty">Hələ test yoxdur.</div>'}
     </section>
     <section class="card stack" data-cpane="nt" hidden id="ntPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
+    <section class="card stack" data-cpane="pl" hidden id="plPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
     <section class="card stack" data-cpane="mk" hidden id="mkPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
     <details class="danger-zone"><summary>Qrupu silmək</summary><p class="small muted">Qrup silinir; tələbələr «Qrupsuz» siyahısına keçir, nəticələri və testlər qalır.</p><button class="btn danger" id="delClass">Qrupu sil</button></details>`;
-  let mkLoaded = false; let ntLoaded = false;
+  let mkLoaded = false; let ntLoaded = false; let plLoaded = false;
   $('#saveExam').onclick = () => busy($('#saveExam'), async () => {
     const v = $('#examDate').value || null;
     const { error: e2 } = await sb.from('classes').update({ exam_date: v }).eq('id', id);
     if (e2) throw needSql(e2, '012_student_insights.sql');
     $('#examLeft').textContent = v ? daysLeftText(v) : 'Tarix silindi.';
+    cls.exam_date = v;
+    if (plLoaded) classPlan($('#plPane'), cls, students, tests || []).catch(fail);
     toast('Yadda saxlandı');
   }).catch(fail);
   $$('[data-ctab]').forEach((b) => b.onclick = () => {
     $$('[data-ctab]').forEach((x) => x.classList.toggle('on', x === b));
     $$('[data-cpane]').forEach((p) => { p.hidden = p.dataset.cpane !== b.dataset.ctab; });
     if (b.dataset.ctab === 'nt' && !ntLoaded) { ntLoaded = true; classNotes($('#ntPane'), cls, students).catch((err) => { $('#ntPane').innerHTML = `<p class="notice">${esc(err.message)}</p>`; }); }
+    if (b.dataset.ctab === 'pl' && !plLoaded) { plLoaded = true; classPlan($('#plPane'), cls, students, tests || []).catch((err) => { $('#plPane').innerHTML = `<p class="notice">${esc(err.message)}</p>`; }); }
     if (b.dataset.ctab === 'mk' && !mkLoaded) { mkLoaded = true; classMistakes($('#mkPane'), students).catch((err) => { $('#mkPane').innerHTML = `<p class="notice">${esc(err.message)}</p>`; }); }
   });
   $('#showAdd').onclick = () => { $('#addStudents').hidden = false; $('textarea', $('#addStudents')).focus(); };

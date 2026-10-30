@@ -1604,3 +1604,16 @@ update public.lessons set fee = 0 where fee <> 0;
 delete from public.lessons a using public.lessons b
   where a.student_id = b.student_id and a.lesson_date = b.lesson_date and (a.created_at, a.id) < (b.created_at, b.id);
 create unique index if not exists lessons_one_per_day on public.lessons(student_id, lesson_date);
+
+-- ================= 017_plan.sql =================
+-- Müəllim+ · 17-ci yeniləmə: qrupun mövzu planı (hansı mövzu keçilib, ardıcıllıq)
+-- Supabase → SQL Editor → New query → bu faylın hamısını yapışdır → Run. Təkrar işlətmək zərərsizdir.
+-- Plan yalnız müəllimə görünür (classes cədvəlinin öz qaydaları: müəllim yalnız öz qrupunu görür/dəyişir).
+
+alter table public.classes add column if not exists plan jsonb;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'classes_plan_check') then
+    alter table public.classes add constraint classes_plan_check
+      check (plan is null or (jsonb_typeof(plan) = 'object' and pg_column_size(plan) <= 60000));
+  end if;
+end $$;

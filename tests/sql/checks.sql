@@ -284,4 +284,16 @@ insert into lessons (student_id, lesson_date, status) values ('00000000-0000-400
 select t_err($q$ insert into lessons (student_id, lesson_date, status) values ('00000000-0000-4000-8000-0000000000b1', current_date - 5, 'missed') $q$, 'eyni gün iki qeyd olmur');
 reset role;
 
+-- ---------- 017: qrupun mövzu planı ----------
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+update classes set plan = '{"topics":[{"t":"Kümeler","done":"2026-01-01"}]}' where id = '00000000-0000-4000-8000-0000000000c1';
+select t_ok((select plan->'topics'->0->>'t' from classes where id = '00000000-0000-4000-8000-0000000000c1') = 'Kümeler', 'müəllim planı saxlayır');
+select t_err($q$ update classes set plan = '[1,2]' where id = '00000000-0000-4000-8000-0000000000c1' $q$, 'plan obyekt olmalıdır');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+update classes set plan = '{"x":1}' where id = '00000000-0000-4000-8000-0000000000c1';
+reset role;
+select t_ok((select plan ? 'topics' from classes where id = '00000000-0000-4000-8000-0000000000c1'), 'başqa müəllim planı dəyişə bilmir');
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

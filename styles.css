@@ -740,3 +740,26 @@ body.ink-open { overflow: hidden; }
 .ink-ans-l { font-weight: 600; color: var(--muted); margin-right: 4px; }
 .ink-a { min-width: 52px; min-height: 44px; border: 2px solid var(--line-strong); border-radius: 12px; background: #fff; font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; }
 .ink-a.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- Mövzu planı ---------- */
+.pbar { height: 10px; border-radius: 6px; background: #EEF1F5; overflow: hidden; margin-top: 6px; }
+.pbar span { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.plan-weeks { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: #F7FBFC; }
+.plan-weeks summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pw-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.pw-list li { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; gap: 10px; padding: 8px 10px; background: #fff; border-radius: 10px; border-left: 4px solid var(--accent); }
+.pw-list li.rev { border-left-color: #D97706; background: #FFFBEB; }
+.pw-l { font-weight: 600; font-size: 13px; }
+.pw-i { font-size: 14px; }
+.plan-list { display: grid; gap: 6px; }
+.prow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.prow.done { background: #F3FAF6; }
+.prow.done .pr-t { color: var(--green); }
+.pr-chk input { width: 26px; height: 26px; accent-color: var(--accent); }
+.pr-chk { min-width: 40px; min-height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.pr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pr-t { font-weight: 600; }
+.pr-weak { color: #B42318; }
+.pr-act { display: flex; gap: 4px; }
+.pr-act .btn { min-width: 40px; min-height: 40px; padding: 0 8px; }
+@media (max-width: 640px) { .pw-list li { grid-template-columns: 1fr; gap: 2px; } .pr-act .btn { min-width: 36px; } .prow { flex-wrap: wrap; } }

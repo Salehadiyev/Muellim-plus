@@ -27,12 +27,12 @@ Sayt bu hesablarda işləyir — hər hansı söhbət bağlansa da dayanmır.
 - Pulsuz Supabase planı avtomatik nüsxə saxlamır; tələbə çoxalanda Pro plana keçmək məsləhətdir.
 
 ## Bazanın yenilənmələri (SQL faylları)
-`supabase/` qovluğunda: `schema.sql` (əsas) və `002`…`016` yeniləmələri. Hamısı bir faylda: `supabase/full_schema.sql` — **yeni boş Supabase layihəsi** üçün bunu bir dəfə işə salmaq kifayətdir. Hər fayl təkrar işə salına bilər (zərərsizdir).
+`supabase/` qovluğunda: `schema.sql` (əsas) və `002`…`017` yeniləmələri. Hamısı bir faylda: `supabase/full_schema.sql` — **yeni boş Supabase layihəsi** üçün bunu bir dəfə işə salmaq kifayətdir. Hər fayl təkrar işə salına bilər (zərərsizdir).
 
 ## Bölmələr (qısa)
 - **Ana səhifə** — bu günün xülasəsi, zəif nəticələr, açıq testlər.
 - **Tələbələr** — yarat, qrupa qoy, köçür, sil; şəxsi link; tələbə səhifəsi (nəticələr, gizli qeyd, fərdi tapşırıq, valideyn hesabatı).
-- **Qruplar** — tələbələr, testlər, səhv dəftəri, materiallar, analiz, imtahan tarixi.
+- **Qruplar** — tələbələr, testlər, mövzu planı (həftəlik, zəif mövzular), səhv dəftəri, materiallar, analiz, imtahan tarixi.
 - **Suallar** — bank (real çətinlik, toplu silmə), kitabdan/PDF, AI ilə (nümunədən, mövzudan, məktəb, yaz və çevir).
 - **Testlər** — yeni test, ⚡ avtomatik test (kitabdan / AI / bankdan, asan-orta-çətin bölgüsü), açıq/bağlı, nəticələr və tələbənin qələmlə həlli.
 - **Materiallar** — PDF, şəkil, mətn, video link — qrup-qrup.

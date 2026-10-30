@@ -27,6 +27,9 @@ class Query {
     if ((this.table === 'lessons' || this.table === 'payments') && !db.lessons) return { data: null, error: { message: 'relation "public.' + this.table + '" does not exist' } };
     if (this.table === 'lesson_notes' && !db.lesson_notes) return { data: null, error: { message: 'relation "public.lesson_notes" does not exist' } };
     if (this.table === 'mistakes' && !db.mistakes) return { data: null, error: { message: 'relation "public.mistakes" does not exist' } };
+    // köhnə baza təqlidi: __missing_columns = { cədvəl: ['sütun'] } — həmin sütuna yazanda xəta
+    const miss = (db.__missing_columns || {})[this.table] || [];
+    if ((this.op === 'update' || this.op === 'insert') && miss.some((c) => [this.values || {}, ...(this.rows || [])].some((o) => c in o))) return { data: null, error: { message: `Could not find the '${miss[0]}' column of '${this.table}' in the schema cache` } };
     let t = db[this.table] = db[this.table] || [];
     if (this.op === 'insert') {
       const made = this.rows.map((r) => ({ id: uid(), created_at: new Date().toISOString(), teacher_id: 'u1', is_open: true, options: [], ...(this.table === 'students' && !window.NO_CODES ? { access_code: Math.random().toString(36).slice(2, 10).toUpperCase() } : {}), ...r }));
