@@ -7,7 +7,7 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OK = /NO ERRORS/;
 const tests = {
-  'e2e/student-solver-e2e.cjs': [OK, /board: pause, next, full solution, replay and responsive layout ok/, /quota: three requests, reload persistence and student isolation ok/],
+  'e2e/student-solver-e2e.cjs': [OK, /whiteboard: ink, graph highlights, seek, cached replay and reduced motion ok/, /board: pause, next, full solution, replay and responsive layout ok/, /quota: three requests, reload persistence and student isolation ok/],
   'server/student-solve.mjs': [/Sol only, structured steps, private ticket and usage ok/, /invalid code, daily limit and missing migration block AI/, /unreadable image, incomplete solution and invalid image handled/],
   'e2e/student-hub-e2e.cjs': [OK, /material: completion, resume, related test and message saved/, /test: draft resume, filters and question context ok/, /teacher: completion visible, reply delivered, other student isolated/, /layout and old database fallback ok/],
   'e2e/material-video-e2e.cjs': [OK, /teacher: embeds and timestamp ok/, /student: inline video, mobile layout and external fallback ok/],
