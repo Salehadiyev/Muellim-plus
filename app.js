@@ -1104,6 +1104,34 @@ async function ensureNoGroup() {
 }
 const studentMsg2 = (s) => `${s.full_name}, bu sənin şəxsi Müəllim+ linkindir. Testləri buradan yaz, nəticələrini, dərs materiallarını və səhv dəftərini də burada görəcəksən:\n${studentLink(s.access_code)}`;
 
+// Yalnız tanınan YouTube ünvanlarından təhlükəsiz video pəncərəsi yaradır.
+function materialVideoUrl(raw) {
+  try {
+    const u = new URL(raw);
+    if (!['https:', 'http:'].includes(u.protocol)) return '';
+    const host = u.hostname.toLowerCase();
+    let id = '';
+    if (host === 'youtu.be') id = u.pathname.slice(1);
+    else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'www.youtube-nocookie.com', 'youtube-nocookie.com'].includes(host)) {
+      if (u.pathname === '/watch') id = u.searchParams.get('v') || '';
+      else id = (u.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)\/?$/) || [])[1] || '';
+    }
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return '';
+    const result = new URL('https://www.youtube-nocookie.com/embed/' + id);
+    result.searchParams.set('playsinline', '1');
+    const time = u.searchParams.get('start') || u.searchParams.get('t') || '';
+    const m = time.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+    const seconds = /^\d+$/.test(time) ? Number(time) : m ? Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0) : 0;
+    if (Number.isSafeInteger(seconds) && seconds > 0) result.searchParams.set('start', String(seconds));
+    return result.href;
+  } catch (_) { return ''; }
+}
+
+function materialVideoHtml(raw, title) {
+  const src = materialVideoUrl(raw);
+  return src ? `<div class="material-video"><iframe src="${esc(src)}" title="${esc(title || 'Dərs videosu')}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe></div><p class="small muted">Video açılmasa, materialın linkindən YouTube-da baxa bilərsiniz.</p>` : '';
+}
+
 // Materiallar (dərs qeydləri): mətn, PDF/şəkil, video link; bir neçə qrupa və ya bir tələbəyə
 async function notesManager(box, { classes, students, fixedClass = null }) {
   const { data: all, error: err } = await sb.from('lesson_notes').select('*').order('created_at', { ascending: false });
@@ -1142,6 +1170,7 @@ async function notesManager(box, { classes, students, fixedClass = null }) {
           ${n.file_path ? `<a class="tag ai" href="${esc(noteUrl(n.file_path))}" target="_blank" rel="noopener">${n.file_type === 'application/pdf' ? '📄' : '🖼'} ${esc(n.file_name || 'fayl')}</a>` : ''}
           ${n.link_url ? `<a class="tag deneme" href="${esc(n.link_url)}" target="_blank" rel="noopener">▶ Video / link</a>` : ''}</div>
         ${n.body ? `<div class="nt-body">${esc(n.body)}</div>` : ''}
+        ${materialVideoHtml(n.link_url, n.title)}
         <div><button class="btn small danger" data-ntdel="${n.id}">Sil</button></div></article>`).join('')}</div>`
       : '<div class="empty">Hələ material yoxdur.</div>'}`;
   const form = $('#ntForm', box);
@@ -4898,6 +4927,7 @@ function studentInsightsHtml(an, notes, home) {
       return `<details class="nt-item" id="nt-${n.id}"><summary><span class="nt-head"><strong>${esc(n.title)}</strong><span class="small muted">${esc(fmtDue(n.created_at))}</span></span>
           <span class="nt-meta">${n.topic ? `<span class="tag book">${esc(n.topic)}</span>` : ''}${n.personal ? '<span class="tag deneme">sənin üçün</span>' : ''}${n.file_path ? `<span class="tag">${n.file_type === 'application/pdf' ? '📄 PDF' : '🖼 şəkil'}</span>` : ''}${n.link_url ? '<span class="tag deneme">▶ video</span>' : ''}</span></summary>
         ${n.body ? `<div class="nt-body">${esc(n.body)}</div>` : ''}
+        ${materialVideoHtml(n.link_url, n.title)}
         ${n.link_url && /^https?:\/\//i.test(n.link_url) ? `<a class="btn primary block" href="${esc(n.link_url)}" target="_blank" rel="noopener">▶ Videoya / linkə bax</a>` : ''}
         ${url ? (isImg ? `<a href="${esc(url)}" target="_blank" rel="noopener"><img class="nt-img" src="${esc(url)}" alt="${esc(n.file_name || n.title)}" loading="lazy"></a>` : `<a class="btn block" href="${esc(url)}" target="_blank" rel="noopener">📄 ${esc(n.file_name || 'Faylı aç')}</a>`) : ''}
       </details>`; }).join('')}</section>`);
