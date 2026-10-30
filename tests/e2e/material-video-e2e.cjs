@@ -5,7 +5,7 @@ const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname
 const ROOT = path.join(__dirname, '..', '..');
 const DB = { classes: [{id:'c1',name:'11A',teacher_id:'u1'}], students: [{id:'s1',class_id:'c1',full_name:'Test',access_code:'ALI23456'}], questions: [], tests: [], submissions: [], ai_usage: [], mistakes: [], lesson_notes: [
 'https://youtu.be/dQw4w9WgXcQ?t=1m30s', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://youtube.com/shorts/dQw4w9WgXcQ', 'https://drive.google.com/file/d/example', 'https://youtube.com.evil.test/watch?v=dQw4w9WgXcQ'
-].map((link_url,i)=>({id:'n'+i,teacher_id:'u1',class_id:'c1',title:'Video '+i,link_url,created_at:new Date().toISOString()})) };
+].map((link_url,i)=>({id:'n'+i,teacher_id:'u1',class_id:'c1',title:'Video '+i,link_url,created_at:new Date(Date.UTC(2026,0,5-i)).toISOString()})) };
 (async () => {
   const b = await chromium.launch(); const errs = [];
   const ctx = await b.newContext({ viewport: { width: 1024, height: 1300 } });
