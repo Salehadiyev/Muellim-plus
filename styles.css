@@ -833,7 +833,7 @@ body.ink-open { overflow: hidden; }
 .solver-image-wrap img { display:block; width:100%; height:auto; border-radius:6px; }
 #solverMarks { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 .solver-figure figcaption { color:#66737c; font-size:12px; text-align:center; margin-top:8px; }
-.solver-writing { min-width:0; }
+.solver-writing { min-width:0; max-height:65vh; overflow-y:auto; scroll-behavior:auto; padding-right:4px; }
 .solver-step { display:flex; gap:12px; padding:20px 0; border-top:1px solid #e7ebed; }
 .solver-step-number { background:#edf3f5; color:#52636a; border-radius:50%; width:28px; height:28px; flex-shrink:0; display:grid; place-items:center; font-weight:700; }
 .solver-step.is-current .solver-step-number { background:#fff1d6; color:#9c5900; }
@@ -849,4 +849,4 @@ body.ink-open { overflow: hidden; }
 .solver-progress { display:flex; align-items:center; gap:12px; color:#52636a; font-size:13px; }
 .solver-progress input { flex:1; min-width:60px; min-height:44px; accent-color:#0e7490; }
 .solver-progress span { font-variant-numeric:tabular-nums; white-space:nowrap; }
-@media(max-width:650px) { .solver-board { padding:16px; }.solver-workspace { grid-template-columns:1fr; }.solver-figure { position:static; max-width:430px; width:100%; margin:auto; }.solver-math { font-size:18px; }.solver-toolbar .btn { flex:1 1 42%; }.solver-progress label { display:none; } }
+@media(max-width:650px) { .solver-board { padding:16px; }.solver-workspace { grid-template-columns:1fr; }.solver-figure { position:static; max-width:240px; width:100%; margin:auto; }.solver-math { font-size:18px; }.solver-toolbar .btn { flex:1 1 42%; }.solver-progress label { display:none; } }

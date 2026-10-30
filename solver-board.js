@@ -22,6 +22,7 @@ export function mountWhiteboard(root,result,image){
     return {el,math,ink,explanation:el.querySelector('p'),step};
   });
   const seek=$('#solverSeek');seek.max=String(duration);
+  const setText=(selector,value)=>{const el=$(selector);if(el.textContent!==value)el.textContent=value;};
   const time=ms=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
   function marks(index,p){
     const host=$('#solverMarks');
@@ -46,11 +47,16 @@ export function mountWhiteboard(root,result,image){
     });
     $('#solverQuestion').style.clipPath=`inset(0 ${100*(1-Math.min(1,elapsed/(intro*.7)))}% 0 0)`;
     $('#solverAnswer').hidden=elapsed<end;
-    $('#solverCounter').textContent=elapsed<intro?'Sualı lövhəyə köçürürük':`${Math.min(entries.length,current+1)} / ${entries.length} addım`;
+    setText('#solverCounter',elapsed<intro?'Sualı lövhəyə köçürürük':`${Math.min(entries.length,current+1)} / ${entries.length} addım`);
     marks(current,current<0?0:Math.max(0,(elapsed-cues[current].start)/(cues[current].end-cues[current].start)));
+    if(current!==lastStage&&playing&&current>=0){
+      const panel=$('.solver-writing'),el=entries[current].el;
+      const top=el.getBoundingClientRect().top-panel.getBoundingClientRect().top+panel.scrollTop;
+      panel.scrollTo({top:Math.max(0,top-12),behavior:'auto'});
+    }
     lastStage=current;seek.value=String(Math.round(elapsed));seek.setAttribute('aria-valuetext',`${time(elapsed)} / ${time(duration)}`);
-    $('#solverTime').textContent=`${time(elapsed)} / ${time(duration)}`;
-    $('#solverPause').textContent=playing?'Dayandır':'Davam et';$('#solverPause').disabled=elapsed>=duration;$('#solverNext').disabled=elapsed>=duration;
+    setText('#solverTime',`${time(elapsed)} / ${time(duration)}`);
+    setText('#solverPause',playing?'Dayandır':'Davam et');$('#solverPause').disabled=elapsed>=duration;$('#solverNext').disabled=elapsed>=duration;
   }
   function frame(now){if(!playing||disposed)return;elapsed=Math.min(duration,elapsed+(now-last));last=now;if(elapsed>=duration)playing=false;render();if(playing)raf=requestAnimationFrame(frame);}
   function pause(){playing=false;cancelAnimationFrame(raf);render();}
@@ -58,7 +64,7 @@ export function mountWhiteboard(root,result,image){
   $('#solverPause').onclick=()=>playing?pause():play();
   $('#solverNext').onclick=()=>{pause();const next=cues.find(c=>c.end>elapsed+1);elapsed=next?next.end:duration;render();};
   $('#solverAll').onclick=()=>{pause();elapsed=duration;render();};
-  $('#solverReplay').onclick=()=>{pause();elapsed=reduced?duration:0;render();if(!reduced)play();};
+  $('#solverReplay').onclick=()=>{pause();$('.solver-writing').scrollTop=0;elapsed=reduced?duration:0;render();if(!reduced)play();};
   seek.oninput=()=>{const value=Number(seek.value);pause();elapsed=value;render();};
   const visibility=()=>{if(document.hidden)pause();};document.addEventListener('visibilitychange',visibility);
   // Hərəkəti azalt seçilibsə, cavab dərhal və tam görünür.
