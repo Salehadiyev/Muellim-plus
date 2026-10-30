@@ -4101,13 +4101,29 @@ const fmtDue = (iso) => {
 const INK_COLORS = [['#111827', 'Qara'], ['#1d4ed8', 'Göy'], ['#dc2626', 'Qırmızı'], ['#16a34a', 'Yaşıl']];
 const inkBg = new Map(); // sual id → { img, w, h } (sualın şəkli; yalnız yaddaşda)
 
+// Sualın şəkli: ayrıca, sabit enli surətdən çəkilir (səhifə sürüşdürülsə də yerindən oynamır), yüksək keyfiyyətlə
+const INK_CAP_W = 720;
 async function captureQuestion(el) {
+  let box = null;
   try {
     await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
-    const c = await window.html2canvas(el, { scale: 1.5, backgroundColor: '#ffffff', logging: false,
-      ignoreElements: (n) => n.classList && (n.classList.contains('ink-bar') || n.classList.contains('ink-thumb')) });
-    return c;
+    box = document.createElement('div');
+    box.setAttribute('aria-hidden', 'true');
+    box.style.cssText = `position:fixed;left:0;top:0;width:${INK_CAP_W}px;background:#fff;z-index:-1;pointer-events:none;padding:4px 0`;
+    const cl = el.cloneNode(true);
+    cl.querySelectorAll('.ink-bar, .ink-thumb').forEach((n) => n.remove());
+    cl.querySelectorAll('[name]').forEach((n) => n.removeAttribute('name')); // əsl formadakı seçimlərə toxunmasın
+    cl.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
+    cl.style.margin = '0';
+    box.appendChild(cl);
+    document.body.appendChild(box);
+    const h = Math.max(1, box.scrollHeight);
+    const scale = Math.max(1.5, Math.min(3, 5000 / h)); // çox uzun sualda yaddaşı aşmasın
+    const c = await window.html2canvas(box, { scale, backgroundColor: '#ffffff', logging: false,
+      scrollX: -window.scrollX, scrollY: -window.scrollY, windowWidth: Math.max(document.documentElement.clientWidth, INK_CAP_W) });
+    return c && c.width > 10 && c.height > 10 ? c : null;
   } catch (_) { return null; }
+  finally { if (box) box.remove(); }
 }
 
 // Ehtiyat fon: şəkil çəkilə bilməsə, sualın mətni və variantları sadə yazı ilə
@@ -4139,24 +4155,28 @@ function drawStrokes(ctx, strokes, k = 1) {
 }
 
 // Sualın şəkli + xətlər → JPEG (müəllimə göndərmək üçün)
-function inkComposite(data, bg, outW = 900) {
+function inkComposite(data, bg, outW = 1200, quality = 0.8) {
   const k = outW / data.W;
   const out = document.createElement('canvas');
   out.width = outW; out.height = Math.round(data.H * k);
   const ctx = out.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+  ctx.imageSmoothingQuality = 'high';
   if (bg) { const r = inkBgRect(data, bg); ctx.drawImage(bg.img, r.x * k, r.y * k, r.w * k, r.h * k); }
   const ink = document.createElement('canvas');
   ink.width = out.width; ink.height = out.height;
   drawStrokes(ink.getContext('2d'), data.s, k);
   ctx.drawImage(ink, 0, 0);
-  return out.toDataURL('image/jpeg', 0.72);
+  return out.toDataURL('image/jpeg', quality);
 }
-// sualın şəkli yuxarıda, eni W, hündürlüyü H-in ən çox 45%-i
+// Sualın yeri və ölçüsü (məntiqi vahidlərlə). data.b = { x, y, w } — tələbə yerini/ölçüsünü dəyişibsə.
+function inkBgDefault(data, bg) {
+  const w = Math.min(data.W * 0.96, (data.H * 0.6) * bg.w / bg.h);
+  return { x: (data.W - w) / 2, y: 8, w };
+}
 function inkBgRect(data, bg) {
-  const sc = Math.min(data.W / bg.w, (data.H * 0.45) / bg.h, 1.6);
-  const w = bg.w * sc, h = bg.h * sc;
-  return { x: (data.W - w) / 2, y: 0, w, h };
+  const b = data.b && data.b.w > 0 ? data.b : inkBgDefault(data, bg);
+  return { x: b.x, y: b.y, w: b.w, h: b.w * bg.h / bg.w };
 }
 
 function openInk(q, fieldset, data, onSave) {
@@ -4169,61 +4189,140 @@ function openInk(q, fieldset, data, onSave) {
       <button type="button" class="ink-t" data-er aria-label="Pozan">⌫ pozan</button>
       <button type="button" class="ink-t" data-undo aria-label="Geri al">↶</button>
       <button type="button" class="ink-t" data-clear aria-label="Hamısını sil">🗑</button>
+      <span class="ink-grp"><button type="button" class="ink-t" data-move aria-pressed="false" title="Sualı sürüşdür və ölçüsünü dəyiş">✋ Sual</button><button type="button" class="ink-t" data-zout aria-label="Sualı kiçilt">－</button><button type="button" class="ink-t" data-zin aria-label="Sualı böyüt">＋</button></span>
       <span class="ink-sp"></span>
       <button type="button" class="btn primary" data-done>Hazır</button></div>
+    <div class="ink-hint small" hidden></div>
     <div class="ink-area"><div class="ink-stage"><canvas class="ink-bgc"></canvas><canvas class="ink-c2"></canvas></div></div>`;
   document.body.appendChild(dlg);
   document.body.classList.add('ink-open');
-  const area = $('.ink-area', dlg), stage = $('.ink-stage', dlg), bgc = $('.ink-bgc', dlg), cv = $('.ink-c2', dlg);
-  let color = INK_COLORS[0][0], width = 6, eraser = false, penSeen = false;
+  const area = $('.ink-area', dlg), stage = $('.ink-stage', dlg), bgc = $('.ink-bgc', dlg), cv = $('.ink-c2', dlg), hint = $('.ink-hint', dlg);
+  let color = INK_COLORS[0][0], width = 6, eraser = false, penSeen = false, moveMode = false;
   let k = 1;
+  const drawBg = () => {
+    const b = bgc.getContext('2d');
+    b.fillStyle = '#fff'; b.fillRect(0, 0, bgc.width, bgc.height);
+    const bg = inkBg.get(q.id);
+    if (!bg) return;
+    const r = inkBgRect(data, bg);
+    b.imageSmoothingQuality = 'high';
+    b.drawImage(bg.img, r.x * k, r.y * k, r.w * k, r.h * k);
+    if (moveMode) { b.strokeStyle = '#0E7490'; b.lineWidth = 2; b.setLineDash([10, 6]); b.strokeRect(r.x * k, r.y * k, r.w * k, r.h * k); b.setLineDash([]); }
+  };
   const fit = () => {
     const aw = area.clientWidth, ah = area.clientHeight;
     if (!data.W) { data.W = 1000; data.H = Math.round(Math.max(1000, Math.min(2200, 1000 * ah / Math.max(1, aw)))); }
     const sc = Math.min(aw / data.W, ah / data.H);
     const dw = Math.floor(data.W * sc), dh = Math.floor(data.H * sc);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
     [bgc, cv].forEach((c) => { c.width = Math.round(dw * dpr); c.height = Math.round(dh * dpr); c.style.width = dw + 'px'; c.style.height = dh + 'px'; });
     stage.style.width = dw + 'px'; stage.style.height = dh + 'px';
     k = (dw * dpr) / data.W;
-    const b = bgc.getContext('2d');
-    b.fillStyle = '#fff'; b.fillRect(0, 0, bgc.width, bgc.height);
-    const bg = inkBg.get(q.id);
-    if (bg) { const r = inkBgRect(data, bg); b.drawImage(bg.img, r.x * k, r.y * k, r.w * k, r.h * k);
-      b.strokeStyle = '#e5e7eb'; b.setLineDash([8, 8]); b.beginPath(); b.moveTo(0, (r.h + 6) * k); b.lineTo(bgc.width, (r.h + 6) * k); b.stroke(); b.setLineDash([]); }
+    drawBg();
     redraw();
     return k;
   };
   const redraw = () => { const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); drawStrokes(c, data.s, k); };
-  const pos = (ev) => { const r = cv.getBoundingClientRect(); return [Math.round((ev.clientX - r.left) / r.width * data.W), Math.round((ev.clientY - r.top) / r.height * data.H)]; };
+  const posF = (ev) => { const r = cv.getBoundingClientRect(); return [(ev.clientX - r.left) / r.width * data.W, (ev.clientY - r.top) / r.height * data.H]; };
+  const pos = (ev) => posF(ev).map(Math.round);
+
+  // --- sualın yeri/ölçüsü ---
+  const curB = () => { const bg = inkBg.get(q.id); if (!bg) return null; const r = inkBgRect(data, bg); return { x: r.x, y: r.y, w: r.w, h: r.h }; };
+  const setB = (x, y, w) => {
+    const bg = inkBg.get(q.id); if (!bg) return;
+    w = Math.max(data.W * 0.2, Math.min(data.W * 3, w));
+    const h = w * bg.h / bg.w;
+    // ən azı bir hissəsi lövhədə qalsın
+    x = Math.max(-w + 80, Math.min(data.W - 80, x));
+    y = Math.max(-h + 80, Math.min(data.H - 80, y));
+    data.b = { x: Math.round(x), y: Math.round(y), w: Math.round(w) };
+    drawBg();
+  };
+  const zoom = (f) => { const b = curB(); if (!b) return; const cx = b.x + b.w / 2, cy = b.y + b.h / 2; const w = b.w * f; setB(cx - w / 2, cy - (b.h * f) / 2, w); onSave(data); };
+  const touches = new Map(); // barmaqlar (sualı tənzimləmək üçün)
+  let gest = null;
+  const startGesture = () => {
+    const b = curB(); if (!b) { gest = null; return; }
+    const pts = [...touches.values()];
+    if (pts.length === 1) gest = { one: true, p0: pts[0], b };
+    else { const [a, c] = pts; gest = { one: false, d0: Math.hypot(a[0] - c[0], a[1] - c[1]) || 1, m0: [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], b }; }
+  };
+  const moveGesture = () => {
+    if (!gest) return;
+    const pts = [...touches.values()];
+    if (gest.one && pts.length === 1) { setB(gest.b.x + pts[0][0] - gest.p0[0], gest.b.y + pts[0][1] - gest.p0[1], gest.b.w); return; }
+    if (!gest.one && pts.length >= 2) {
+      const [a, c] = pts;
+      const f = Math.max(0.2, Math.min(5, (Math.hypot(a[0] - c[0], a[1] - c[1]) || 1) / gest.d0));
+      const m = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2];
+      // barmaqların ortası altındakı nöqtə yerində qalır
+      const w = gest.b.w * f;
+      const real = Math.max(data.W * 0.2, Math.min(data.W * 3, w)) / gest.b.w;
+      setB(m[0] - (gest.m0[0] - gest.b.x) * real, m[1] - (gest.m0[1] - gest.b.y) * real, w);
+    }
+  };
+  const showHint = (t) => { hint.textContent = t; hint.hidden = !t; };
+  const setMove = (on) => {
+    moveMode = on;
+    const btn = $('[data-move]', dlg); btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', String(on));
+    cv.style.cursor = on ? 'move' : 'crosshair';
+    showHint(on ? 'Sualı barmaqla sürüşdür, iki barmaqla böyüt/kiçilt. Bitirəndə yenə “✋ Sual”-a bas.' : '');
+    drawBg();
+  };
+
   let cur = null;
   cv.addEventListener('pointerdown', (ev) => {
     if (ev.pointerType === 'pen') penSeen = true;
-    if (penSeen && ev.pointerType === 'touch') return; // qələm varsa, ovuc ekrana toxunanda xətt çəkilmir
+    // Sualı tənzimləmək: "✋ Sual" rejimi, ya da qələm işlədilirsə — iki barmaqla
+    if (moveMode || (penSeen && ev.pointerType === 'touch')) {
+      if (cur) return;
+      ev.preventDefault();
+      try { cv.setPointerCapture(ev.pointerId); } catch (_) { /* */ }
+      touches.set(ev.pointerId, posF(ev));
+      // qələm rejimində tək barmaq (ovuc) heç nə etmir — yalnız iki barmaq
+      if (moveMode || touches.size >= 2) startGesture(); else gest = null;
+      return;
+    }
     ev.preventDefault(); cv.setPointerCapture(ev.pointerId);
     cur = { c: color, w: eraser ? 28 : width, e: eraser, p: [pos(ev)] };
     data.s.push(cur); redraw();
   });
   cv.addEventListener('pointermove', (ev) => {
+    if (touches.has(ev.pointerId)) { touches.set(ev.pointerId, posF(ev)); moveGesture(); return; }
     if (!cur) return;
     const evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
     evs.forEach((e) => { const p = pos(e); const l = cur.p[cur.p.length - 1]; if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 2) cur.p.push(p); });
     redraw();
   });
-  const end = () => { if (cur) { cur = null; onSave(data); } };
+  const end = (ev) => {
+    if (touches.has(ev.pointerId)) {
+      touches.delete(ev.pointerId);
+      const had = !!gest;
+      if (touches.size && (moveMode || touches.size >= 2)) startGesture(); else gest = null;
+      if (had && !touches.size) onSave(data);
+      return;
+    }
+    if (cur) { cur = null; onSave(data); }
+  };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
-  $$('[data-c]', dlg).forEach((b) => b.onclick = () => { color = b.dataset.c; eraser = false; $$('[data-c]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
-  $$('[data-w]', dlg).forEach((b) => b.onclick = () => { width = +b.dataset.w; eraser = false; $$('[data-w]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
-  $('[data-er]', dlg).onclick = (e) => { eraser = !eraser; e.currentTarget.classList.toggle('on', eraser); };
+  $$('[data-c]', dlg).forEach((b) => b.onclick = () => { color = b.dataset.c; eraser = false; setMove(false); $$('[data-c]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
+  $$('[data-w]', dlg).forEach((b) => b.onclick = () => { width = +b.dataset.w; eraser = false; setMove(false); $$('[data-w]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
+  $('[data-er]', dlg).onclick = (e) => { eraser = !eraser; setMove(false); e.currentTarget.classList.toggle('on', eraser); };
   $('[data-undo]', dlg).onclick = () => { data.s.pop(); redraw(); onSave(data); };
   $('[data-clear]', dlg).onclick = () => { if (data.s.length && confirm('Bu sualdakı bütün yazılar silinsin?')) { data.s.length = 0; redraw(); onSave(data); } };
+  $('[data-move]', dlg).onclick = () => setMove(!moveMode);
+  $('[data-zin]', dlg).onclick = () => zoom(1.15);
+  $('[data-zout]', dlg).onclick = () => zoom(1 / 1.15);
   const close = () => { window.removeEventListener('resize', onResize); dlg.remove(); document.body.classList.remove('ink-open'); onSave(data, true); };
   $('[data-done]', dlg).onclick = close;
   const onResize = () => { k = fit(); };
   window.addEventListener('resize', onResize);
   // fon: sualın şəkli (bir dəfə çəkilir)
   k = fit();
-  if (!inkBg.has(q.id)) captureQuestion(fieldset).then((c) => { c = c || textQuestionCanvas(q); inkBg.set(q.id, { img: c, w: c.width, h: c.height }); if (dlg.isConnected) fit(); });
+  if (!inkBg.has(q.id)) {
+    showHint('Sual yüklənir…');
+    captureQuestion(fieldset).then((c) => { c = c || textQuestionCanvas(q); inkBg.set(q.id, { img: c, w: c.width, h: c.height }); if (dlg.isConnected) { showHint(moveMode ? hint.textContent : ''); fit(); } });
+  }
 }
 
 // Test formuna qoşulur: hər suala "✏️ Yaz" düyməsi; xətlər yerli yaddaşda; göndərəndə şəkillər hazırlanır
@@ -4260,8 +4359,8 @@ function setupInk(form, test, key) {
           const c = (fs ? await captureQuestion(fs) : null) || textQuestionCanvas(qById[qid]);
           inkBg.set(qid, { img: c, w: c.width, h: c.height });
         }
-        let img = inkComposite(d, inkBg.get(qid));
-        if (img.length > 650000) img = inkComposite(d, inkBg.get(qid), 650);
+        let img = '';
+        for (const [w, ql] of [[1200, 0.8], [1000, 0.72], [800, 0.7], [650, 0.65]]) { img = inkComposite(d, inkBg.get(qid), w, ql); if (img.length <= 650000) break; }
         if (img.length <= 680000) out[qid] = img;
       }
       return out;

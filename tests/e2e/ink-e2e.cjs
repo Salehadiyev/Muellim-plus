@@ -9,11 +9,14 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: [
   tests: [{ id: 'tA', teacher_id: 'u1', class_id: 'c1', title: 'Hesab', question_ids: ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'], is_open: true, review_mode: 'after_submit', created_at: new Date().toISOString() },
           { id: 'tB', teacher_id: 'u1', class_id: 'c1', title: 'İkinci', question_ids: ['22222222-2222-4222-8222-222222222222'], is_open: true, review_mode: 'after_submit', created_at: new Date().toISOString() }],
   submissions: [], ai_usage: [], mistakes: [], lesson_notes: [], lessons: [], payments: [], submission_drawings: [] };
+// html2canvas təqlidi: seçimləri yadda saxlayır, elementin ölçüsündə (× scale) ağ şəkil qaytarır
+const H2C = `window.html2canvas = async (el, o) => { const r = el.getBoundingClientRect(); window.__h2c = { scale: o.scale, sx: o.scrollX, sy: o.scrollY, w: Math.round(r.width), left: Math.round(r.left), top: Math.round(r.top), fixed: getComputedStyle(el).position, names: el.querySelectorAll('[name]').length, bars: el.querySelectorAll('.ink-bar').length };
+  const c = document.createElement('canvas'); c.width = Math.round(r.width * o.scale); c.height = Math.round(r.height * o.scale); const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.fillStyle = '#000'; x.fillRect(10, 10, 40, 40); return c; };`;
 (async () => {
   const b = await chromium.launch(); const errs = [];
   const ctx = await b.newContext({ viewport: { width: 820, height: 1100 } });
   await ctx.route('**/*', (route) => { const u = new URL(route.request().url());
-    if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : '' });
+    if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : u.pathname.includes('html2canvas') ? H2C : '' });
     if (u.hostname !== 'app.test') return route.abort();
     if (u.pathname === '/api/config') return route.fulfill({ json: { supabaseUrl: 'x', supabaseAnonKey: 'k', models: [] } });
     const f = path.join(ROOT, u.pathname === '/' ? 'index.html' : u.pathname); route.fulfill({ contentType: f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html', body: fs.readFileSync(f) }); });
@@ -28,6 +31,23 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: [
   await line(60, 300, 300, 340); await line(80, 380, 260, 420);
   await p.click('.ink-modal [data-c="#dc2626"]'); await line(100, 450, 320, 450);
   await p.click('.ink-modal [data-undo]');
+  // sualın şəkli: ayrıca sabit surətdən, yüksək keyfiyyətlə; surət sonra silinir
+  await p.waitForFunction(() => window.__h2c && !document.querySelector('.ink-hint:not([hidden])'));
+  const h = await p.evaluate(() => window.__h2c);
+  console.log('capture:', `scale ${h.scale} | w ${h.w} | at ${h.left},${h.top} | ${h.fixed} | names ${h.names} | bars ${h.bars}`, '| clone removed:', await p.evaluate(() => !document.querySelector('body > div[aria-hidden="true"] fieldset')));
+  // sualı böyüt / kiçilt / sürüşdür
+  const inkData = () => p.evaluate(() => Object.values(JSON.parse(localStorage.getItem(Object.keys(localStorage).find((k) => k.endsWith('_ink')))))[0]);
+  await p.click('.ink-modal [data-zin]'); await p.click('.ink-modal [data-zin]');
+  const b1 = (await inkData()).b;
+  await p.click('.ink-modal [data-zout]');
+  const b2 = (await inkData()).b;
+  await p.click('.ink-modal [data-move]');
+  console.log('move hint:', !(await p.$eval('.ink-hint', (x) => x.hidden)));
+  const nS = (await inkData()).s.length;
+  await line(200, 100, 260, 180);
+  const b3 = (await inkData()).b;
+  await p.click('.ink-modal [data-move]');
+  console.log('zoom:', b1.w > b2.w, '| moved:', b3.x - b2.x, b3.y - b2.y, '| no stroke while moving:', (await inkData()).s.length === nS);
   await p.screenshot({ path: path.join(T, 'ink1-draw.png') });
   await p.click('.ink-modal [data-done]'); await p.waitForSelector('.ink-modal', { state: 'detached' });
   console.log('label after:', (await p.textContent('#st fieldset >> nth=0 >> .ink-open-btn')).trim());
