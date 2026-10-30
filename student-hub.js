@@ -16,7 +16,9 @@ export function nextStudentLesson(schedule, now = new Date()) {
     const dow = new Date(date+'T12:00:00Z').getUTCDay() || 7;
     for (const slot of slots.filter(s=>+s.d===dow && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.s) && /^([01]\d|2[0-3]):[0-5]\d$/.test(s.e)).sort((a,b)=>a.s.localeCompare(b.s))) {
       if (new Date(date+'T'+slot.e+':00+04:00') <= now) continue;
-      return new Intl.DateTimeFormat('az-AZ',{timeZone:'Asia/Baku',weekday:'long',day:'numeric',month:'short'}).format(day)+' · '+slot.s+'–'+slot.e+' (Bakı)';
+      const weekdays=['','Bazar ertəsi','Çərşənbə axşamı','Çərşənbə','Cümə axşamı','Cümə','Şənbə','Bazar'];
+      const months=['yan','fev','mar','apr','may','iyn','iyl','avq','sen','okt','noy','dek'];
+      return weekdays[dow]+' · '+Number(date.slice(8))+' '+months[Number(date.slice(5,7))-1]+' · '+slot.s+'–'+slot.e+' (Bakı)';
     }
   }
   return '';
@@ -95,6 +97,7 @@ export function mountStudentHub(root, {code, home, me, notes, hub, mk, an, initi
   pages.lessons.appendChild(inbox);
   const replies=(hub.messages||[]).filter(m=>m.reply).length;
   if(replies)pages.home.insertAdjacentHTML('beforeend',`<button class="btn" data-open-page="lessons">Müəllimdən ${replies} cavab · Suallarıma bax</button>`);
+  const privacy=root.querySelector('a[href="#/privacy"]')?.closest('p'); if(privacy)root.appendChild(privacy);
   const nav=document.createElement('nav');nav.className='hub-nav';nav.setAttribute('aria-label','Tələbə bölmələri');
   nav.innerHTML=[['home','⌂','Ana səhifə'],['tasks','✓','Tapşırıqlar'],['lessons','▤','Dərslərim'],['results','↗','Nəticələr'],['notebook','↺','Səhv dəftəri']].map(([k,i,l])=>`<button type="button" data-hub-tab="${k}" aria-controls="hub-${k}"><span aria-hidden="true">${i}</span>${l}</button>`).join('');root.appendChild(nav);
   function show(key,scroll=true){if(!pages[key])key='home';Object.entries(pages).forEach(([k,p])=>p.hidden=k!==key);nav.querySelectorAll('button').forEach(b=>{b.setAttribute('aria-current',b.dataset.hubTab===key?'page':'false');});history.replaceState(null,'',home+(key==='home'?'':'/'+key));if(scroll)window.scrollTo(0,0);}
