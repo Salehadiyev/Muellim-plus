@@ -763,3 +763,12 @@ body.ink-open { overflow: hidden; }
 .pr-act { display: flex; gap: 4px; }
 .pr-act .btn { min-width: 40px; min-height: 40px; padding: 0 8px; }
 @media (max-width: 640px) { .pw-list li { grid-template-columns: 1fr; gap: 2px; } .pr-act .btn { min-width: 36px; } .prow { flex-wrap: wrap; } }
+
+/* ---------- Dərs cədvəli ---------- */
+.sch-chip { display: inline-block; background: var(--accent-soft); color: var(--accent-dark); border-radius: 8px; padding: 3px 8px; margin: 2px 2px 2px 0; font-weight: 600; }
+.sch-edit { gap: 8px; flex-wrap: wrap; }
+.ls-agenda { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; }
+.ag-line { gap: 6px; flex-wrap: wrap; align-items: center; }
+.ag-b { min-height: 40px; }
+.ag-b.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ag-b.miss:not(.on) { border-color: #F3B4AE; background: #FFF5F4; }

@@ -296,4 +296,16 @@ update classes set plan = '{"x":1}' where id = '00000000-0000-4000-8000-00000000
 reset role;
 select t_ok((select plan ? 'topics' from classes where id = '00000000-0000-4000-8000-0000000000c1'), 'başqa müəllim planı dəyişə bilmir');
 
+-- ---------- 018: dərs cədvəli ----------
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a1';
+update classes set schedule = '{"slots":[{"d":2,"s":"16:00","e":"17:00"}],"since":"2026-10-30"}' where id = '00000000-0000-4000-8000-0000000000c1';
+select t_ok((select schedule->'slots'->0->>'s' from classes where id = '00000000-0000-4000-8000-0000000000c1') = '16:00', 'müəllim cədvəli saxlayır');
+select t_err($q$ update classes set schedule = '"x"' where id = '00000000-0000-4000-8000-0000000000c1' $q$, 'cədvəl obyekt olmalıdır');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-0000000000a2';
+update classes set schedule = '{"slots":[]}' where id = '00000000-0000-4000-8000-0000000000c1';
+reset role;
+select t_ok((select jsonb_array_length(schedule->'slots') = 1 from classes where id = '00000000-0000-4000-8000-0000000000c1'), 'başqa müəllim cədvəli dəyişə bilmir');
+
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'

@@ -780,6 +780,82 @@ const CODE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => CODE_ABC[b % 31]).join('');
 
 // Qrupun səhv dəftəri (müəllim): kimdə neçə sual, ən çox səhv edilənlər, AI ilə bənzər hazırlamaq
+// ================= Dərs cədvəli (qrup) =================
+// classes.schedule = { slots: [{ d: 1..7 (1 = bazar ertəsi), s: 'HH:MM', e: 'HH:MM' }], since: 'YYYY-MM-DD' }
+const WEEK_DAYS = [[1, 'Bazar ertəsi', 'B.e.'], [2, 'Çərşənbə axşamı', 'Ç.a.'], [3, 'Çərşənbə', 'Ç.'], [4, 'Cümə axşamı', 'C.a.'], [5, 'Cümə', 'C.'], [6, 'Şənbə', 'Ş.'], [7, 'Bazar', 'B.']];
+const isoDow = (ymdStr) => (new Date(ymdStr + 'T00:00:00').getDay() || 7);
+const schedSlots = (c) => (c && c.schedule && Array.isArray(c.schedule.slots) ? c.schedule.slots : [])
+  .filter((x) => x && x.d >= 1 && x.d <= 7 && /^\d\d:\d\d$/.test(x.s || '')).sort((a, b) => a.d - b.d || a.s.localeCompare(b.s));
+const slotText = (x, long = false) => `${WEEK_DAYS[x.d - 1][long ? 1 : 2]} ${x.s}${x.e ? '–' + x.e : ''}`;
+const schedText = (c) => schedSlots(c).map((x) => slotText(x)).join(' · ');
+
+function schedEditor(box, cls) {
+  let edit = false;
+  let rows = schedSlots(cls).map((x) => ({ ...x }));
+  const draw = () => {
+    if (!edit) {
+      box.innerHTML = `<span class="exam-ico" aria-hidden="true">🗓️</span><strong class="small">Dərs cədvəli</strong>
+        <span class="small ${schedSlots(cls).length ? '' : 'muted'}" style="flex:1">${schedSlots(cls).length ? schedSlots(cls).map((x) => `<span class="sch-chip">${esc(slotText(x, true))}</span>`).join(' ') : 'Yazılmayıb — yazsanız, «Dərslər» bölməsi bu qrupun dərs gününü özü açacaq.'}</span>
+        <button class="btn small" id="schEdit">${schedSlots(cls).length ? '✏️ Dəyiş' : '+ Cədvəl yaz'}</button>`;
+      $('#schEdit', box).onclick = () => { edit = true; rows = schedSlots(cls).map((x) => ({ ...x })); if (!rows.length) rows.push({ d: 2, s: '16:00', e: '17:00' }); draw(); };
+      return;
+    }
+    box.innerHTML = `<div class="stack" style="width:100%;gap:8px"><strong class="small">🗓️ Dərs cədvəli — həftənin günləri və saatlar</strong>
+      ${rows.map((x, i) => `<div class="row sch-edit">
+        <select data-sd="${i}" aria-label="Gün" style="min-height:40px;width:auto">${WEEK_DAYS.map(([d, n]) => `<option value="${d}" ${d === x.d ? 'selected' : ''}>${n}</option>`).join('')}</select>
+        <input type="time" data-ss="${i}" value="${esc(x.s)}" aria-label="Başlayır" style="min-height:40px;width:auto"> – <input type="time" data-se="${i}" value="${esc(x.e || '')}" aria-label="Bitir" style="min-height:40px;width:auto">
+        <button type="button" class="btn small" data-sx="${i}" aria-label="Bu günü sil">✕</button></div>`).join('')}
+      <div class="row"><button type="button" class="btn small" id="schAdd">+ Gün əlavə et</button><span style="flex:1"></span>
+        <button type="button" class="btn small" id="schCancel">Ləğv et</button><button type="button" class="btn small primary" id="schSave">Yadda saxla</button></div></div>`;
+    const sync = () => rows.forEach((x, i) => { x.d = +$(`[data-sd="${i}"]`, box).value; x.s = $(`[data-ss="${i}"]`, box).value; x.e = $(`[data-se="${i}"]`, box).value; });
+    $$('[data-sx]', box).forEach((b) => b.onclick = () => { sync(); rows.splice(+b.dataset.sx, 1); draw(); });
+    $('#schAdd', box).onclick = () => { sync(); const l = rows[rows.length - 1]; rows.push({ d: l ? Math.min(7, l.d + 1) : 2, s: l?.s || '16:00', e: l?.e || '17:00' }); draw(); };
+    $('#schCancel', box).onclick = () => { edit = false; draw(); };
+    $('#schSave', box).onclick = () => busy($('#schSave', box), async () => {
+      sync();
+      const slots = rows.filter((x) => /^\d\d:\d\d$/.test(x.s)).map((x) => ({ d: x.d, s: x.s, e: /^\d\d:\d\d$/.test(x.e) ? x.e : '' }));
+      if (slots.some((x) => x.e && x.e <= x.s)) throw new Error('Bitmə saatı başlamadan sonra olmalıdır');
+      const schedule = { slots, since: cls.schedule?.since || todayIso() };
+      const { error } = await sb.from('classes').update({ schedule }).eq('id', cls.id);
+      if (error) throw needSql(error, '018_schedule.sql');
+      cls.schedule = schedule; edit = false; draw(); toast('Dərs cədvəli yadda saxlandı');
+    }).catch(fail);
+  };
+  draw();
+}
+
+// Bu günün dərsləri və son 14 gündə qeyd olunmamış dərs günləri
+function scheduleAgenda(classes, lessons, students) {
+  const today = todayIso();
+  const now = new Date(); const hm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const dow = isoDow(today);
+  const todayList = [];
+  const missing = [];
+  const stuByClass = {};
+  students.forEach((s) => { (stuByClass[s.class_id] = stuByClass[s.class_id] || new Set()).add(s.id); });
+  const marked = new Set(lessons.map((l) => l.lesson_date + '|' + l.student_id));
+  classes.forEach((c) => {
+    const slots = schedSlots(c);
+    if (!slots.length || !stuByClass[c.id]) return;
+    slots.filter((x) => x.d === dow).forEach((x) => todayList.push({ c, x }));
+    const since = c.schedule?.since || today;
+    for (let i = 0; i <= 14; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (ds < since) break;
+      slots.filter((x) => x.d === isoDow(ds)).forEach((x) => {
+        if (ds === today && (x.e || x.s) > hm) return; // bu günün dərsi hələ bitməyib
+        const any = [...stuByClass[c.id]].some((sid) => marked.has(ds + '|' + sid));
+        if (!any) missing.push({ c, x, date: ds });
+      });
+    }
+  });
+  todayList.sort((a, b) => a.x.s.localeCompare(b.x.s));
+  // indi gedən, yoxsa ən yaxın növbəti, yoxsa sonuncu
+  const pick = todayList.find((t) => t.x.s <= hm && hm < (t.x.e || '24:00')) || todayList.find((t) => t.x.s > hm) || todayList[todayList.length - 1] || null;
+  return { todayList, missing: missing.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10), pick };
+}
+
 // ================= Mövzu planı (qrup) =================
 // classes.plan = { topics: [{ t: 'Mövzu', done: 'YYYY-MM-DD' | null }] } — ardıcıllıq siyahının sırasıdır.
 const topicKey = (t) => String(t || '').toLocaleLowerCase('tr').replace(/[^a-zəğıöşüçâîû0-9]+/gi, '');
@@ -1292,6 +1368,7 @@ async function classView(id) {
       <button class="btn small" id="saveExam">Saxla</button>
       <span class="small muted" id="examLeft">${cls.exam_date ? daysLeftText(cls.exam_date) : 'Tarixi yazın: tələbələr öz səhifəsində geri sayımı görəcək.'}</span>
     </div>
+    <div class="exam-row card" id="schedBox"></div>
     <form id="addStudents" class="card stack" ${students.length ? 'hidden' : ''}>
       <h2>Tələbə əlavə et</h2>
       <label class="field">Adlar<span class="hint">Hər sətirdə bir ad. Siyahını Excel və ya qeydlərdən yapışdıra bilərsiniz.</span>
@@ -1334,6 +1411,7 @@ async function classView(id) {
     <section class="card stack" data-cpane="mk" hidden id="mkPane"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">Yüklənir…</span></div></section>
     <details class="danger-zone"><summary>Qrupu silmək</summary><p class="small muted">Qrup silinir; tələbələr «Qrupsuz» siyahısına keçir, nəticələri və testlər qalır.</p><button class="btn danger" id="delClass">Qrupu sil</button></details>`;
   let mkLoaded = false; let ntLoaded = false; let plLoaded = false;
+  schedEditor($('#schedBox'), cls);
   $('#saveExam').onclick = () => busy($('#saveExam'), async () => {
     const v = $('#examDate').value || null;
     const { error: e2 } = await sb.from('classes').update({ exam_date: v }).eq('id', id);
@@ -3634,6 +3712,7 @@ const shiftYm = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d =
 const dueDateOf = (ym, day) => { const [y, m] = ym.split('-').map(Number); const dd = Math.min(Math.max(1, day || 1), new Date(y, m, 0).getDate()); return `${ym}-${String(dd).padStart(2, '0')}`; };
 let lessonsYm = '';
 let lessonsDate = '';
+let lessonsCls = null; // null — hələ seçilməyib (bu günün cədvəlinə görə özü seçilir)
 let ledgerNeeds016 = false;
 
 async function loadLedger() {
@@ -3705,9 +3784,20 @@ async function lessonsView() {
   }
   const ym = lessonsYm;
   const classes = [...new Map(L.students.map((x) => [x.class_id, x.classes?.name || ''])).entries()];
-  let cls = '';
+  // qrupların dərs cədvəli (018 yoxdursa — cədvəlsiz işləyir)
+  let schedClasses = [];
+  { const r = await sb.from('classes').select('id, name, schedule'); if (!r.error) schedClasses = r.data || []; }
+  const agenda = () => scheduleAgenda(schedClasses, L.lessons, L.students);
+  if (lessonsCls === null) {
+    const a = agenda();
+    lessonsCls = a.pick && classes.length > 1 ? a.pick.c.id : '';
+    if (a.pick) lessonsDate = todayIso();
+  }
+  let cls = lessonsCls;
   const draw = () => {
     const date = lessonsDate;
+    const ag = agenda();
+    const selSlots = cls ? schedSlots(schedClasses.find((c) => c.id === cls)).filter((x) => x.d === isoDow(date)) : [];
     const list = L.students.filter((x) => !cls || x.class_id === cls);
     const rows = list.map((x) => ({ x, g: billingOf(x, L, ym), day: L.lessons.find((l) => l.student_id === x.id && l.lesson_date === date) || null }));
     const sum = rows.reduce((a, r) => ({ exp: a.exp + (r.g.sel ? r.g.fee : 0), paid: a.paid + r.g.mPaid, debt: a.debt + Math.max(0, r.g.balance),
@@ -3723,7 +3813,12 @@ async function lessonsView() {
         <div class="card stat"><div class="label">${esc(monthName(ym))}: ödənilib</div><div class="value" style="font-size:22px;color:var(--green)">${money(sum.paid)}</div></div>
         <div class="card stat"><div class="label">Ümumi borc</div><div class="value" style="font-size:22px;color:${sum.debt > 0 ? 'var(--red)' : 'var(--green)'}">${money(sum.debt)}</div></div>
       </section>
+      ${ag.todayList.length || ag.missing.length ? `<div class="card ls-agenda">
+        ${ag.todayList.length ? `<div class="row ag-line"><strong class="small">Bu gün:</strong>${ag.todayList.map((t) => `<button type="button" class="btn small ag-b ${t.c.id === cls && date === todayIso() ? 'on' : ''}" data-ag="${t.c.id}|${todayIso()}">${esc(t.c.name)} · ${esc(t.x.s)}${t.x.e ? '–' + esc(t.x.e) : ''}</button>`).join('')}</div>` : ''}
+        ${ag.missing.length ? `<div class="row ag-line"><strong class="small" style="color:var(--red)">Qeyd olunmayıb:</strong>${ag.missing.map((t) => `<button type="button" class="btn small ag-b miss ${t.c.id === cls && date === t.date ? 'on' : ''}" data-ag="${t.c.id}|${t.date}">${esc(t.c.name)} · ${esc(WEEK_DAYS[t.x.d - 1][2])} ${esc(fmtDayAz(t.date).replace(/ \d{4}$/, ''))}</button>`).join('')}</div>` : ''}
+      </div>` : ''}
       <div class="card ls-quick">
+        ${cls ? `<span class="small"><strong>${esc((classes.find(([id]) => id === cls) || [])[1] || '')}</strong>${selSlots.length ? ` · ${esc(WEEK_DAYS[selSlots[0].d - 1][1])} ${esc(selSlots.map((x) => x.s + (x.e ? '–' + x.e : '')).join(', '))}` : schedSlots(schedClasses.find((c) => c.id === cls)).length ? ' · <span style="color:#B45309">bu gün cədvəldə dərs yoxdur</span>' : ''}</span>` : ''}
         <label class="row small" style="gap:8px"><strong>Dərs günü</strong> <input type="date" id="lsDate" value="${date}" style="min-height:40px;width:auto"></label>
         <label class="row small" style="gap:8px;flex:1;min-width:180px">Mövzu <input type="text" id="lsTopic" maxlength="200" placeholder="istəyə bağlı, məs. Fonksiyonlar" style="min-height:40px"></label>
         <span class="small"><strong style="color:var(--green)">✓ ${sum.came}</strong> gəldi · <strong style="color:var(--red)">✗ ${sum.missed}</strong> gəlmədi</span>
@@ -3740,7 +3835,9 @@ async function lessonsView() {
           <span class="ls-act"><button class="btn small primary" data-pay="${x.id}">+ Ödəniş</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
         </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/students">Tələbələr</a> bölməsindən əlavə edin.</div></div>'}`;
     $$('[data-ym]').forEach((b) => b.onclick = () => { lessonsYm = shiftYm(ym, +b.dataset.ym); route(); });
-    $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = e.target.value; draw(); });
+    $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = lessonsCls = e.target.value; draw(); });
+    $$('[data-ag]').forEach((b) => b.onclick = () => { const [c, d] = b.dataset.ag.split('|'); cls = lessonsCls = c; lessonsDate = d;
+      if (ymOf(d) !== lessonsYm) { lessonsYm = ymOf(d); route(); } else draw(); });
     $('#lsDate').onchange = (e) => { lessonsDate = e.target.value || todayIso(); if (ymOf(lessonsDate) !== lessonsYm) { lessonsYm = ymOf(lessonsDate); route(); } else draw(); };
     const byId = Object.fromEntries(L.students.map((x) => [x.id, x]));
     const reload = async () => { L = await loadLedger(); draw(); };
