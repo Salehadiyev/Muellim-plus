@@ -47,6 +47,18 @@ const H2C = `window.html2canvas = async (el, o) => { const r = el.getBoundingCli
   await line(200, 100, 260, 180);
   const b3 = (await inkData()).b;
   await p.click('.ink-modal [data-move]');
+  // ovuc: barmaq yazır, sonra qələm gəlir → barmağın son xətti silinir; sonra barmaq yazmır, sualı da oynatmır
+  const pe = (type, pointerType, id, x, y) => p.evaluate(([type, pointerType, id, x, y]) => { const c = document.querySelector('.ink-c2'); const r = c.getBoundingClientRect();
+    c.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType, clientX: r.left + x, clientY: r.top + y, isPrimary: true })); }, [type, pointerType, id, x, y]);
+  const nPalm = (await inkData()).s.length, bPalm = JSON.stringify((await inkData()).b);
+  await pe('pointerdown', 'touch', 7, 500, 600); await pe('pointermove', 'touch', 7, 520, 610); await pe('pointerup', 'touch', 7, 520, 610);
+  const afterTouch = (await inkData()).s.length;
+  await pe('pointerdown', 'pen', 8, 100, 700); await pe('pointermove', 'pen', 8, 160, 720); await pe('pointerup', 'pen', 8, 160, 720);
+  await pe('pointerdown', 'touch', 9, 300, 600); await pe('pointerdown', 'touch', 10, 400, 650); await pe('pointermove', 'touch', 9, 340, 640); await pe('pointermove', 'touch', 10, 460, 700); await pe('pointerup', 'touch', 9, 340, 640); await pe('pointerup', 'touch', 10, 460, 700);
+  console.log('palm:', afterTouch - nPalm, '→', (await inkData()).s.length - nPalm, 'pen:', !(await inkData()).s.at(-1).t, '| question still:', JSON.stringify((await inkData()).b) === bPalm);
+  await pe('pointerdown', 'pen', 8, 100, 750); await pe('pointerup', 'pen', 8, 100, 750); await p.click('.ink-modal [data-undo]'); await p.click('.ink-modal [data-undo]');
+  // boş ağ kənarlar kəsilir → sualın özü (təqlidin qara kvadratı) böyük görünür
+  console.log('trimmed bg dark:', await p.evaluate(() => { const c = document.querySelector('.ink-bgc'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 60) n++; return n / (d.length / 4) > 0.03; }));
   console.log('zoom:', b1.w > b2.w, '| moved:', b3.x - b2.x, b3.y - b2.y, '| no stroke while moving:', (await inkData()).s.length === nS);
   await p.screenshot({ path: path.join(T, 'ink1-draw.png') });
   await p.click('.ink-modal [data-done]'); await p.waitForSelector('.ink-modal', { state: 'detached' });

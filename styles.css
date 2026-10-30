@@ -733,3 +733,6 @@ body.ink-open { overflow: hidden; }
 .ink-grp { display: inline-flex; gap: 4px; margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--line); }
 .ink-hint { background: #ecfeff; color: var(--accent-dark); padding: 6px 12px; text-align: center; border-bottom: 1px solid var(--line); }
 .ink-hint[hidden] { display: none; }
+.ink-modal, .ink-modal * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.ink-area { touch-action: none; overscroll-behavior: contain; }
+.ink-stage canvas { outline: none; }

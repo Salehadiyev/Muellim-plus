@@ -4099,6 +4099,7 @@ const fmtDue = (iso) => {
 // ================= Qaralama: sualın üstündə/yanında qələmlə yazmaq (Apple Pencil, barmaq) =================
 // Hər sual üçün xətlər məntiqi ölçüdə saxlanılır (W×H), ekrana sığdırılır. Arxa fon — sualın özünün şəkli.
 const INK_COLORS = [['#111827', 'Qara'], ['#1d4ed8', 'Göy'], ['#dc2626', 'Qırmızı'], ['#16a34a', 'Yaşıl']];
+let inkPenSeen = false; // bu cihazda Apple Pencil işlədilibsə, barmaq yazmır
 const inkBg = new Map(); // sual id → { img, w, h } (sualın şəkli; yalnız yaddaşda)
 
 // Sualın şəkli: ayrıca, sabit enli surətdən çəkilir (səhifə sürüşdürülsə də yerindən oynamır), yüksək keyfiyyətlə
@@ -4114,16 +4115,34 @@ async function captureQuestion(el) {
     cl.querySelectorAll('.ink-bar, .ink-thumb').forEach((n) => n.remove());
     cl.querySelectorAll('[name]').forEach((n) => n.removeAttribute('name')); // əsl formadakı seçimlərə toxunmasın
     cl.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
-    cl.style.margin = '0';
+    cl.style.margin = '0'; cl.style.border = 'none'; cl.style.boxShadow = 'none'; cl.style.maxWidth = 'none';
     box.appendChild(cl);
     document.body.appendChild(box);
     const h = Math.max(1, box.scrollHeight);
     const scale = Math.max(1.5, Math.min(3, 5000 / h)); // çox uzun sualda yaddaşı aşmasın
     const c = await window.html2canvas(box, { scale, backgroundColor: '#ffffff', logging: false,
       scrollX: -window.scrollX, scrollY: -window.scrollY, windowWidth: Math.max(document.documentElement.clientWidth, INK_CAP_W) });
-    return c && c.width > 10 && c.height > 10 ? c : null;
+    return c && c.width > 10 && c.height > 10 ? inkTrim(c) : null;
   } catch (_) { return null; }
   finally { if (box) box.remove(); }
+}
+
+// Şəklin ətrafındakı boş (ağ) sahəni kəsir — bəzi cihazlarda şəkil artıq boşluqla çəkilir
+function inkTrim(c) {
+  try {
+    const W = c.width, H = c.height, d = c.getContext('2d').getImageData(0, 0, W, H).data;
+    const ink = (i) => d[i + 3] > 20 && (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235);
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (ink((y * W + x) * 4)) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return c;
+    const pad = Math.round(W * 0.02);
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W, x1 + pad + 2); y1 = Math.min(H, y1 + pad + 2);
+    if (x1 - x0 >= W - 4 && y1 - y0 >= H - 4) return c;
+    const o = document.createElement('canvas'); o.width = x1 - x0; o.height = y1 - y0;
+    const ctx = o.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, o.width, o.height);
+    ctx.drawImage(c, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+    return o;
+  } catch (_) { return c; }
 }
 
 // Ehtiyat fon: şəkil çəkilə bilməsə, sualın mətni və variantları sadə yazı ilə
@@ -4171,7 +4190,7 @@ function inkComposite(data, bg, outW = 1200, quality = 0.8) {
 }
 // Sualın yeri və ölçüsü (məntiqi vahidlərlə). data.b = { x, y, w } — tələbə yerini/ölçüsünü dəyişibsə.
 function inkBgDefault(data, bg) {
-  const w = Math.min(data.W * 0.96, (data.H * 0.6) * bg.w / bg.h);
+  const w = Math.min(data.W * 0.96, (data.H * 0.7) * bg.w / bg.h);
   return { x: (data.W - w) / 2, y: 8, w };
 }
 function inkBgRect(data, bg) {
@@ -4197,7 +4216,7 @@ function openInk(q, fieldset, data, onSave) {
   document.body.appendChild(dlg);
   document.body.classList.add('ink-open');
   const area = $('.ink-area', dlg), stage = $('.ink-stage', dlg), bgc = $('.ink-bgc', dlg), cv = $('.ink-c2', dlg), hint = $('.ink-hint', dlg);
-  let color = INK_COLORS[0][0], width = 6, eraser = false, penSeen = false, moveMode = false;
+  let color = INK_COLORS[0][0], width = 6, eraser = false, moveMode = false;
   let k = 1;
   const drawBg = () => {
     const b = bgc.getContext('2d');
@@ -4272,24 +4291,33 @@ function openInk(q, fieldset, data, onSave) {
 
   let cur = null;
   cv.addEventListener('pointerdown', (ev) => {
-    if (ev.pointerType === 'pen') penSeen = true;
-    // Sualı tənzimləmək: "✋ Sual" rejimi, ya da qələm işlədilirsə — iki barmaqla
-    if (moveMode || (penSeen && ev.pointerType === 'touch')) {
+    ev.preventDefault();
+    if (ev.pointerType === 'pen' && !inkPenSeen) {
+      inkPenSeen = true;
+      // qələm ilk dəfə toxunanda: son anlarda ovucun təsadüfən çəkdiyi xətləri sil
+      const now = Date.now(), n = data.s.length;
+      data.s = data.s.filter((x) => !(x.t && now - x.t < 2000));
+      if (cur && cur.t) cur = null;
+      if (data.s.length !== n) { redraw(); onSave(data); }
+    }
+    // Sualı tənzimləmək: yalnız "✋ Sual" rejimində (ovuc sualı təsadüfən oynatmasın)
+    if (moveMode) {
       if (cur) return;
-      ev.preventDefault();
       try { cv.setPointerCapture(ev.pointerId); } catch (_) { /* */ }
       touches.set(ev.pointerId, posF(ev));
-      // qələm rejimində tək barmaq (ovuc) heç nə etmir — yalnız iki barmaq
-      if (moveMode || touches.size >= 2) startGesture(); else gest = null;
+      startGesture();
       return;
     }
-    ev.preventDefault(); cv.setPointerCapture(ev.pointerId);
-    cur = { c: color, w: eraser ? 28 : width, e: eraser, p: [pos(ev)] };
+    if (inkPenSeen && ev.pointerType === 'touch') return; // qələm varsa, barmaq/ovuc yazmır
+    if (cur) return; // eyni anda ikinci xətt yox
+    try { cv.setPointerCapture(ev.pointerId); } catch (_) { /* */ }
+    cur = { c: color, w: eraser ? 28 : width, e: eraser, p: [pos(ev)], id: ev.pointerId };
+    if (ev.pointerType === 'touch') cur.t = Date.now();
     data.s.push(cur); redraw();
   });
   cv.addEventListener('pointermove', (ev) => {
     if (touches.has(ev.pointerId)) { touches.set(ev.pointerId, posF(ev)); moveGesture(); return; }
-    if (!cur) return;
+    if (!cur || ev.pointerId !== cur.id) return;
     const evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
     evs.forEach((e) => { const p = pos(e); const l = cur.p[cur.p.length - 1]; if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 2) cur.p.push(p); });
     redraw();
@@ -4302,9 +4330,12 @@ function openInk(q, fieldset, data, onSave) {
       if (had && !touches.size) onSave(data);
       return;
     }
-    if (cur) { cur = null; onSave(data); }
+    if (cur && ev.pointerId === cur.id) { delete cur.id; cur = null; onSave(data); }
   };
-  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end); cv.addEventListener('lostpointercapture', end);
+  // iOS: lövhədə uzun basma / sürüşdürmə səhifəni seçməsin, böyütməsin, sürüşdürməsin
+  ['touchstart', 'touchmove', 'gesturestart', 'gesturechange', 'dblclick'].forEach((t) => area.addEventListener(t, (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false }));
+  dlg.addEventListener('contextmenu', (e) => e.preventDefault());
   $$('[data-c]', dlg).forEach((b) => b.onclick = () => { color = b.dataset.c; eraser = false; setMove(false); $$('[data-c]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
   $$('[data-w]', dlg).forEach((b) => b.onclick = () => { width = +b.dataset.w; eraser = false; setMove(false); $$('[data-w]', dlg).forEach((x) => x.classList.toggle('on', x === b)); $('[data-er]', dlg).classList.remove('on'); });
   $('[data-er]', dlg).onclick = (e) => { eraser = !eraser; setMove(false); e.currentTarget.classList.toggle('on', eraser); };
