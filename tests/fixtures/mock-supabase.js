@@ -23,6 +23,7 @@ class Query {
   then(res, rej) { try { res(this.exec()); } catch (e) { rej(e); } }
   exec() {
     const db = load();
+    if (['student_questions','material_progress'].includes(this.table) && !db[this.table]) return {data:null,error:{message:'relation does not exist'}};
     if (this.table === 'submission_drawings' && !db.submission_drawings) return { data: null, error: { message: 'relation "public.submission_drawings" does not exist' } };
     if ((this.table === 'lessons' || this.table === 'payments') && !db.lessons) return { data: null, error: { message: 'relation "public.' + this.table + '" does not exist' } };
     if (this.table === 'lesson_notes' && !db.lesson_notes) return { data: null, error: { message: 'relation "public.lesson_notes" does not exist' } };
@@ -107,6 +108,14 @@ export function createClient() {
         const overdue = (t) => !!t.due_at && Date.now() > new Date(t.due_at).getTime() + 120000;
         const vis = (t) => t.class_id === st?.class_id && (!t.student_id || t.student_id === st.id);
         const rvOk = (t) => (t.review_mode || 'never') === 'after_submit' || (t.review_mode === 'after_close' && !t.is_open);
+        if (['student_hub','student_material_done','student_ask'].includes(fn)) {
+          if (!db.student_questions || !db.material_progress) return {data:null,error:{message:'Could not find the function '+fn}};
+          if (!st) return {data:null,error:{message:'Link etibarsızdır'}};
+          const notes=(db.lesson_notes||[]).filter(n=>n.student_id===st.id||(!n.student_id&&n.class_id===st.class_id));
+          if(fn==='student_hub') return {data:{schedule:db.classes.find(c=>c.id===st.class_id)?.schedule, progress:db.material_progress.filter(p=>p.student_id===st.id), messages:db.student_questions.filter(m=>m.student_id===st.id), related:notes.flatMap(n=>db.tests.filter(t=>vis(t)&&n.topic&&db.questions.some(q=>(t.question_ids||[]).includes(q.id)&&q.topic===n.topic)).map(t=>({note_id:n.id,test_id:t.id})))},error:null};
+          if(fn==='student_material_done') {if(!notes.some(n=>n.id===a.p_note_id))return {data:null,error:{message:'Material tapılmadı'}};let row=db.material_progress.find(p=>p.student_id===st.id&&p.note_id===a.p_note_id);if(!row){row={student_id:st.id,note_id:a.p_note_id};db.material_progress.push(row);}row.completed=a.p_completed;save(db);return {data:null,error:null};}
+          if(fn==='student_ask'){if(!(a.p_note_id?notes.some(n=>n.id===a.p_note_id):db.tests.some(t=>vis(t)&&t.id===a.p_test_id&&t.question_ids.includes(a.p_question_id))))return {data:null,error:{message:'Sual tapılmadı'}};const id=uid();db.student_questions.push({id,student_id:st.id,body:a.p_body,note_id:a.p_note_id,test_id:a.p_test_id,question_id:a.p_question_id,created_at:new Date().toISOString()});save(db);return {data:id,error:null};}
+        }
         if (fn === 'student_analysis' || fn === 'student_notes') {
           if (!Array.isArray(db.lesson_notes)) return { data: null, error: { message: 'Could not find the function public.' + fn } };
           if (!st) return { data: null, error: { message: 'Link etibarsızdır' } };

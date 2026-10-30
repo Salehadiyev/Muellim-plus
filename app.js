@@ -1,3 +1,4 @@
+import { mountStudentHub, rememberStudent } from './student-hub.js';
 // Müəllim+ · əsas tətbiq (heç bir quraşdırma tələb etmir)
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
@@ -572,6 +573,9 @@ async function dashboard() {
         : '<div class="empty">Hələ nəticə yoxdur.</div>'}
     </section>
     </div>`;
+  const root = view();
+  const {data:messages} = await sb.from('student_questions').select('id,student_id,body,reply,created_at').order('created_at',{ascending:false}).limit(100);
+  if(root===view() && messages?.some(m=>!m.reply)) root.insertAdjacentHTML('beforeend', `<section class="card stack"><h2>Tələbələrdən suallar</h2>${messages.filter(m=>!m.reply).map(m=>`<a class="drow" href="#/student/${esc(m.student_id)}"><span><strong>${esc((studs||[]).find(s=>s.id===m.student_id)?.full_name||'Tələbə')}</strong><br>${esc(m.body.slice(0,120))}</span><span class="tag amber">Cavabla</span></a>`).join('')}</section>`);
 }
 
 // Ayarlar: AI xərci və limit, müəllimlər (admin), hesab
@@ -4049,6 +4053,7 @@ async function studentWorkView(id) {
     openDialog(esc(st.full_name) + ' · ' + esc(r.t.title), submissionDetailHtml(r.questions, r.sub));
     attachDrawings(document.getElementById('rvDialog'), r.sub.id).catch(() => {});
   });
+  teacherStudentHub(st).catch(fail);
   practiceSection(st, done);
   reportSection(st, rows);
 }
@@ -4668,7 +4673,7 @@ function setupInk(form, test, key) {
   };
 }
 
-function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline = null, ink = false, onSubmit }) {
+function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline = null, ink = false, onQuestion, onSubmit }) {
   $app.innerHTML = `<form class="student" id="st">
     ${top}
     <h1>${esc(test.title)}</h1>
@@ -4679,6 +4684,10 @@ function mountTestForm(test, { top = '', nameField = '', draftKey = '', deadline
     <button class="btn primary block" type="submit" style="min-height:52px;font-size:16px">Cavabları göndər</button>
   </form>`;
   const form = $('#st');
+  if (onQuestion) $$('fieldset[data-q]', form).forEach((el, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn small ask-question'; b.textContent = 'Müəllimə sual';
+    b.onclick = () => onQuestion(el.dataset.q, i + 1); el.appendChild(b);
+  });
   // qaralama: səhifə yenilənsə cavablar itməsin
   const load = () => { try { return JSON.parse(localStorage.getItem(draftKey) || '{}'); } catch (_) { return {}; } };
   if (draftKey) {
@@ -4946,6 +4955,8 @@ async function studentPortal(rawCode, testId, sub) {
   window.scrollTo(0, 0);
   const home = '#/s/' + code;
 
+  const hubPage = ['home','tasks','lessons','results','notebook'].includes(testId) ? testId : 'home';
+  if (hubPage !== 'home' || testId === 'home') testId = null;
   if (testId === 'defter') return mistakesView(code, home);
 
   if (testId && sub === 'review') {
@@ -4962,6 +4973,7 @@ async function studentPortal(rawCode, testId, sub) {
       <div class="stack" id="rvList">${rv.questions.map((q, i) => `<div class="card" data-st="${answerState(q, rv.answers?.[q.id])}">${reviewQuestionHtml(q, rv.answers?.[q.id], i)}</div>`).join('')}</div>
       <a class="btn block" href="${home}">Testlərimə qayıt</a>
     </div>`;
+    $$('#rvList > [data-st]').forEach((el, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn small ask-question'; b.textContent = 'Müəllimə sual'; b.onclick = () => askStudentTeacher(code, {test_id: testId, question_id: rv.questions[i].id, title: rv.title + ' · Sual ' + (i+1)}); el.appendChild(b); });
     const ow = $('#onlyWrong');
     if (ow) ow.onchange = () => $$('#rvList > [data-st]').forEach((el) => { el.hidden = ow.checked && el.dataset.st === 'right'; });
     return;
@@ -4975,8 +4987,10 @@ async function studentPortal(rawCode, testId, sub) {
     if (test.overdue) return studentMsg(esc(test.title), `Son tarix keçib (${esc(fmtDue(test.due_at))}). Cavablar artıq qəbul edilmir.`, `<a class="btn block" href="${home}">Testlərimə qayıt</a>`);
     const shown = test.shuffle ? shuffleTest(test, String(test.seed) + testId) : test;
     const top = `<div class="row between"><a class="muted" href="${home}">‹ Testlərim</a><span class="muted">${esc(test.name)}</span></div>`;
+    rememberStudent(code, 'test', testId);
     const run = (deadline) => mountTestForm(shown, {
       top, deadline, draftKey: 'mp_draft_' + code + '_' + testId, ink: true,
+      onQuestion: (question_id, number) => askStudentTeacher(code, { test_id: testId, question_id, title: test.title + ' · Sual ' + number }),
       onSubmit: async (answers, _auto, _fd, drawings) => {
         const { data, error: err } = await sb.rpc('student_submit_test', { p_code: code, p_test_id: testId, p_answers: answers });
         if (err) throw new Error(err.message);
@@ -5001,8 +5015,8 @@ async function studentPortal(rawCode, testId, sub) {
   }
 
   const soft = (fn) => Promise.resolve(sb.rpc(fn, { p_code: code })).then((r) => (r && !r.error ? r.data : null), () => null);
-  const [{ data: me, error }, mk, an, notes] = await Promise.all([
-    sb.rpc('student_portal', { p_code: code }), soft('student_mistakes'), soft('student_analysis'), soft('student_notes')
+  const [{ data: me, error }, mk, an, notes, hub] = await Promise.all([
+    sb.rpc('student_portal', { p_code: code }), soft('student_mistakes'), soft('student_analysis'), soft('student_notes'), soft('student_hub')
   ]);
   if (error || !me) {
     try { if (localStorage.getItem(CODE_KEY) === code) localStorage.removeItem(CODE_KEY); } catch (_) { /* */ }
@@ -5041,6 +5055,14 @@ ${studentInsightsHtml(an, notes, home)}
     </section>
     <p class="small muted" style="text-align:center"><a href="#/privacy">Məxfilik siyasəti</a></p>
   </div>`;
+  if (hub) mountStudentHub($app.querySelector('.student'), { code, home, me, notes: notes || [], hub, mk, an, initial: hubPage,
+    onAsk: (context) => askStudentTeacher(code, context),
+    onComplete: async (id, value) => {
+      const { error } = await sb.rpc('student_material_done', { p_code: code, p_note_id: id, p_completed: value });
+      if (error) { toast('Qeyd saxlanılmadı. Yenidən yoxlayın.', true); throw error; }
+      toast(value ? 'Tamamlandı kimi qeyd edildi' : 'Qeyd ləğv edildi');
+    }
+  });
   // "Dərs qeydinə bax": səhifə daxilində aç (hash marşrutu dəyişməsin)
   $$('[data-nt]').forEach((l) => l.onclick = (e) => {
     e.preventDefault();
@@ -5223,3 +5245,41 @@ function startMath() {
 
 startMath();
 boot();
+
+
+// Tələbənin material və ya test sualı haqqında müəllimə qeydi.
+function askStudentTeacher(code, context) {
+  openDialog('Müəllimə sual', `<p>${esc(context.title || '')}</p><form id="studentAsk" class="stack"><label class="field">Nəyi başa düşmədin?<textarea name="body" maxlength="2000" rows="4" required></textarea></label><p class="small muted">Müəllimin cavabı Dərslərim → Müəllimlə suallarım bölməsində görünəcək.</p><button type="submit" class="btn primary">Göndər</button><p class="notice" id="askError" hidden></p></form>`);
+  $('#studentAsk').onsubmit = e => { e.preventDefault(); const form = e.currentTarget;
+    busy($('button[type=submit]', form), async () => {
+      const { error } = await sb.rpc('student_ask', {p_code:code, p_body:new FormData(form).get('body').trim(), p_test_id:context.test_id || null, p_question_id:context.question_id || null, p_note_id:context.note_id || null});
+      if (error) { const el = $('#askError'); el.hidden=false; el.textContent=/function|schema cache/i.test(error.message) ? 'Bu imkan üçün müəllim bazanı yeniləməlidir (019_student_hub.sql).' : error.message; return; }
+      $('#rvDialog').close(); toast('Sual müəllimə göndərildi');
+    }).catch(fail);
+  };
+}
+
+async function teacherStudentHub(st) {
+  const box = document.createElement('section'); box.className='card stack teacher-hub'; view().appendChild(box);
+  const [messages, progress, notes] = await Promise.all([
+    sb.from('student_questions').select('*').eq('student_id',st.id).order('created_at',{ascending:false}),
+    sb.from('material_progress').select('*').eq('student_id',st.id),
+    sb.from('lesson_notes').select('*')
+  ]);
+  if (messages.error || progress.error) { box.innerHTML='<h2>Materiallar və tələbənin sualları</h2><p class="notice">Bu imkan üçün Supabase-də 019_student_hub.sql yeniləməsini işə salın.</p>'; return; }
+  const relevant=(notes.data||[]).filter(n=>n.student_id===st.id || (!n.student_id && n.class_id===st.class_id));
+  const done=new Set((progress.data||[]).filter(p=>p.completed).map(p=>p.note_id));
+  const rows=messages.data||[];
+  box.innerHTML=`<h2>Materiallar və tələbənin sualları</h2><p>${relevant.filter(n=>done.has(n.id)).length} / ${relevant.length} material tamamlanıb <span class="small muted">(tələbənin öz qeydi)</span></p>
+    ${relevant.map(n=>`<div class="row between"><span>${esc(n.title)}</span><span class="tag ${done.has(n.id)?'ai':''}">${done.has(n.id)?'✓ Tamamlayıb':'Gözləyir'}</span></div>`).join('')}
+    <h3>Suallar (${rows.filter(m=>!m.reply).length} cavabsız)</h3>${rows.length?rows.map(m=>`<details class="hub-message" ${m.reply?'':'open'}><summary>${esc(m.body.slice(0,85))} <span class="tag">${m.reply?'Cavablanıb':'Cavab gözləyir'}</span></summary>
+    ${m.test_id?`<a href="#/test/${esc(m.test_id)}">Testə bax</a>`:`<p class="small">${esc(relevant.find(n=>n.id===m.note_id)?.title||'Material')}</p>`}<p>${esc(m.body)}</p><div data-question-context="${esc(m.id)}"></div><form data-reply="${esc(m.id)}" class="stack"><label class="field">Cavabınız<textarea name="reply" maxlength="4000" rows="3" required>${esc(m.reply||'')}</textarea></label><button class="btn primary" type="submit">Cavabı saxla</button><span role="status" class="small"></span></form></details>`).join(''):'<p class="muted">Hələ sual göndərilməyib.</p>'}`;
+  const ids=[...new Set(rows.map(m=>m.question_id).filter(Boolean))];
+  if (ids.length) { const {data:qs}=await sb.from('questions').select('*').in('id',ids); rows.forEach(m=>{const q=(qs||[]).find(q=>q.id===m.question_id);const el=box.querySelector(`[data-question-context="${CSS.escape(m.id)}"]`);if(q&&el)el.innerHTML=questionHtml(q);}); }
+  $$('[data-reply]',box).forEach(form=>form.onsubmit=e=>{e.preventDefault();busy($('button',form),async()=>{
+    const reply=new FormData(form).get('reply').trim(); if(!reply)throw new Error('Cavab yazın');
+    const {data,error}=await sb.from('student_questions').update({reply,replied_at:new Date().toISOString()}).eq('id',form.dataset.reply).select('id');
+    if(error)throw error; if(!data?.length)throw new Error('Cavab saxlanılmadı');
+    $('span[role=status]',form).textContent='✓ Tələbəyə göndərildi';toast('Cavab saxlanıldı');
+  }).catch(fail);});
+}

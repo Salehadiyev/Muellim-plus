@@ -776,3 +776,36 @@ body.ink-open { overflow: hidden; }
 /* Material videosu telefon və iPad ölçüsünə uyğunlaşır. */
 .material-video { width: 100%; aspect-ratio: 16 / 9; margin: 12px 0; }
 .material-video iframe { display: block; width: 100%; height: 100%; border: 0; border-radius: 12px; }
+
+/* Tələbə kabineti: gündəlik plan və toxunma üçün rahat aşağı menyu. */
+.student-hub { max-width: 960px; padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
+.student-hub [hidden] { display: none !important; }
+.hub-page { min-width: 0; }
+.hub-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); padding: 8px max(8px,calc((100vw - 940px)/2)) calc(8px + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid #d9e7eb; box-shadow: 0 -4px 22px #0b3a470a; }
+.hub-nav button { border: 0; background: transparent; color: #52636a; min-height: 56px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit; font-size: 12px; cursor: pointer; }
+.hub-nav button span { font-size: 22px; line-height: 1; }
+.hub-nav button[aria-current=page] { color: #0e7490; background: #e9f6f8; font-weight: 700; }
+.hub-nav button:focus-visible, .hub-filters button:focus-visible { outline: 3px solid #0e7490; outline-offset: 2px; }
+.hub-hero { padding: 28px; border-radius: 22px; background: #0b3a47; color: white; }
+.hub-hero h2 { color: white; font-size: clamp(24px,5vw,32px); margin: 12px 0; }
+.hub-hero p { color: #d2e6eb; margin-bottom: 22px; }
+.hub-hero .btn { background: white; color: #0b3a47; white-space: normal; }
+.hub-eyebrow { font-size: 11px; letter-spacing: .12em; color: #9ad7e4; font-weight: 700; }
+.hub-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.hub-summary h3 { margin-top: 10px; font-size: 17px; line-height: 1.5; }
+.hub-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.hub-filters [aria-pressed=true] { color: white; background: #0e7490; }
+.hub-topic { border-top: 1px solid #e3eaed; padding-top: 18px; }
+.hub-topic h3 { font-size: 18px; color: #0b3a47; }
+.hub-material-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; align-items: center; }
+.hub-material-actions [aria-pressed=true] { background: #e6f5ed; color: #166534; }
+.hub-related { margin-top: 16px; }
+.hub-message { padding: 14px 0; border-bottom: 1px solid #e3eaed; overflow-wrap: anywhere; }
+.hub-message summary { cursor: pointer; min-height: 44px; }
+.hub-message p, .hub-reply { white-space: pre-wrap; }
+.hub-reply { border-left: 3px solid #0e7490; background: #eef8fa; padding: 14px; border-radius: 8px; }
+#hubProgressBar { width: 100%; height: 12px; accent-color: #0e7490; }
+.hub-page .btn, .ask-question { min-height: 44px; }
+.hub-page .portal-row { gap: 12px; }
+.hub-page .portal-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+@media(max-width:560px) { .hub-summary { grid-template-columns: 1fr; gap: 12px; } .hub-hero { padding: 22px; } .hub-nav button { font-size: 10px; } .hub-material-actions .btn { flex: 1; } }
