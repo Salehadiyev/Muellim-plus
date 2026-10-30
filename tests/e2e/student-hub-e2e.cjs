@@ -1,0 +1,67 @@
+// Material videosu: müəllim, tələbə, telefon və xarici linklər.
+const { chromium } = require(process.env.PW || 'playwright');
+const path = require('path'); const fs = require('fs');
+const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
+const ROOT = path.join(__dirname, '..', '..');
+const DB = { classes: [{id:'c1',name:'11A',teacher_id:'u1',schedule:{slots:[{d:1,s:'16:00',e:'17:00'}]}}], students:[{id:'s1',class_id:'c1',full_name:'Əli',access_code:'ALI23456'},{id:'s2',class_id:'c1',full_name:'Nərgiz',access_code:'NRG23456'}],
+questions:[{id:'q1',teacher_id:'u1',body:'2+2=?',topic:'Sayılar',qtype:'mcq',options:['3','4'],answer:'4'}],tests:[{id:'t1',teacher_id:'u1',class_id:'c1',title:'Sayılar testi',question_ids:['q1'],is_open:true,review_mode:'after_submit',created_at:new Date().toISOString()}], submissions:[],ai_usage:[],mistakes:[],student_questions:[],material_progress:[],lesson_notes:[{id:'n1',teacher_id:'u1',class_id:'c1',title:'Sayılar dərsi',topic:'Sayılar',body:'İzah',link_url:'https://youtu.be/dQw4w9WgXcQ',created_at:new Date().toISOString()}] };
+(async () => {
+  const b = await chromium.launch(); const errs = [];
+  const ctx = await b.newContext({ viewport: { width: 1024, height: 1300 } });
+  await ctx.route('**/*', (route) => { const u = new URL(route.request().url());
+    if (u.hostname === 'cdn.jsdelivr.net') return route.fulfill({ contentType: 'text/javascript', body: u.pathname.includes('supabase') ? fs.readFileSync(path.join(FX, 'mock-supabase.js')) : '' });
+    if (u.hostname === 'files.test') return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' });
+    if (u.hostname === 'www.youtube-nocookie.com') return route.fulfill({ contentType: 'text/html', body: '<p>Video test</p>' });
+    if (u.hostname !== 'app.test') return route.abort();
+    if (u.pathname === '/api/config') return route.fulfill({ json: { supabaseUrl: 'x', supabaseAnonKey: 'k', models: [] } });
+    const f = path.join(ROOT, u.pathname === '/' ? 'index.html' : u.pathname); route.fulfill({ contentType: f.endsWith('.js') ? 'text/javascript' : f.endsWith('.css') ? 'text/css' : 'text/html', body: fs.readFileSync(f) }); });
+  const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept());
+  const db = () => p.evaluate(() => JSON.parse(localStorage.getItem('mockdb')));
+  const setDb = (d) => p.evaluate((x) => localStorage.setItem('mockdb', JSON.stringify(x)), d);
+  await p.goto('http://app.test/'); await setDb(DB);
+
+  const assert=require('node:assert/strict');
+  await p.setViewportSize({width:390,height:844});
+  await p.goto('http://app.test/#/s/ALI23456');
+  await p.waitForSelector('.hub-nav');
+  assert.equal(await p.locator('.hub-page:visible').count(),1);
+  assert.equal(await p.locator('[data-hub-page=home]').isVisible(),true);
+  assert.equal(await p.locator('#hubProgress').textContent(),'0 / 1');
+  await p.click('[data-hub-tab=lessons]');
+  await p.click('#nt-n1 summary');
+  assert.equal(await p.locator('.material-video iframe').isVisible(),true);
+  assert.equal(await p.locator('.hub-related a').getAttribute('href'),'#/s/ALI23456/t1');
+  await p.click('[data-complete=n1]');
+  await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).material_progress[0]?.completed);
+  await p.click('[data-ask-note=n1]'); await p.fill('#studentAsk textarea','Bu hissəni izah edin'); await p.click('#studentAsk button[type=submit]');
+  await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).student_questions.length===1);
+  await p.reload(); await p.waitForSelector('.hub-nav');
+  assert.equal(await p.locator('[data-complete=n1]').getAttribute('aria-pressed'),'true');
+  assert.equal(await p.locator('.hub-messages').textContent().then(x=>x.includes('Bu hissəni izah edin')),true);
+  await p.click('[data-hub-tab=home]'); assert.equal(await p.locator('#hubProgress').textContent(),'1 / 1');
+  assert.equal(await p.locator('[data-resume-note=n1]').count(),1);
+  console.log('material: completion, resume, related test and message saved');
+  await p.click('[data-hub-tab=tasks]'); await p.click('a.portal-row'); await p.waitForSelector('#st');
+  await p.check('input[type=radio][value="4"]');
+  await p.click('.ask-question');await p.fill('#studentAsk textarea','Niyə 4?');await p.click('#studentAsk button[type=submit]');
+  await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).student_questions.length===2);
+  await p.goto('http://app.test/#/s/ALI23456');await p.waitForSelector('.hub-nav');
+  assert.equal(await p.locator('.hub-hero a').textContent().then(x=>x.includes('Davam et')),true);
+  await p.click('[data-hub-tab=tasks]');await p.click('[data-task-filter=started]');assert.equal(await p.locator('[data-task-state=started]:visible').count(),1);
+  await p.click('[data-task-filter=done]');assert.equal(await p.locator('[data-filter-empty]').isVisible(),true);
+  console.log('test: draft resume, filters and question context ok');
+  await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({access_token:'tok',user:{id:'u1',email:'a@b.az'}})));
+  await p.goto('http://app.test/#/student/s1');await p.reload();await p.waitForSelector('.teacher-hub [data-reply]');
+  assert.equal(await p.locator('.teacher-hub').textContent().then(x=>x.includes('1 / 1 material')),true);
+  await p.locator('[data-reply] textarea').first().fill('Addım-addım izah');await p.locator('[data-reply] button').first().click();
+  await p.waitForSelector('text=✓ Tələbəyə göndərildi');
+  await p.goto('http://app.test/#/s/ALI23456/lessons');await p.waitForSelector('.hub-nav');
+  assert.equal(await p.locator('.hub-reply').textContent().then(x=>x.includes('Addım-addım izah')),true);
+  await p.goto('http://app.test/#/s/NRG23456/lessons');await p.waitForSelector('.hub-nav');
+  assert.equal(await p.locator('.hub-reply').count(),0);assert.equal(await p.locator('[data-complete=n1]').getAttribute('aria-pressed'),'false');
+  console.log('teacher: completion visible, reply delivered, other student isolated');
+  for(const width of [390,768,1024]){await p.setViewportSize({width,height:1000});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+  await p.goto('http://app.test/#/s/ALI23456');await p.waitForSelector('.hub-nav');await p.screenshot({path:path.join(T,'student-hub-home.png'),fullPage:true});
+  const d=await db();delete d.student_questions;delete d.material_progress;await setDb(d);await p.reload();await p.waitForSelector('text=Yazılacaq testlər');assert.equal(await p.locator('.hub-nav').count(),0);
+  console.log('layout and old database fallback ok');assert.deepEqual(errs,[]);console.log('NO ERRORS');await b.close();
+})().catch(e=>{console.error('FAIL',e);process.exit(1);});

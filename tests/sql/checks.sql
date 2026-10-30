@@ -309,3 +309,41 @@ reset role;
 select t_ok((select jsonb_array_length(schedule->'slots') = 1 from classes where id = '00000000-0000-4000-8000-0000000000c1'), 'başqa müəllim cədvəli dəyişə bilmir');
 
 \echo 'NO ERRORS: bütün baza yoxlamaları keçdi'
+
+-- 019: şəxsi qeydlər, sual göndərmə və müəllim cavablarının izolyasiyası
+reset role;
+insert into lesson_notes(id,teacher_id,class_id,title,topic) values('00000000-0000-4000-8000-000000001901','00000000-0000-4000-8000-0000000000a1','00000000-0000-4000-8000-0000000000c1','Portal materialı','Sayılar');
+insert into lesson_notes(id,teacher_id,student_id,title) values('00000000-0000-4000-8000-000000001902','00000000-0000-4000-8000-0000000000a1','00000000-0000-4000-8000-0000000000b2','Fərdi material');
+set role anon;
+reset request.jwt.claim.sub;
+select student_material_done('AAAAAAAA','00000000-0000-4000-8000-000000001901',true);
+select student_material_done('AAAAAAAA','00000000-0000-4000-8000-000000001901',false);
+select student_material_done('AAAAAAAA','00000000-0000-4000-8000-000000001901',true);
+select t_ok(jsonb_array_length(student_hub('AAAAAAAA')->'progress')=1,'təkrar qeyd bir sətir saxlayır');
+select t_ok(jsonb_array_length(student_hub('BBBBBBBB')->'progress')=0,'başqa tələbə qeydi görmür');
+select t_err($q$ select student_hub('INVALID') $q$,'yanlış kod hub-a girmir');
+select t_err($q$ select student_material_done('CCCCCCCC','00000000-0000-4000-8000-000000001901',true) $q$,'başqa qrupun materialı');
+select t_err($q$ select student_material_done('AAAAAAAA','00000000-0000-4000-8000-000000001902',true) $q$,'başqa tələbənin materialı');
+select student_ask('AAAAAAAA','Materialı izah edin',null,null,'00000000-0000-4000-8000-000000001901');
+select student_ask('AAAAAAAA','Bu sualı izah edin','00000000-0000-4000-8000-0000000000f1','00000000-0000-4000-8000-0000000000e1',null);
+select t_err($q$ select student_ask('BBBBBBBB','x','00000000-0000-4000-8000-0000000000f5','00000000-0000-4000-8000-0000000000e1',null) $q$,'fərdi testdən başqa tələbə yaza bilmir');
+select t_err($q$ select student_ask('CCCCCCCC','x','00000000-0000-4000-8000-0000000000f1','00000000-0000-4000-8000-0000000000e1',null) $q$,'başqa müəllimin testi');
+select t_err($q$ select student_ask('AAAAAAAA',' ',null,null,'00000000-0000-4000-8000-000000001901') $q$,'boş sual rədd edilir');
+select t_err('select * from student_questions','anon cədvəli oxuya bilmir');
+select t_ok(jsonb_array_length(student_hub('BBBBBBBB')->'messages')=0,'başqa tələbə mesajı görmür');
+select t_ok(student_hub('AAAAAAAA')::text not like '%"answer"%' and student_hub('AAAAAAAA')::text not like '%"solution"%','hub cavab açarını daşımır');
+set role authenticated;
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a2';
+select t_ok((select count(*) from student_questions)=0,'başqa müəllim mesajı görmür');
+select t_ok((select count(*) from material_progress)=0,'başqa müəllim tamamlanmanı görmür');
+update student_questions set reply='icazəsiz';
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a1';
+select t_ok((select count(*) from student_questions where reply is not null)=0,'başqa müəllim cavab yaza bilmədi');
+update student_questions set reply='İzah',replied_at=now() where student_id='00000000-0000-4000-8000-0000000000b1';
+select t_err($q$ update student_questions set body='dəyişdi' $q$,'müəllim tələbə mətnini dəyişə bilmir');
+set role anon;
+select t_ok(student_hub('AAAAAAAA')->'messages'->0->>'reply'='İzah','tələbə müəllim cavabını görür');
+do $$ begin for i in 1..18 loop perform student_ask('AAAAAAAA','Təkrar sual',null,null,'00000000-0000-4000-8000-000000001901'); end loop; end $$;
+select t_err($q$ select student_ask('AAAAAAAA','21-ci',null,null,'00000000-0000-4000-8000-000000001901') $q$,'gündəlik limit');
+reset role;
+\echo 'NO ERRORS: tələbə portalının izolyasiyası keçdi'

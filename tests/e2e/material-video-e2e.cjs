@@ -33,6 +33,7 @@ const DB = { classes: [{id:'c1',name:'11A',teacher_id:'u1'}], students: [{id:'s1
   await p.waitForSelector('details.nt-item');
   await p.locator('details.nt-item summary').first().click();
   assert.equal(await p.locator('.material-video iframe').count(), 3);
+  await p.waitForFunction(() => { const r = document.querySelector('.material-video iframe')?.getBoundingClientRect(); return r && r.width > 200 && r.width < 390 && r.height > 100; });
   const bounds = await p.locator('.material-video iframe').first().boundingBox();
   assert(bounds.width > 200 && bounds.width < 390 && bounds.height > 100);
   assert.equal(await p.locator('a[href="https://drive.google.com/file/d/example"]').count(), 1);
