@@ -4166,8 +4166,17 @@ function drawStrokes(ctx, strokes, k = 1) {
     ctx.globalCompositeOperation = s.e ? 'destination-out' : 'source-over';
     ctx.strokeStyle = s.c; ctx.lineWidth = s.w * k;
     ctx.beginPath();
-    s.p.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
-    if (s.p.length === 1) ctx.lineTo(s.p[0][0] * k + 0.1, s.p[0][1] * k);
+    const p = s.p;
+    ctx.moveTo(p[0][0] * k, p[0][1] * k);
+    if (p.length === 1) ctx.lineTo(p[0][0] * k + 0.1, p[0][1] * k);
+    else if (p.length === 2) ctx.lineTo(p[1][0] * k, p[1][1] * k);
+    else {
+      // hamar xətt: nöqtələr arasından əyri keçir (künc-künc görünməsin)
+      for (let i = 1; i < p.length - 1; i++) {
+        ctx.quadraticCurveTo(p[i][0] * k, p[i][1] * k, (p[i][0] + p[i + 1][0]) / 2 * k, (p[i][1] + p[i + 1][1]) / 2 * k);
+      }
+      ctx.lineTo(p[p.length - 1][0] * k, p[p.length - 1][1] * k);
+    }
     ctx.stroke();
   }
   ctx.globalCompositeOperation = 'source-over';
@@ -4241,9 +4250,15 @@ function openInk(q, fieldset, data, onSave) {
     redraw();
     return k;
   };
-  const redraw = () => { const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); drawStrokes(c, data.s, k); };
+  const redraw = () => { snap = null; const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); drawStrokes(c, data.s, k); };
+  // yazarkən: bitmiş xətlərin surəti + yalnız indiki xətt çəkilir (çox xətt olanda da ləngimir), kadr başına bir dəfə
+  let snap = null, raf = 0;
+  const takeSnap = () => { const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); drawStrokes(c, data.s.filter((x) => x !== cur), k);
+    snap = document.createElement('canvas'); snap.width = cv.width; snap.height = cv.height; snap.getContext('2d').drawImage(cv, 0, 0); };
+  const drawCur = () => { raf = 0; if (!cur) return; if (!snap) takeSnap(); const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height); c.drawImage(snap, 0, 0); drawStrokes(c, [cur], k); };
+  const queueCur = () => { if (!raf) raf = requestAnimationFrame(drawCur); };
   const posF = (ev) => { const r = cv.getBoundingClientRect(); return [(ev.clientX - r.left) / r.width * data.W, (ev.clientY - r.top) / r.height * data.H]; };
-  const pos = (ev) => posF(ev).map(Math.round);
+  const pos = (ev) => posF(ev).map((v) => Math.round(v * 10) / 10);
 
   // --- sualın yeri/ölçüsü ---
   const curB = () => { const bg = inkBg.get(q.id); if (!bg) return null; const r = inkBgRect(data, bg); return { x: r.x, y: r.y, w: r.w, h: r.h }; };
@@ -4313,14 +4328,14 @@ function openInk(q, fieldset, data, onSave) {
     try { cv.setPointerCapture(ev.pointerId); } catch (_) { /* */ }
     cur = { c: color, w: eraser ? 28 : width, e: eraser, p: [pos(ev)], id: ev.pointerId };
     if (ev.pointerType === 'touch') cur.t = Date.now();
-    data.s.push(cur); redraw();
+    snap = null; data.s.push(cur); queueCur();
   });
   cv.addEventListener('pointermove', (ev) => {
     if (touches.has(ev.pointerId)) { touches.set(ev.pointerId, posF(ev)); moveGesture(); return; }
     if (!cur || ev.pointerId !== cur.id) return;
     const evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
-    evs.forEach((e) => { const p = pos(e); const l = cur.p[cur.p.length - 1]; if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 2) cur.p.push(p); });
-    redraw();
+    evs.forEach((e) => { const p = pos(e); const l = cur.p[cur.p.length - 1]; if (Math.abs(p[0] - l[0]) + Math.abs(p[1] - l[1]) >= 0.8) cur.p.push(p); });
+    queueCur();
   });
   const end = (ev) => {
     if (touches.has(ev.pointerId)) {
@@ -4330,7 +4345,7 @@ function openInk(q, fieldset, data, onSave) {
       if (had && !touches.size) onSave(data);
       return;
     }
-    if (cur && ev.pointerId === cur.id) { delete cur.id; cur = null; onSave(data); }
+    if (cur && ev.pointerId === cur.id) { if (ev.type !== 'lostpointercapture') { const p = pos(ev); const l = cur.p[cur.p.length - 1]; if (p[0] !== l[0] || p[1] !== l[1]) cur.p.push(p); } delete cur.id; cur = null; redraw(); onSave(data); }
   };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end); cv.addEventListener('lostpointercapture', end);
   // iOS: lövhədə uzun basma / sürüşdürmə səhifəni seçməsin, böyütməsin, sürüşdürməsin
