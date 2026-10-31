@@ -1,3 +1,4 @@
+import { paymentAssistantView, paymentAssistantSettings } from './payment-assistant.js';
 import { mountStudentSolver } from './student-solver.js';
 let cleanupStudentSolver = null;
 import { mountStudentHub, rememberStudent } from './student-hub.js';
@@ -296,10 +297,11 @@ function route() {
   if (page === 'privacy') return privacyView();
   if (!session) { access = null; return loginView(); }
   if (!access) {
-    loadAccess().then(route).catch(() => { access = { approved: true, missing: true }; route(); });
+    loadAccess().then(route).catch(() => { $app.innerHTML='<div class="center-screen"><p role="alert">Giriş icazəsi yoxlanmadı. Səhifəni yeniləyin.</p></div>'; });
     $app.innerHTML = '<div class="center-screen"><div class="spinner" aria-label="Yüklənir"></div></div>';
     return;
   }
+  if (access.role === 'payment_assistant') return paymentAssistantView($app,sb,access).catch(fail);
   if (!access.approved) return pendingView();
   if (page === 'print') return printView();
 
@@ -391,6 +393,9 @@ function loginView() {
 
 // ================= Giriş icazəsi və limitlər (008) =================
 async function loadAccess() {
+  const helper=await sb.rpc('payment_assistant_access');
+  if(helper.data?.role==='payment_assistant'){access=helper.data;return;}
+  if(helper.error&&!/PGRST202|function|404/i.test((helper.error.code||'')+' '+(helper.error.message||'')))throw helper.error;
   const { data, error } = await sb.rpc('ai_gate');
   if (error) {
     // baza yenilənməyibsə (funksiya yoxdur) əvvəlki kimi işləsin
@@ -586,6 +591,7 @@ async function settingsView() {
   await loadAccess().catch(() => {});
   view().innerHTML = `
     <div class="page-head"><div><h1>Ayarlar</h1></div></div>
+    <section class="card stack" id="paymentAssistantSettings"></section>
     <section class="card stack"><h2>AI xərci</h2>${limitLine() || '<p class="muted small">Limitlər üçün bazada 008 yeniləməsi lazımdır.</p>'}</section>
     <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
     ${access?.is_admin ? `<section class="card stack" id="errCard"><h2>Səhvlər</h2><p class="muted small">Yüklənir…</p></section>` : ''}
@@ -596,6 +602,7 @@ async function settingsView() {
       <div class="row"><button class="btn" id="logout3">Çıxış</button><a class="btn" href="#/privacy">Məxfilik siyasəti</a></div></section>`;
   $('#exportBtn').onclick = () => busy($('#exportBtn'), exportMyData).catch(fail);
   $('#logout3').onclick = async () => { await sb.auth.signOut(); go('#/'); };
+  paymentAssistantSettings($('#paymentAssistantSettings'),sb).catch(()=>{});
   renderUsage().catch(fail);
   if (access?.is_admin) renderErrors().catch(() => { const c = $('#errCard'); if (c) c.hidden = true; });
 }
@@ -643,7 +650,7 @@ function privacyView() {
       <h2>Nə üçün istifadə edirik</h2>
       <p>Yalnız platformanın işləməsi üçün: testlərin keçirilməsi, balların hesablanması, müəllimə nəticə və analizlərin göstərilməsi, səhvlərin düzəldilməsi. Məlumat satılmır və reklam üçün istifadə edilmir.</p>
       <h2>Kim görür</h2>
-      <p>Hər müəllim yalnız öz qruplarının və tələbələrinin məlumatını görür. Tələbə yalnız öz testlərini və nəticələrini görür. Bu qayda verilənlər bazasının özündə tətbiq olunur.</p>
+      <p>Hər müəllim yalnız öz qruplarının və tələbələrinin məlumatını görür. Tələbə yalnız öz testlərini və nəticələrini görür. Müəllimin icazə verdiyi ödəniş köməkçisi yalnız tələbə adı, qrup, dərs davamiyyəti və aylıq ödənişləri görə bilər. Köməkçinin ödəniş qeydləri ad və vaxtla saxlanır. Bu qaydalar verilənlər bazasında tətbiq olunur.</p>
       <h2>Süni intellekt</h2>
       <p>Müəllim sual yaradanda və ya yoxlayanda sualın mətni və şəkli AI xidmətlərinə (Anthropic, OpenAI, Google) göndərilir. Tələbə adları və cavabları AI-a göndərilmir.</p>
       <h2>Harada saxlanılır</h2>

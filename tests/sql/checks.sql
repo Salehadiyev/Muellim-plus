@@ -376,3 +376,53 @@ select t_err($q$ select student_ai_reserve('BBBBBBBB') $q$,'müəllim xərc limi
 select t_ok((student_ai_allowance('BBBBBBBB')->>'remaining')::int=3,'rədd edilmiş rezerv tələbənin haqqını azaltmır');
 reset role;
 \echo 'NO ERRORS: tələbə Sol limiti keçdi'
+
+-- 021: Qəşəm hesabı yalnız məhdud RPC vasitəsilə sahibinin dərs/ödənişlərini görür.
+insert into auth.users(id,email) values('00000000-0000-4000-8000-0000000000a5','qesem@example.test');
+update students set lesson_price=200,billing_start=date_trunc('month',now() at time zone 'Asia/Baku')::date,teacher_note='GIZLI QEYD' where id='00000000-0000-4000-8000-0000000000b1';
+delete from payments where student_id='00000000-0000-4000-8000-0000000000b1';
+set role authenticated;
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a1';
+select set_payment_assistant('qesem@example.test','Qəşəm',true);
+select t_ok((select count(*) from payment_assistants)=1,'sahib köməkçini görür');
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a2';
+select t_err($q$select set_payment_assistant('qesem@example.test','Başqası',true)$q$,'köməkçini başqa müəllim mənimsəyə bilmir');
+select t_err($q$select toggle_payment_assistant('00000000-0000-4000-8000-0000000000a5',false)$q$,'başqa müəllim köməkçini bağlaya bilmir');
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a5';
+select t_ok(payment_assistant_access()->>'name'='Qəşəm','Qəşəm adı');
+select t_ok((select count(*) from questions)=0 and (select count(*) from students)=0 and (select count(*) from tests)=0,'köməkçiyə əsas cədvəllər açılmır');
+select t_ok(not (payment_assistant_ledger(date_trunc('month',now() at time zone 'Asia/Baku')::date)::text like any(array['%GIZLI QEYD%','%access_code%','%Başqa%','%teacher_note%'])),'şəxsi qeydlər və başqa müəllim sızmır');
+select t_err($q$insert into payments(teacher_id,student_id,amount) values('00000000-0000-4000-8000-0000000000a1','00000000-0000-4000-8000-0000000000b1',999)$q$,'birbaşa ödəniş yazılmır');
+select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b3',date_trunc('month',now() at time zone 'Asia/Baku')::date,200)$q$,'başqa müəllimin tələbəsinə yazılmır');
+select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b1',date_trunc('month',now() at time zone 'Asia/Baku')::date,999)$q$,'məbləğ saxtalaşdırılmır');
+select t_ok((payment_assistant_mark('00000000-0000-4000-8000-0000000000b1',date_trunc('month',now() at time zone 'Asia/Baku')::date,200)->>'saved')::boolean,'ödəniş qeydə alınır');
+select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b1',date_trunc('month',now() at time zone 'Asia/Baku')::date,200)$q$,'təkrar sorğu ikiqat ödəniş yaratmır');
+select t_err($q$delete from assistant_payment_log$q$,'jurnal silinə bilmir');
+select t_err($q$select set_payment_assistant('admin@x.az','x',true)$q$,'köməkçi icazə paylamır');
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a1';
+select t_ok((select count(*) from assistant_payment_log where actor_name='Qəşəm' and amount=200)=1,'ad, məbləğ və vaxt jurnalı');
+select t_ok((select sum(amount) from payments where student_id='00000000-0000-4000-8000-0000000000b1')=200,'əsas dərs dəftərində məbləğ eynidir');
+select t_err($q$update teacher_access set approved=true where user_id='00000000-0000-4000-8000-0000000000a5'$q$,'köməkçini təsadüfən müəllim etmək olmur');
+select toggle_payment_assistant('00000000-0000-4000-8000-0000000000a5',false);
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a5';
+select t_ok(not (payment_assistant_access()->>'active')::boolean,'bağlı hesab məhdud rol olaraq qalır');
+select t_err($q$select payment_assistant_ledger(current_date)$q$,'bağlı hesab dərsləri oxumur');
+select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b1',current_date,200)$q$,'bağlı hesab ödəniş yazmır');
+reset role;
+set role anon;
+reset request.jwt.claim.sub;
+select t_err('select payment_assistant_access()','anon köməkçi RPC çağırmır');
+reset role;
+-- Qismən ödənişdə yalnız qalan məbləğ, köhnə aydan başlayaraq yazılır.
+update students set lesson_price=200,billing_start=(date_trunc('month',now() at time zone 'Asia/Baku')-interval '1 month')::date where id='00000000-0000-4000-8000-0000000000b2';
+delete from payments where student_id='00000000-0000-4000-8000-0000000000b2';
+insert into payments(teacher_id,student_id,amount) values('00000000-0000-4000-8000-0000000000a1','00000000-0000-4000-8000-0000000000b2',50);
+set role authenticated;
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a1';
+select toggle_payment_assistant('00000000-0000-4000-8000-0000000000a5',true);
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a5';
+select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b2',date_trunc('month',now() at time zone 'Asia/Baku')::date,150)$q$,'köhnə borc atlanmır');
+select t_ok((payment_assistant_mark('00000000-0000-4000-8000-0000000000b2',(date_trunc('month',now() at time zone 'Asia/Baku')-interval '1 month')::date,150)->>'amount')::numeric=150,'qismən ödənişin yalnız qalığı yazılır');
+select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b1',(date_trunc('month',now() at time zone 'Asia/Baku')+interval '1 month')::date,200)$q$,'gələcək ayı köməkçi yaza bilmir');
+reset role;
+\echo 'NO ERRORS: Qəşəm məhdud giriş və ödəniş jurnalı keçdi'
