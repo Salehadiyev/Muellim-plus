@@ -3754,6 +3754,7 @@ const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 const shiftYm = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 const dueDateOf = (ym, day) => { const [y, m] = ym.split('-').map(Number); const dd = Math.min(Math.max(1, day || 1), new Date(y, m, 0).getDate()); return `${ym}-${String(dd).padStart(2, '0')}`; };
 let lessonsYm = '';
+let lessonsMode = 'attendance';
 let lessonsDate = '';
 let lessonsCls = null; // null — hələ seçilməyib (bu günün cədvəlinə görə özü seçilir)
 let ledgerNeeds016 = false;
@@ -3846,37 +3847,42 @@ async function lessonsView() {
     const sum = rows.reduce((a, r) => ({ exp: a.exp + (r.g.sel ? r.g.fee : 0), paid: a.paid + r.g.mPaid, debt: a.debt + Math.max(0, r.g.balance),
       came: a.came + (r.day?.status === 'came' ? 1 : 0), missed: a.missed + (r.day?.status === 'missed' ? 1 : 0) }), { exp: 0, paid: 0, debt: 0, came: 0, missed: 0 });
     view().innerHTML = `
-      <div class="page-head"><div><h1>Dərslər</h1><p class="muted">Aylıq ödənişlər və dərsə gəlib-gəlmədiyi. Bunu yalnız siz görürsünüz.</p></div></div>
+      <div class="lesson-workspace" data-mode="${lessonsMode}">
+      <div class="page-head"><div><span class="ls-eyebrow">DƏRS DƏFTƏRİ</span><h1>Dərslər</h1><p class="muted">Davamiyyəti qeyd et, aylıq ödənişləri ayrıca izlə.</p></div></div>
+      <div class="ls-tabs" role="group" aria-label="Dərs dəftərinin bölmələri"><button class="btn" data-ls-mode="attendance" aria-pressed="${lessonsMode==='attendance'}">Davamiyyət <span>Kim gəlib, kim gəlməyib?</span></button><button class="btn" data-ls-mode="payments" aria-pressed="${lessonsMode==='payments'}">Ödənişlər <span>Aylıq məbləğ və ödəniş qeydi</span></button></div>
+      <div class="ls-guide"><strong>${lessonsMode==='attendance'?'1. Dərs gününü seç → 2. Gəldi / Gəlmədi işarələ':'1. Tələbəni seç → 2. Ödəniş qeyd et → 3. Məbləği təsdiqlə'}</strong><p>${lessonsMode==='attendance'?'Davamiyyət ödəniş hesabını dəyişmir. Səhv qeydi qarşı düymə ilə dəyişə və ya “Qeydi sil” ilə təmizləyə bilərsən.':'Yalnız qəbul etdiyin pulu qeyd et. Aylıq məbləği dəyişmək ödəniş yazmaq demək deyil.'}</p></div>
       ${ledgerNeeds016 ? '<p class="notice">Aylıq ödəniş günü üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>016_monthly.sql</strong> → Run.</p>' : ''}
-      <div class="month-bar"><button class="btn small" data-ym="-1" aria-label="Əvvəlki ay">‹</button><strong>${esc(ymLabel(ym))}</strong><button class="btn small" data-ym="1" aria-label="Növbəti ay">›</button>
+      <div class="month-bar"><button class="btn small ls-payment-only" data-ym="-1" aria-label="Əvvəlki ay">‹</button><strong class="ls-payment-only">${esc(ymLabel(ym))}</strong><button class="btn small ls-payment-only" data-ym="1" aria-label="Növbəti ay">›</button>
         ${classes.length > 1 ? `<select id="lsClass" aria-label="Qrup" style="min-height:40px;width:auto;margin-left:auto"><option value="">Bütün qruplar</option>${classes.map(([id, n]) => `<option value="${id}" ${id === cls ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
-      <section class="grid ls-stats4">
+      <section class="grid ls-stats4 ls-payment-only">
         <div class="card stat"><div class="label">Tələbə</div><div class="value">${list.length}</div></div>
         <div class="card stat"><div class="label">${esc(monthName(ym))}: gözlənilən</div><div class="value" style="font-size:22px">${money(sum.exp)}</div></div>
-        <div class="card stat"><div class="label">${esc(monthName(ym))}: ödənilib</div><div class="value" style="font-size:22px;color:var(--green)">${money(sum.paid)}</div></div>
+        <div class="card stat"><div class="label">${esc(monthName(ym))}: qəbul edilən pul</div><div class="value" style="font-size:22px;color:var(--green)">${money(sum.paid)}</div></div>
         <div class="card stat"><div class="label">Ümumi borc</div><div class="value" style="font-size:22px;color:${sum.debt > 0 ? 'var(--red)' : 'var(--green)'}">${money(sum.debt)}</div></div>
       </section>
-      ${ag.todayList.length || ag.missing.length ? `<div class="card ls-agenda">
+      ${ag.todayList.length || ag.missing.length ? `<div class="card ls-agenda ls-attendance-only">
         ${ag.todayList.length ? `<div class="row ag-line"><strong class="small">Bu gün:</strong>${ag.todayList.map((t) => `<button type="button" class="btn small ag-b ${t.c.id === cls && date === todayIso() ? 'on' : ''}" data-ag="${t.c.id}|${todayIso()}">${esc(t.c.name)} · ${esc(t.x.s)}${t.x.e ? '–' + esc(t.x.e) : ''}</button>`).join('')}</div>` : ''}
         ${ag.missing.length ? `<div class="row ag-line"><strong class="small" style="color:var(--red)">Qeyd olunmayıb:</strong>${ag.missing.map((t) => `<button type="button" class="btn small ag-b miss ${t.c.id === cls && date === t.date ? 'on' : ''}" data-ag="${t.c.id}|${t.date}">${esc(t.c.name)} · ${esc(WEEK_DAYS[t.x.d - 1][2])} ${esc(fmtDayAz(t.date).replace(/ \d{4}$/, ''))}</button>`).join('')}</div>` : ''}
       </div>` : ''}
-      <div class="card ls-quick">
+      <div class="card ls-quick ls-attendance-only">
         ${cls ? `<span class="small"><strong>${esc((classes.find(([id]) => id === cls) || [])[1] || '')}</strong>${selSlots.length ? ` · ${esc(WEEK_DAYS[selSlots[0].d - 1][1])} ${esc(selSlots.map((x) => x.s + (x.e ? '–' + x.e : '')).join(', '))}` : schedSlots(schedClasses.find((c) => c.id === cls)).length ? ' · <span style="color:#B45309">bu gün cədvəldə dərs yoxdur</span>' : ''}</span>` : ''}
         <label class="row small" style="gap:8px"><strong>Dərs günü</strong> <input type="date" id="lsDate" value="${date}" style="min-height:40px;width:auto"></label>
         <label class="row small" style="gap:8px;flex:1;min-width:180px">Mövzu <input type="text" id="lsTopic" maxlength="200" placeholder="istəyə bağlı, məs. Fonksiyonlar" style="min-height:40px"></label>
         <span class="small"><strong style="color:var(--green)">✓ ${sum.came}</strong> gəldi · <strong style="color:var(--red)">✗ ${sum.missed}</strong> gəlmədi</span>
-        <button class="btn small ok" id="allCame">✓ Hamısı gəldi</button>
+        <button class="btn small ok" id="allCame">✓ Qeyd olunmayanlar gəldi</button>
       </div>
+      <div class="ls-section-title"><h2>${lessonsMode==='attendance'?'Davamiyyət · '+esc(fmtDayAz(date)):'Aylıq ödənişlər'}</h2><span class="muted small">${lessonsMode==='attendance'?`${sum.came} gəldi · ${sum.missed} gəlmədi · ${list.length-sum.came-sum.missed} qeyd gözləyir`:list.length+' tələbə'}</span></div>
       ${rows.length ? `<section class="card ls-list">${rows.map(({ x, g, day }) => `<div class="ls-row" data-sid="${x.id}">
           <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="small muted">${esc(x.classes?.name || '')} · ${esc(monthName(ym))}: ${g.came} dərs${g.missed ? `, ${g.missed} gəlmədi` : ''}</span></div>
-          <span class="ls-money"><label class="ls-price" title="Aylıq ödəniş">₼<input type="number" min="0" step="1" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="aylıq" data-price="${x.id}" aria-label="${esc(x.full_name)}: aylıq ödəniş"></label>
+          <span class="ls-money ls-payment-only"><label class="ls-price" title="Aylıq məbləğ — qəbul edilən pul deyil">Aylıq ₼<input type="number" min="0" step="1" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="aylıq" data-price="${x.id}" aria-label="${esc(x.full_name)}: aylıq ödəniş"></label>
             <label class="ls-day" title="Ödəniş günü">ayın<input type="number" min="1" max="31" inputmode="numeric" value="${x.pay_day ?? ''}" placeholder="1" data-pday="${x.id}" aria-label="${esc(x.full_name)}: ödəniş günü" ${ledgerNeeds016 ? 'disabled' : ''}>-i</label></span>
-          <span class="ls-bal">${monthChip(g, ym)}${g.balance > g.fee + 0.004 ? balanceChip(g.balance) : g.balance < -0.004 ? balanceChip(g.balance) : ''}</span>
-          <span class="ls-att" role="group" aria-label="${esc(x.full_name)}: ${esc(fmtDayAz(date))}">
+          <span class="ls-bal ls-payment-only">${monthChip(g, ym)}${g.balance > g.fee + 0.004 ? balanceChip(g.balance) : g.balance < -0.004 ? balanceChip(g.balance) : ''}</span>
+          <span class="ls-att ls-attendance-only" role="group" aria-label="${esc(x.full_name)}: ${esc(fmtDayAz(date))}">
             <button class="btn small att ${day?.status === 'came' ? 'on-came' : ''}" data-att="came" data-s="${x.id}" aria-pressed="${day?.status === 'came'}">✓ Gəldi</button>
-            <button class="btn small att ${day?.status === 'missed' ? 'on-miss' : ''}" data-att="missed" data-s="${x.id}" aria-pressed="${day?.status === 'missed'}">✗ Gəlmədi</button></span>
-          <span class="ls-act"><button class="btn small primary" data-pay="${x.id}">+ Ödəniş</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
-        </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/students">Tələbələr</a> bölməsindən əlavə edin.</div></div>'}`;
+            <button class="btn small att ${day?.status === 'missed' ? 'on-miss' : ''}" data-att="missed" data-s="${x.id}" aria-pressed="${day?.status === 'missed'}">✗ Gəlmədi</button>${day?`<button class="btn small" data-att="${day.status}" data-clear-att data-s="${x.id}">Qeydi sil</button>`:'<span class="ls-unmarked">Qeyd olunmayıb</span>'}</span>
+          <span class="ls-act"><button class="btn small primary ls-payment-only" data-pay="${x.id}">+ Ödəniş qeyd et</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
+        </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/students">Tələbələr</a> bölməsindən əlavə edin.</div></div>'}</div>`;
+    $$('[data-ls-mode]').forEach(b=>b.onclick=()=>{lessonsMode=b.dataset.lsMode;draw();});
     $$('[data-ym]').forEach((b) => b.onclick = () => { lessonsYm = shiftYm(ym, +b.dataset.ym); route(); });
     $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = lessonsCls = e.target.value; draw(); });
     $$('[data-ag]').forEach((b) => b.onclick = () => { const [c, d] = b.dataset.ag.split('|'); cls = lessonsCls = c; lessonsDate = d;
@@ -3902,11 +3908,12 @@ async function lessonsView() {
       toast(v ? `Ödəniş günü: ayın ${v}-i` : 'Ödəniş günü silindi');
       await reload();
     });
-    // Davamiyyət: eyni düymə yenidən basılsa qeyd silinir; fərqlisi basılsa dəyişir. Hər əməl geri alına bilər.
+    // Davamiyyət ayrıca silinir; təkrar toxunma qeydi dəyişmir. Hər əməl geri alına bilər.
     $$('[data-att]').forEach((b) => b.onclick = () => busy(b, async () => {
       const x = byId[b.dataset.s]; const want = b.dataset.att;
       const cur = L.lessons.find((l) => l.student_id === x.id && l.lesson_date === lessonsDate);
       const label = want === 'came' ? '✓ gəldi' : '✗ gəlmədi';
+      if (cur && cur.status === want && !b.hasAttribute('data-clear-att')) return toast('Bu davamiyyət artıq qeyd olunub');
       if (cur && cur.status === want) {
         const { error } = await sb.from('lessons').delete().eq('id', cur.id);
         if (error) throw error;
@@ -3935,17 +3942,21 @@ async function lessonsView() {
     }).catch(fail);
     $$('[data-pay]').forEach((b) => b.onclick = () => {
       const x = byId[b.dataset.pay]; const g = billingOf(x, L, ym);
-      const def = g.balance > 0 ? Math.round(g.balance * 100) / 100 : (g.fee || '');
-      const raw = prompt(`${x.full_name} — ödəniş məbləği (₼):`, String(def));
-      if (raw === null) return;
-      const amount = Number(String(raw).replace(',', '.'));
-      if (!(amount > 0)) return toast('Məbləğ düzgün deyil', true);
-      busy(b, async () => {
-        const { data: row, error } = await sb.from('payments').insert({ student_id: x.id, amount, paid_on: lessonsDate }).select().single();
-        if (error) throw error;
-        showUndo(`${x.full_name}: ${money(amount)} ödəniş yazıldı`, async () => { const { error: e } = await sb.from('payments').delete().eq('id', row.id); if (e) throw e; await reload(); });
-        await reload();
-      }).catch(fail);
+      const next = g.next;
+      const def = next ? Math.max(0,g.fee-next.paid) : (g.fee || '');
+      openDialog('Ödəniş qeyd et', `<form id="lessonPaymentForm" class="stack"><div class="ls-pay-person"><h3>${esc(x.full_name)}</h3><p>${esc(x.classes?.name||'')} · Aylıq məbləğ: ${money(g.fee)}</p></div><p class="notice">${next?`${esc(ymLabel(next.ym))} üçün qalan: <strong>${money(def)}</strong>.`:'Cari aya qədər borc yoxdur. Daxil edilən məbləğ avans kimi nəzərə alınacaq.'} Ödəniş əvvəlki aylardan başlayaraq hesablanır.</p><label>Qəbul etdiyin məbləğ (₼)<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required value="${def}"></label><label>Ödənişin alındığı tarix<input name="paid_on" type="date" required value="${todayIso()}"></label><p class="muted small">Bu əməliyyat yalnız ödəniş yazır, davamiyyəti dəyişmir.</p><p id="lessonPaymentError" role="alert"></p><button class="btn primary" type="submit">Ödənişi təsdiqlə</button></form>`);
+      const dlg=$('#rvDialog'),form=$('#lessonPaymentForm');
+      form.onsubmit=e=>{e.preventDefault();const f=new FormData(form),amount=Number(f.get('amount')),paid_on=String(f.get('paid_on'));
+        if(!Number.isFinite(amount)||amount<=0||!/^\d{4}-\d{2}-\d{2}$/.test(paid_on))return;
+        const submit=$('button[type=submit]',form);
+        busy(submit,async()=>{
+          const {data:row,error}=await sb.from('payments').insert({student_id:x.id,amount,paid_on}).select().single();
+          if(error)throw error;
+          dlg.close();
+          showUndo(`${x.full_name}: ${money(amount)} ödəniş yazıldı`,async()=>{const {error:e}=await sb.from('payments').delete().eq('id',row.id);if(e)throw e;await reload();});
+          await reload();
+        }).catch(err=>{$('#lessonPaymentError',form).textContent=err.message||'Ödəniş yazılmadı. Yenidən yoxlayın.';});
+      };
     });
     $$('[data-hist]').forEach((b) => b.onclick = () => openHistory(byId[b.dataset.hist], L, ym, reload));
   };
