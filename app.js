@@ -3803,17 +3803,18 @@ function monthChip(g, ym) {
 const balanceChip = (b) => (b > 0.004 ? `<span class="pchip low">Borc: ${money(b)}</span>` : b < -0.004 ? `<span class="pchip hi">Avans: ${money(-b)}</span>` : '<span class="pchip">Borc yoxdur</span>');
 
 // Son əməli geri almaq üçün aşağıda çıxan zolaq
-let undoTimer = null;
 function showUndo(msg, fn) {
   let bar = document.getElementById('undoBar');
   if (!bar) { bar = document.createElement('div'); bar.id = 'undoBar'; bar.className = 'undo-bar'; bar.setAttribute('role', 'status'); document.body.appendChild(bar); }
-  bar.innerHTML = `<span>${esc(msg)}</span><button type="button" class="btn small">↶ Geri al</button>`;
+  bar.innerHTML = `<span>${esc(msg)}</span><button type="button" class="btn small" data-undo>↶ Geri al</button><button type="button" class="btn small" data-dismiss-undo aria-label="Bildirişi bağla">✕</button>`;
   bar.hidden = false;
-  clearTimeout(undoTimer);
-  undoTimer = setTimeout(() => { bar.hidden = true; }, 12000);
-  $('button', bar).onclick = async () => {
-    bar.hidden = true; clearTimeout(undoTimer);
-    try { await fn(); toast('Geri alındı'); } catch (err) { fail(err); }
+  $('[data-dismiss-undo]',bar).onclick=()=>{bar.hidden=true;};
+  const button=$('[data-undo]',bar);
+  button.onclick=async()=>{
+    if(button.disabled)return;
+    button.disabled=true;
+    try { await fn(); if(button.isConnected)bar.hidden=true; toast('Geri alındı'); }
+    catch(err){button.disabled=false;fail(err);}
   };
 }
 
@@ -3977,7 +3978,7 @@ function openHistory(x, L, ym, reload) {
         <span class="small muted">ödəniş günü ${esc(fmtDayAz(m.due))}</span><span class="h-m">${money(g.fee)}</span>
         <span>${m.full ? '<span class="pchip hi">✓ ödənilib</span>' : m.overdue ? `<span class="pchip low">gecikir · ${money(g.fee - m.paid)}</span>` : `<span class="pchip mid">gözlənilir${m.paid > 0 ? ` · ${money(m.paid)} ödənilib` : ''}</span>`}</span></div>`).join('')}</div>`
       : '<p class="small muted">Aylıq məbləğ yazılmayıb.</p>'}
-    <h3>Ödənişlər</h3>
+    <p class="ls-guide small">Səhv qeydi burada silə bilərsən. Sildikdən sonra “Geri al” ilə bərpa etmək mümkündür. Düzgün ödənişi Ödənişlərdən, davamiyyəti isə uyğun dərs günündən yenidən qeyd et.</p><h3>Ödənişlər</h3>
     ${g.ps.length ? `<div class="h-list">${g.ps.map((p) => `<div class="h-row"><span class="h-d">${esc(fmtDayAz(p.paid_on))}</span><span class="h-k pay">💳 Ödəniş</span><span class="h-t">${esc(p.note || '')}</span><span class="h-m">+${money(p.amount)}</span><button class="btn small danger" data-hdp="${p.id}" aria-label="Sil">Sil</button></div>`).join('')}</div>`
       : '<p class="small muted">Hələ ödəniş yoxdur.</p>'}
     <h3>Dərslər · ${esc(monthName(ym))}</h3>
@@ -3986,7 +3987,7 @@ function openHistory(x, L, ym, reload) {
   const dlg = document.getElementById('rvDialog');
   $('#hCopy', dlg).onclick = () => copyText(report, 'Hesabat kopyalandı');
   const del = (table, row) => async () => {
-    if (!confirm('Bu qeyd silinsin?')) return;
+    if (!confirm(`${x.full_name}: ${table==='payments'?money(row.amount)+' ödənişi ('+fmtDayAz(row.paid_on)+')':fmtDayAz(row.lesson_date)+' davamiyyət qeydi'} silinsin?`)) return;
     const { error } = await sb.from(table).delete().eq('id', row.id);
     if (error) return fail(error);
     dlg.close();

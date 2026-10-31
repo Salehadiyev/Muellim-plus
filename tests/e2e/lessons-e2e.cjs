@@ -58,6 +58,8 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
    await p.fill('#lessonPaymentForm [name=amount]','200');await p.click('#lessonPaymentForm button[type=submit]');};
   await pay(); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
   console.log('paid:', await chip(0));
+  await p.waitForTimeout(13000);assert.equal(await p.isVisible('#undoBar'),true);
+  console.log('undo remains available until dismissed');
   await p.click('#undoBar button'); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('Gecikir'), row(0)); console.log('pay undone:', (await db()).payments.length);
   await pay(); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
   // Nərgiz: aylıq 150, ayın 28-i
@@ -74,7 +76,12 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
   console.log('history months:', await p.$$eval('#rvDialog .h-month', (x) => x.map((e) => e.textContent.replace(/\s+/g, ' ').trim()).join(' || ')));
   console.log('report:', (await p.textContent('#rvDialog p.pre')).trim());
   await p.screenshot({ path: path.join(T, 'ls2-history.png') });
-  await p.click('#rvDialog [data-close]');
+  await p.click('#rvDialog [data-hdp]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).payments.length===0);
+  await p.click('#undoBar [data-undo]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).payments.length===1);
+  await p.click(`${row(0)} [data-hist]`);await p.waitForSelector('#rvDialog [data-hdl]');
+  await p.click('#rvDialog [data-hdl]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).lessons.length===0);
+  await p.click('#undoBar [data-undo]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).lessons.length===1);
+  console.log('history: payment and attendance deletions restored');
   // gizli qeyd + tələbə səhifəsində xülasə
   await p.goto('http://app.test/#/student/s0'); await p.waitForSelector('#tNote'); await p.waitForSelector('#ledgerCard .pchip');
   await p.fill('#tNote', 'Üslü sayılarda zəifdir'); await p.waitForSelector('#noteState >> text=yadda saxlandı');
