@@ -30,6 +30,7 @@ class Query {
     if (this.table === 'mistakes' && !db.mistakes) return { data: null, error: { message: 'relation "public.mistakes" does not exist' } };
     // köhnə baza təqlidi: __missing_columns = { cədvəl: ['sütun'] } — həmin sütuna yazanda xəta
     const miss = (db.__missing_columns || {})[this.table] || [];
+    if (this.op === 'select' && miss.some(c => (this.cols || '').split(',').map(x=>x.trim()).includes(c))) return {data:null,error:{message:`column ${miss[0]} does not exist`}};
     if ((this.op === 'update' || this.op === 'insert') && miss.some((c) => [this.values || {}, ...(this.rows || [])].some((o) => c in o))) return { data: null, error: { message: `Could not find the '${miss[0]}' column of '${this.table}' in the schema cache` } };
     let t = db[this.table] = db[this.table] || [];
     if (this.op === 'insert') {

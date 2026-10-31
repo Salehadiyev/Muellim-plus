@@ -1,3 +1,4 @@
+import { parentWhatsApp, mountParentContact } from './parent-contact.js';
 import { paymentAssistantView, paymentAssistantSettings } from './payment-assistant.js';
 import { mountStudentSolver } from './student-solver.js';
 let cleanupStudentSolver = null;
@@ -3761,7 +3762,8 @@ let ledgerNeeds016 = false;
 
 async function loadLedger() {
   const cols = 'id, full_name, class_id, lesson_price, pay_day, billing_start, classes(name)';
-  let st = await sb.from('students').select(cols).order('full_name');
+  let st = await sb.from('students').select(cols + ', parent_phone').order('full_name');
+  if (st.error && /parent_phone/i.test(st.error.message || '')) st = await sb.from('students').select(cols).order('full_name');
   if (st.error && /pay_day|billing_start/i.test(st.error.message || '')) { ledgerNeeds016 = true; st = await sb.from('students').select('id, full_name, class_id, lesson_price, classes(name)').order('full_name'); }
   const [ls, ps] = await Promise.all([
     sb.from('lessons').select('*').order('lesson_date', { ascending: false }),
@@ -3874,7 +3876,7 @@ async function lessonsView() {
       </div>
       <div class="ls-section-title"><h2>${lessonsMode==='attendance'?'Davamiyyət · '+esc(fmtDayAz(date)):'Aylıq ödənişlər'}</h2><span class="muted small">${lessonsMode==='attendance'?`${sum.came} gəldi · ${sum.missed} gəlmədi · ${list.length-sum.came-sum.missed} qeyd gözləyir`:list.length+' tələbə'}</span></div>
       ${rows.length ? `<section class="card ls-list">${rows.map(({ x, g, day }) => `<div class="ls-row" data-sid="${x.id}">
-          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="small muted">${esc(x.classes?.name || '')} · ${esc(monthName(ym))}: ${g.came} dərs${g.missed ? `, ${g.missed} gəlmədi` : ''}</span></div>
+          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="ls-payment-only">${parentWhatsApp(x.parent_phone) || `<a class="btn small" href="#/student/${x.id}">+ Valideyn nömrəsi</a>`}</span><span class="small muted">${esc(x.classes?.name || '')} · ${esc(monthName(ym))}: ${g.came} dərs${g.missed ? `, ${g.missed} gəlmədi` : ''}</span></div>
           <span class="ls-money ls-payment-only"><label class="ls-price" title="Aylıq məbləğ — qəbul edilən pul deyil">Aylıq ₼<input type="number" min="0" step="1" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="aylıq" data-price="${x.id}" aria-label="${esc(x.full_name)}: aylıq ödəniş"></label>
             <label class="ls-day" title="Ödəniş günü">ayın<input type="number" min="1" max="31" inputmode="numeric" value="${x.pay_day ?? ''}" placeholder="1" data-pday="${x.id}" aria-label="${esc(x.full_name)}: ödəniş günü" ${ledgerNeeds016 ? 'disabled' : ''}>-i</label></span>
           <span class="ls-bal ls-payment-only">${monthChip(g, ym)}${g.balance > g.fee + 0.004 ? balanceChip(g.balance) : g.balance < -0.004 ? balanceChip(g.balance) : ''}</span>
@@ -4031,6 +4033,7 @@ async function studentWorkView(id) {
       <div class="card stat"><div class="label">Orta nəticə</div><div class="value">${avg === null ? '—' : avg + '%'}</div></div>
       <div class="card stat"><div class="label">Suallar</div><div class="value" style="font-size:20px"><span style="color:var(--green)">✓ ${tot.right}</span> · <span style="color:var(--red)">✗ ${tot.wrong}</span> · — ${tot.empty}</div></div>
     </section>
+    <section class="card" id="parentContact"></section>
     <div class="split">
       <section class="card stack secret-note"><div class="row between"><h2>🔒 Gizli qeyd</h2><span class="small muted" id="noteState">yalnız siz görürsünüz</span></div>
         <textarea id="tNote" rows="5" maxlength="20000" placeholder="məs. Üslü sayılarda zəifdir · valideynlə danışıldı · növbəti dərsdə Kümeler">${esc(st.teacher_note || '')}</textarea></section>
@@ -4050,6 +4053,7 @@ async function studentWorkView(id) {
           <td>${r.sub ? `<button type="button" class="btn small" data-row="${i}">Ətraflı</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty">Bu qrupun hələ testi yoxdur.</div>'}
     </section>`;
+  mountParentContact($('#parentContact'), sb, st);
   // gizli qeyd: yazdıqca avtomatik saxlanılır
   let noteTimer = null;
   $('#tNote').oninput = () => {
