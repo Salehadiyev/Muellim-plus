@@ -893,3 +893,7 @@ body.ink-open { overflow: hidden; }
 .ls-date-nav { justify-content:space-between; padding-top:12px; border-top:1px solid #e3ebef; }
 .ls-date-nav strong { font-size:14px; }
 @media(max-width:620px) { .ls-date-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .ls-date-nav { gap:8px; } .ls-date-nav strong { order:-1; width:100%; text-align:center; } }
+.ls-schedule:not(.expanded) .ls-date-extra { display:none; }
+.ls-agenda summary { cursor:pointer; font-weight:600; padding:4px 0; }
+.ls-agenda[open] summary { margin-bottom:12px; }
+.ls-date-nav { margin-top:12px; }

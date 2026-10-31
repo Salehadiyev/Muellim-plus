@@ -34,6 +34,7 @@ const DB = { classes: [
   await p.click('.ls-row[data-sid="s2"] [data-att="missed"]'); await p.waitForSelector('.ls-row[data-sid="s2"] .on-miss');
   await p.click('.ls-row[data-sid="s1"] [data-att="came"]'); await p.waitForSelector('.ls-row[data-sid="s1"] .on-came');
   // keçmiş dərs: Mat 2-6 · 27 oktyabr
+  await p.click('.ls-agenda summary');
   await p.click('[data-ag="c1|2026-10-27"]'); await p.waitForFunction(() => document.querySelector('#lsDate').value === '2026-10-27');
   console.log('past:', await p.$eval('#lsClass', (s) => s.selectedOptions[0].textContent), (await p.textContent('.ls-quick > span.small')).trim());
   await p.click('#allCame'); await p.waitForFunction(() => document.querySelectorAll('.ag-b.miss').length === 3);
@@ -43,6 +44,7 @@ const DB = { classes: [
   await p.click('.ls-date-nav [data-lesson-date="2026-10-31"]');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-10-31');
   await p.click('.ls-date-nav [data-lesson-date="2026-11-03"]');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-11-03');
   assert.match(await p.locator('.ls-date-card[data-lesson-date="2026-11-03"]').innerText(),/Tam qeyd edilib/);
+  assert.equal(await p.locator('.ls-date-card:visible').count(),3);await p.click('#lsAllDates');assert.ok(await p.locator('.ls-date-card:visible').count()>3);
   await p.clock.setFixedTime(new Date('2026-11-04T12:00:00+04:00'));
   await p.selectOption('#lsClass','c2');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-11-03');
   assert.equal(await names(),'Cavid');
