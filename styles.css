@@ -882,3 +882,18 @@ body.ink-open { overflow: hidden; }
  .lesson-workspace .ls-att .att { flex: 1; }
  .lesson-workspace .ls-who { flex-basis: 100%; }
 }
+
+/* Qrup cədvəlinə bağlı davamiyyət tarixləri. */
+.ls-schedule h2 { font-size:18px; margin:0; }
+.ls-schedule p { margin:8px 0; }
+.ls-date-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(125px,1fr)); gap:8px; margin:16px 0; }
+.ls-date-card.btn { display:flex; flex-direction:column; gap:5px; align-items:flex-start; white-space:normal; text-align:left; padding:14px; background:#f7fafb; min-width:0; }
+.ls-date-card span,.ls-date-card small { font-size:11px; font-weight:400; line-height:1.4; }
+.ls-date-card[aria-pressed=true] { border-color:var(--accent); background:#e6f4f7; color:#07556b; box-shadow:inset 0 0 0 1px var(--accent); }
+.ls-date-nav { justify-content:space-between; padding-top:12px; border-top:1px solid #e3ebef; }
+.ls-date-nav strong { font-size:14px; }
+@media(max-width:620px) { .ls-date-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .ls-date-nav { gap:8px; } .ls-date-nav strong { order:-1; width:100%; text-align:center; } }
+.ls-schedule:not(.expanded) .ls-date-extra { display:none; }
+.ls-agenda summary { cursor:pointer; font-weight:600; padding:4px 0; }
+.ls-agenda[open] summary { margin-bottom:12px; }
+.ls-date-nav { margin-top:12px; }
