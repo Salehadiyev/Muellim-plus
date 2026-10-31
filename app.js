@@ -3900,6 +3900,8 @@ async function lessonsView() {
       const { error } = await sb.from('students').update(upd).eq('id', x.id);
       if (error) return fail(error);
       toast('Aylıq məbləğ yadda saxlandı');
+      const back={lesson_price:x.lesson_price??null};if(!ledgerNeeds016)back.billing_start=x.billing_start??null;
+      showUndo(`${x.full_name}: aylıq məbləğ dəyişdi`,async()=>{const {error:e}=await sb.from('students').update(back).eq('id',x.id);if(e)throw e;await reload();});
       await reload();
     });
     $$('[data-pday]').forEach((inp) => inp.onchange = async () => {
@@ -3907,6 +3909,8 @@ async function lessonsView() {
       const { error } = await sb.from('students').update({ pay_day: v }).eq('id', inp.dataset.pday);
       if (error) return fail(needSql(error, '016_monthly.sql'));
       toast(v ? `Ödəniş günü: ayın ${v}-i` : 'Ödəniş günü silindi');
+      const x=byId[inp.dataset.pday];
+      showUndo(`${x.full_name}: ödəniş günü dəyişdi`,async()=>{const {error:e}=await sb.from('students').update({pay_day:x.pay_day??null}).eq('id',x.id);if(e)throw e;await reload();});
       await reload();
     });
     // Davamiyyət ayrıca silinir; təkrar toxunma qeydi dəyişmir. Hər əməl geri alına bilər.

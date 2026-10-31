@@ -54,7 +54,7 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
   await p.click('[data-ls-mode=payments]');
   assert.equal(await p.isVisible('#allCame'),false);assert.equal(await p.isVisible('[data-att=came]'),false);
   const pay=async()=>{await p.click(`${row(0)} [data-pay]`);await p.waitForSelector('#lessonPaymentForm');
-   assert.notEqual(await p.locator('#lessonPaymentForm [name=paid_on]').inputValue(),'');
+   assert.equal(await p.locator('#lessonPaymentForm [name=paid_on]').inputValue(),first.slice(0,8)+pad2(nd.getDate()));
    await p.fill('#lessonPaymentForm [name=amount]','200');await p.click('#lessonPaymentForm button[type=submit]');};
   await pay(); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
   console.log('paid:', await chip(0));
@@ -65,6 +65,8 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
   // Nərgiz: aylıq 150, ayın 28-i
   await p.fill(`${row(1)} [data-price]`, '150'); await p.dispatchEvent(`${row(1)} [data-price]`, 'change'); await p.waitForSelector('text=Aylıq məbləğ yadda saxlandı');
   await p.fill(`${row(1)} [data-pday]`, '28'); await p.dispatchEvent(`${row(1)} [data-pday]`, 'change'); await p.waitForSelector('text=Ödəniş günü: ayın 28-i');
+  await p.click('#undoBar [data-undo]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).students.find(x=>x.id==='s1').pay_day===null);
+  await p.fill(`${row(1)} [data-pday]`, '28');await p.dispatchEvent(`${row(1)} [data-pday]`,'change');await p.waitForSelector('text=Ödəniş günü: ayın 28-i');
   d = await db(); const n1 = d.students.find((x) => x.id === 's1');
   const expect1 = nd.getDate() >= 28 ? 'Gecikir' : 'Gözlənilir';
   console.log('Nərgiz:', n1.lesson_price, n1.pay_day, n1.billing_start === first, '| chip ok:', (await chip(1)).includes(expect1));
