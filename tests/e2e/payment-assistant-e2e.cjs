@@ -5,7 +5,7 @@ const month=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Baku',year:'numeric'
 const DB={classes:[],students:[],questions:[],tests:[],submissions:[],ai_usage:[],
  teacher_access:[{user_id:'u1',approved:true,is_admin:false}],
  payment_assistants:[{user_id:'helper',teacher_id:'u1',email:'qesem@example.test',display_name:'Qəşəm',active:true}],assistant_payment_log:[],
- assistant_students:[{id:'s1',name:'Əli <b>Həsənov</b>',class_name:'Riyaziyyat',monthly_fee:200,pay_day:5,next_month:month+'-01',remaining:150,lessons:[{date:month+'-01',status:'came',topic:'Tənliklər'}]}]};
+ assistant_students:[{id:'s1',name:'Əli <b>Həsənov</b>',parent_phone:'+994501234567',class_name:'Riyaziyyat',monthly_fee:200,pay_day:5,next_month:month+'-01',remaining:150,lessons:[{date:month+'-01',status:'came',topic:'Tənliklər'}]}]};
 (async()=>{
  const b=await chromium.launch(),ctx=await b.newContext({viewport:{width:390,height:844}}),errors=[];
  await ctx.route('**/*',r=>{const u=new URL(r.request().url());
@@ -23,6 +23,7 @@ const DB={classes:[],students:[],questions:[],tests:[],submissions:[],ai_usage:[
  for(const hash of ['bank','settings','students','teachers']){await p.goto('http://app.test/#/'+hash);await p.waitForSelector('[data-assistant-pay]');assert.deepEqual(await p.locator('nav .item').allTextContents(),['Dərslər']);}
  await p.locator('summary').click();assert.match(await p.locator('#assistantRows').innerText(),/Gəldi.*Tənliklər/);
  for(const width of [390,768]){await p.setViewportSize({width,height:900});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+ assert.equal(await p.locator('.parent-whatsapp').getAttribute('href'),'https://wa.me/994501234567');
  console.log('restricted routes and responsive lessons ok');
  await p.locator('[data-assistant-pay]').click();await p.waitForSelector('text=Ödəniş qeydə alındı.');assert.equal(await p.locator('[data-assistant-pay]').count(),0);
  const log=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')).assistant_payment_log);assert.equal(log.length,1);assert.equal(log[0].actor_name,'Qəşəm');assert.equal(log[0].amount,150);

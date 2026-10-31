@@ -7,6 +7,7 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OK = /NO ERRORS/;
 const tests = {
+  'e2e/parent-phone-e2e.cjs': [OK, /parent phone: save, reload, edit, remove, validation and payment links ok/, /parent phone: missing migration keeps lessons usable/],
   'e2e/payment-assistant-e2e.cjs': [OK, /restricted routes and responsive lessons ok/, /payment confirmed and audit saved ok/, /owner revokes access and helper blocked ok/],
   'e2e/student-solver-e2e.cjs': [OK, /whiteboard: ink, graph highlights, seek, cached replay and reduced motion ok/, /board: pause, next, full solution, replay and responsive layout ok/, /quota: three requests, reload persistence and student isolation ok/],
   'server/student-solve.mjs': [/Sol only, structured steps, private ticket and usage ok/, /invalid code, daily limit and missing migration block AI/, /unreadable image, incomplete solution and invalid image handled/],

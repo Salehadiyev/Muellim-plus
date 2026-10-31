@@ -426,3 +426,26 @@ select t_ok((payment_assistant_mark('00000000-0000-4000-8000-0000000000b2',(date
 select t_err($q$select payment_assistant_mark('00000000-0000-4000-8000-0000000000b1',(date_trunc('month',now() at time zone 'Asia/Baku')+interval '1 month')::date,200)$q$,'gələcək ayı köməkçi yaza bilmir');
 reset role;
 \echo 'NO ERRORS: Qəşəm məhdud giriş və ödəniş jurnalı keçdi'
+
+-- 022: nömrə yalnız sahibə və aktiv köməkçiyə verilir.
+set role authenticated;
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a1';
+update students set parent_phone='+994501234567' where id='00000000-0000-4000-8000-0000000000b1';
+select t_ok((select parent_phone from students where id='00000000-0000-4000-8000-0000000000b1')='+994501234567','sahib nömrəni saxlayır');
+select t_err($q$update students set parent_phone='javascript:alert(1)' where id='00000000-0000-4000-8000-0000000000b1'$q$,'yanlış nömrə rədd edilir');
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a2';
+select t_ok((select count(*) from students where parent_phone='+994501234567')=0,'başqa müəllim nömrəni görmür');
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a5';
+select t_ok(payment_assistant_ledger(date_trunc('month',current_date)::date)::text like '%+994501234567%','aktiv köməkçi nömrəni görür');
+update students set parent_phone=null where id='00000000-0000-4000-8000-0000000000b1';
+select t_ok(payment_assistant_ledger(date_trunc('month',current_date)::date)::text like '%+994501234567%','köməkçi nömrəni dəyişə bilmir');
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a1';
+select toggle_payment_assistant('00000000-0000-4000-8000-0000000000a5',false);
+set request.jwt.claim.sub='00000000-0000-4000-8000-0000000000a5';
+select t_err($q$select payment_assistant_ledger(date_trunc('month',current_date)::date)$q$,'bağlı köməkçi nömrəni görmür');
+reset role;
+set role anon;
+reset request.jwt.claim.sub;
+select t_ok(not (student_portal('AAAAAAAA') ? 'parent_phone') and student_portal('AAAAAAAA')::text not like '%+994501234567%','tələbə portalına nömrə verilmir');
+reset role;
+\echo 'NO ERRORS: valideyn nömrəsinin məxfiliyi keçdi'

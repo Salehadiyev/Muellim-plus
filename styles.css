@@ -882,3 +882,6 @@ body.ink-open { overflow: hidden; }
  .lesson-workspace .ls-att .att { flex: 1; }
  .lesson-workspace .ls-who { flex-basis: 100%; }
 }
+
+/* Valideynlə əlaqə: telefonda rahat toxunma. */
+.parent-whatsapp{min-height:44px;color:#166534;white-space:normal;overflow-wrap:anywhere}.ls-who .parent-whatsapp{margin-top:5px;font-size:12px}
