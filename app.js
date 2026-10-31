@@ -831,6 +831,21 @@ function schedEditor(box, cls) {
   draw();
 }
 
+// Cədvələ uyğun tarix: təqvim günləri ilə hesabla, saat qurşağında gün sürüşməsin.
+function scheduledDate(cls, from, direction, include=false) {
+  if(!schedSlots(cls).length)return null;
+  const since=cls?.schedule?.since||'';
+  let date=new Date(from+'T12:00:00');
+  if(direction>0&&since&&from<since){date=new Date(since+'T12:00:00');include=true;}
+  if(!include)date.setDate(date.getDate()+direction);
+  for(let i=0;i<370;i++,date.setDate(date.getDate()+direction)){
+    const day=localYmd(date);
+    if(day<since){if(direction<0)return null;continue;}
+    if(schedSlots(cls).some(x=>x.d===isoDow(day)))return day;
+  }
+  return null;
+}
+
 // Bu günün dərsləri və son 14 gündə qeyd olunmamış dərs günləri
 function scheduleAgenda(classes, lessons, students) {
   const today = todayIso();
@@ -852,8 +867,8 @@ function scheduleAgenda(classes, lessons, students) {
       if (ds < since) break;
       slots.filter((x) => x.d === isoDow(ds)).forEach((x) => {
         if (ds === today && (x.e || x.s) > hm) return; // bu günün dərsi hələ bitməyib
-        const any = [...stuByClass[c.id]].some((sid) => marked.has(ds + '|' + sid));
-        if (!any) missing.push({ c, x, date: ds });
+        const complete = [...stuByClass[c.id]].every((sid) => marked.has(ds + '|' + sid));
+        if (!complete) missing.push({ c, x, date: ds });
       });
     }
   });
@@ -3828,12 +3843,24 @@ async function lessonsView() {
   const agenda = () => scheduleAgenda(schedClasses, L.lessons, L.students);
   if (lessonsCls === null) {
     const a = agenda();
-    lessonsCls = a.pick && classes.length > 1 ? a.pick.c.id : '';
-    if (a.pick) lessonsDate = todayIso();
+    lessonsCls = a.pick?.c.id || classes[0]?.[0] || '';
+    const c=schedClasses.find(c=>c.id===lessonsCls);
+    lessonsDate=scheduledDate(c,todayIso(),-1,true)||scheduledDate(c,todayIso(),1,true)||todayIso();
+    lessonsYm=ymOf(lessonsDate);
+    if(lessonsYm!==ym)return lessonsView();
   }
   let cls = lessonsCls;
   const draw = () => {
     const date = lessonsDate;
+    const selectedClass=schedClasses.find(c=>c.id===cls);
+    const scheduled=schedSlots(selectedClass);
+    const previousDate=scheduledDate(selectedClass,date,-1),nextDate=scheduledDate(selectedClass,date,1);
+    const monthDates=[];
+    for(let n=1;n<=31;n++){
+      const d=ym+'-'+String(n).padStart(2,'0');
+      if(localYmd(new Date(d+'T12:00:00'))!==d)continue;
+      if(d>=(selectedClass?.schedule?.since||'')&&scheduled.some(x=>x.d===isoDow(d)))monthDates.push(d);
+    }
     const ag = agenda();
     const selSlots = cls ? schedSlots(schedClasses.find((c) => c.id === cls)).filter((x) => x.d === isoDow(date)) : [];
     const list = L.students.filter((x) => !cls || x.class_id === cls);
@@ -3847,7 +3874,7 @@ async function lessonsView() {
       <div class="ls-guide"><strong>${lessonsMode==='attendance'?'1. Dərs gününü seç → 2. Gəldi / Gəlmədi işarələ':'1. Tələbəni seç → 2. Ödəniş qeyd et → 3. Məbləği təsdiqlə'}</strong><p>${lessonsMode==='attendance'?'Davamiyyət ödəniş hesabını dəyişmir. Səhv qeydi qarşı düymə ilə dəyişə və ya “Qeydi sil” ilə təmizləyə bilərsən.':'Yalnız qəbul etdiyin pulu qeyd et. Aylıq məbləği dəyişmək ödəniş yazmaq demək deyil.'}</p></div>
       ${ledgerNeeds016 ? '<p class="notice">Aylıq ödəniş günü üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>016_monthly.sql</strong> → Run.</p>' : ''}
       <div class="month-bar"><button class="btn small ls-payment-only" data-ym="-1" aria-label="Əvvəlki ay">‹</button><strong class="ls-payment-only">${esc(ymLabel(ym))}</strong><button class="btn small ls-payment-only" data-ym="1" aria-label="Növbəti ay">›</button>
-        ${classes.length > 1 ? `<select id="lsClass" aria-label="Qrup" style="min-height:40px;width:auto;margin-left:auto"><option value="">Bütün qruplar</option>${classes.map(([id, n]) => `<option value="${id}" ${id === cls ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
+        ${classes.length ? `<select id="lsClass" aria-label="Qrup" style="min-height:40px;width:auto;margin-left:auto"><option value="">Bütün qruplar</option>${classes.map(([id, n]) => `<option value="${id}" ${id === cls ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
       <section class="grid ls-stats4 ls-payment-only">
         <div class="card stat"><div class="label">Tələbə</div><div class="value">${list.length}</div></div>
         <div class="card stat"><div class="label">${esc(monthName(ym))}: gözlənilən</div><div class="value" style="font-size:22px">${money(sum.exp)}</div></div>
@@ -3858,6 +3885,12 @@ async function lessonsView() {
         ${ag.todayList.length ? `<div class="row ag-line"><strong class="small">Bu gün:</strong>${ag.todayList.map((t) => `<button type="button" class="btn small ag-b ${t.c.id === cls && date === todayIso() ? 'on' : ''}" data-ag="${t.c.id}|${todayIso()}">${esc(t.c.name)} · ${esc(t.x.s)}${t.x.e ? '–' + esc(t.x.e) : ''}</button>`).join('')}</div>` : ''}
         ${ag.missing.length ? `<div class="row ag-line"><strong class="small" style="color:var(--red)">Qeyd olunmayıb:</strong>${ag.missing.map((t) => `<button type="button" class="btn small ag-b miss ${t.c.id === cls && date === t.date ? 'on' : ''}" data-ag="${t.c.id}|${t.date}">${esc(t.c.name)} · ${esc(WEEK_DAYS[t.x.d - 1][2])} ${esc(fmtDayAz(t.date).replace(/ \d{4}$/, ''))}</button>`).join('')}</div>` : ''}
       </div>` : ''}
+      ${scheduled.length?`<section class="card ls-schedule ls-attendance-only"><div class="row between"><div><h2>${esc(selectedClass.name)} · dərs günləri</h2><p class="muted small">${scheduled.map(x=>esc(slotText(x,true))).join(' · ')}</p></div><span class="small muted">${esc(ymLabel(ym))}</span></div><div class="ls-date-grid">${monthDates.map(d=>{
+        const count=list.filter(st=>L.lessons.some(l=>l.student_id===st.id&&l.lesson_date===d)).length;
+        const state=count===list.length&&list.length?'Tam qeyd edilib':count?`${count}/${list.length} qeyd edilib`:d>todayIso()?'Qarşıdakı dərs':'Qeyd gözləyir';
+        const slots=scheduled.filter(x=>x.d===isoDow(d));
+        return `<button class="btn ls-date-card" data-lesson-date="${d}" aria-pressed="${d===date}"><strong>${esc(fmtDayAz(d).replace(/ \d{4}$/,''))}</strong><span>${esc(WEEK_DAYS[isoDow(d)-1][1])}</span><span>${slots.map(x=>esc(x.s)+(x.e?'–'+esc(x.e):'')).join(' · ')}</span><small>${esc(state)}</small></button>`;
+      }).join('')||'<p class="muted">Bu ay üçün cədvəldə dərs yoxdur.</p>'}</div><div class="row ls-date-nav"><button class="btn small" ${previousDate?`data-lesson-date="${previousDate}"`:'disabled'}>← Əvvəlki dərs</button><strong>${esc(fmtDayAz(date))}</strong><button class="btn small" ${nextDate?`data-lesson-date="${nextDate}"`:'disabled'}>Növbəti dərs →</button></div><p class="small muted">${scheduled.some(x=>x.d===isoDow(date))&&date>=(selectedClass.schedule?.since||'')?'Davamiyyət aşağıda seçilmiş dərs tarixinə yazılır.':'Seçilmiş tarix cədvəldən kənardır — aşağıdakı qeydlər əlavə dərs üçün yazılacaq.'} Başqa tarix seçərək əlavə dərsi də qeyd edə bilərsən.</p></section>`:cls?'<p class="ls-attendance-only small muted">Bu qrupun dərs cədvəli yazılmayıb. Dərs tarixini aşağıdan seçə bilərsən.</p>':'<p class="ls-attendance-only small muted">Dərs günlərini görmək üçün qrup seç.</p>'}
       <div class="card ls-quick ls-attendance-only">
         ${cls ? `<span class="small"><strong>${esc((classes.find(([id]) => id === cls) || [])[1] || '')}</strong>${selSlots.length ? ` · ${esc(WEEK_DAYS[selSlots[0].d - 1][1])} ${esc(selSlots.map((x) => x.s + (x.e ? '–' + x.e : '')).join(', '))}` : schedSlots(schedClasses.find((c) => c.id === cls)).length ? ' · <span style="color:#B45309">bu gün cədvəldə dərs yoxdur</span>' : ''}</span>` : ''}
         <label class="row small" style="gap:8px"><strong>Dərs günü</strong> <input type="date" id="lsDate" value="${date}" style="min-height:40px;width:auto"></label>
@@ -3878,7 +3911,15 @@ async function lessonsView() {
         </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/students">Tələbələr</a> bölməsindən əlavə edin.</div></div>'}</div>`;
     $$('[data-ls-mode]').forEach(b=>b.onclick=()=>{lessonsMode=b.dataset.lsMode;draw();});
     $$('[data-ym]').forEach((b) => b.onclick = () => { lessonsYm = shiftYm(ym, +b.dataset.ym); route(); });
-    $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = lessonsCls = e.target.value; draw(); });
+    const selectLessonDate=d=>{lessonsDate=d;if(ymOf(d)!==lessonsYm){lessonsYm=ymOf(d);route();}else draw();};
+    $$('[data-lesson-date]').forEach(b=>b.onclick=()=>selectLessonDate(b.dataset.lessonDate));
+    $('#lsClass') && ($('#lsClass').onchange = (e) => {
+      cls=lessonsCls=e.target.value;
+      if(lessonsMode==='attendance'){
+        const c=schedClasses.find(c=>c.id===cls);
+        selectLessonDate(scheduledDate(c,todayIso(),-1,true)||scheduledDate(c,todayIso(),1,true)||todayIso());
+      }else draw();
+    });
     $$('[data-ag]').forEach((b) => b.onclick = () => { const [c, d] = b.dataset.ag.split('|'); cls = lessonsCls = c; lessonsDate = d;
       if (ymOf(d) !== lessonsYm) { lessonsYm = ymOf(d); route(); } else draw(); });
     $('#lsDate').onchange = (e) => { lessonsDate = e.target.value || todayIso(); if (ymOf(lessonsDate) !== lessonsYm) { lessonsYm = ymOf(lessonsDate); route(); } else draw(); };

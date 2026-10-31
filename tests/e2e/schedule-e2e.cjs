@@ -1,6 +1,6 @@
 // Qrupun dərs cədvəli: qrup səhifəsində yazılır; «Dərslər» bu günün dərsini özü seçir, qeyd olunmamış dərs günlərini göstərir; 018 olmadan yumşaq xəta
 const { chromium } = require(process.env.PW || 'playwright');
-const path = require('path'); const fs = require('fs');
+const assert=require('node:assert/strict'); const path = require('path'); const fs = require('fs');
 const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
 const ROOT = path.join(__dirname, '..', '..');
 const sch = (slots) => ({ slots, since: '2026-10-27' });
@@ -34,11 +34,24 @@ const DB = { classes: [
   await p.click('.ls-row[data-sid="s2"] [data-att="missed"]'); await p.waitForSelector('.ls-row[data-sid="s2"] .on-miss');
   await p.click('.ls-row[data-sid="s1"] [data-att="came"]'); await p.waitForSelector('.ls-row[data-sid="s1"] .on-came');
   // keçmiş dərs: Mat 2-6 · 27 oktyabr
-  await p.click('.ag-b.miss >> text=Mat 2-6'); await p.waitForFunction(() => document.querySelector('#lsDate').value === '2026-10-27');
+  await p.click('[data-ag="c1|2026-10-27"]'); await p.waitForFunction(() => document.querySelector('#lsDate').value === '2026-10-27');
   console.log('past:', await p.$eval('#lsClass', (s) => s.selectedOptions[0].textContent), (await p.textContent('.ls-quick > span.small')).trim());
-  await p.click('#allCame'); await p.waitForFunction(() => document.querySelectorAll('.ag-b.miss').length === 2);
+  await p.click('#allCame'); await p.waitForFunction(() => document.querySelectorAll('.ag-b.miss').length === 3);
   console.log('missing after:', await chips('.ag-b.miss'));
   const d = await db(); console.log('saved:', d.lessons.map((l) => `${l.student_id}:${l.lesson_date}:${l.status}`).sort().join(','));
+  assert.match(await p.locator('.ls-date-card[data-lesson-date="2026-10-31"]').innerText(),/1\/2 qeyd edilib/);
+  await p.click('.ls-date-nav [data-lesson-date="2026-10-31"]');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-10-31');
+  await p.click('.ls-date-nav [data-lesson-date="2026-11-03"]');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-11-03');
+  assert.match(await p.locator('.ls-date-card[data-lesson-date="2026-11-03"]').innerText(),/Tam qeyd edilib/);
+  await p.clock.setFixedTime(new Date('2026-11-04T12:00:00+04:00'));
+  await p.selectOption('#lsClass','c2');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-11-03');
+  assert.equal(await names(),'Cavid');
+  await p.selectOption('#lsClass','c3');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-11-04');assert.match(await p.locator('#view').innerText(),/Bu qrupun dərs cədvəli yazılmayıb/);
+  await p.selectOption('#lsClass','c1');await p.waitForFunction(()=>document.querySelector('#lsDate').value==='2026-11-03');
+  await p.fill('#lsDate','2026-11-04');await p.dispatchEvent('#lsDate','change');assert.match(await p.locator('.ls-schedule').innerText(),/cədvəldən kənardır/);
+  assert.equal((await db()).lessons.length,d.lessons.length);
+  for(const width of [390,768,1024]){await p.setViewportSize({width,height:1200});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+  console.log('schedule cards: partial, complete, month crossing, group switch, extra date and responsive ok');
   await p.screenshot({ path: path.join(T, 'sched1-lessons.png'), fullPage: true });
   // qrup səhifəsində cədvəl yaz: 3-cü və 5-ci gün 14:00–15:00
   await p.goto('http://app.test/#/class/c3'); await p.waitForSelector('#schEdit'); await p.click('#schEdit');
