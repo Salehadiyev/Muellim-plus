@@ -34,7 +34,7 @@
       ]
     },
     {
-      "source": "/(|index.html|app.js|styles.css|student-hub.js|student-solver.js|solver-board.js|solver-ink.js|solver-glyphs.js)",
+      "source": "/(|index.html|app.js|styles.css|student-hub.js|student-solver.js|solver-board.js|solver-ink.js|solver-glyphs.js|payment-assistant.js)",
       "headers": [
         {
           "key": "Cache-Control",

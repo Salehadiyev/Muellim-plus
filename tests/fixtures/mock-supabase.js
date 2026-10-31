@@ -84,6 +84,24 @@ export function createClient() {
     }) },
     rpc: async (fn, a) => {
       const db = load();
+      if(fn==='payment_assistant_access'){
+        const a=(db.payment_assistants||[]).find(x=>x.user_id===getS()?.user?.id);
+        return {data:a?{role:'payment_assistant',name:a.display_name,active:a.active}:null,error:null};
+      }
+      if(fn==='payment_assistant_ledger')return {data:{students:db.assistant_students||[]},error:null};
+      if(fn==='payment_assistant_mark'){
+        const helper=(db.payment_assistants||[]).find(x=>x.user_id===getS()?.user?.id&&x.active);
+        if(!helper)return {data:null,error:{message:'Giriş icazəsi yoxdur'}};
+        const st=db.assistant_students.find(x=>x.id===a.p_student);
+        db.assistant_payment_log.push({actor_name:helper.display_name,student_name:st.name,amount:a.p_expected_amount,billing_month:a.p_month,created_at:new Date().toISOString()});
+        st.next_month='2099-01-01';save(db);return {data:{saved:true},error:null};
+      }
+      if(fn==='toggle_payment_assistant'){const helper=db.payment_assistants.find(x=>x.user_id===a.p_user);helper.active=a.p_active;save(db);return {data:null,error:null};}
+      if(fn==='set_payment_assistant'){
+        const helper=db.payment_assistants.find(x=>x.email===a.p_email);
+        if(helper){helper.active=a.p_active;helper.display_name=a.p_name;}else db.payment_assistants.push({user_id:'helper',teacher_id:'u1',email:a.p_email,display_name:a.p_name,active:a.p_active});
+        save(db);return {data:null,error:null};
+      }
       if (fn === 'ai_gate') {
         if (!db.teacher_access) return { data: null, error: { message: 'Could not find the function public.ai_gate', code: 'PGRST202' } };
         const me = db.teacher_access.find((x) => x.user_id === (getS()?.user?.id));
