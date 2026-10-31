@@ -1,6 +1,6 @@
 // Dərs və ödəniş dəftəri, gizli qeyd, real çətinlik (bank + avtomatik test "Bankdan"); 013 olmadan sınmır
 const { chromium } = require(process.env.PW || 'playwright');
-const path = require('path'); const fs = require('fs');
+const assert = require('node:assert/strict'); const path = require('path'); const fs = require('fs');
 const FX = path.join(__dirname, '..', 'fixtures'); const T = path.join(__dirname, '..', 'out'); fs.mkdirSync(T, { recursive: true });
 const ROOT = path.join(__dirname, '..', '..');
 const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
@@ -34,35 +34,56 @@ const DB = { classes: [{ id: 'c1', name: '11A', teacher_id: 'u1' }], students: s
   const chip = async (i) => (await p.textContent(`${row(i)} .ls-bal`)).replace(/\s+/g, ' ').trim();
   console.log('rows:', await p.$$eval('.ls-row', (x) => x.length), '| stats:', await p.$$eval('.ls-stats4 .value', (x) => x.map((e) => e.textContent.trim()).join(' | ')));
   console.log('Əli overdue:', await chip(0));
+  assert.equal(await p.isVisible('[data-pay="s0"]'),false);
+  assert.equal(await p.isVisible('[data-att=came]'),true);
+  await p.screenshot({path:path.join(T,'lessons-attendance.png'),fullPage:true});
   // davamiyyət: gəldi → yenə bas (silinir) → geri al → gəlmədi
-  await p.click(`${row(0)} [data-att=came]`); await p.waitForSelector(`${row(0)} [data-att=came].on-came`);
+  await p.click(`${row(0)} [data-att=came]:not([data-clear-att])`); await p.waitForSelector(`${row(0)} [data-att=came].on-came`);
   let d = await db(); console.log('came:', d.lessons.map((l) => l.status + ':' + l.fee).join(','), '| money unchanged:', (await chip(0)).includes('Gecikir'));
-  await p.click(`${row(0)} [data-att=came]`); await p.waitForSelector(`${row(0)} [data-att=came]:not(.on-came)`);
+  await p.click(`${row(0)} [data-att=came]:not([data-clear-att])`); assert.equal((await db()).lessons.length,1);
+  await p.click(`${row(0)} [data-clear-att]`); await p.waitForSelector(`${row(0)} [data-att=came]:not(.on-came)`);
   console.log('toggle off:', (await db()).lessons.length, '| undo bar:', (await p.textContent('#undoBar span')).trim());
   await p.click('#undoBar button'); await p.waitForSelector(`${row(0)} [data-att=came].on-came`); console.log('undo restored:', (await db()).lessons.length);
-  await p.click(`${row(0)} [data-att=missed]`); await p.waitForSelector(`${row(0)} [data-att=missed].on-miss`);
+  await p.click(`${row(0)} [data-att=missed]:not([data-clear-att])`); await p.waitForSelector(`${row(0)} [data-att=missed].on-miss`);
   d = await db(); console.log('switched:', d.lessons.map((l) => l.status).join(','), '| one per day:', d.lessons.filter((l) => l.student_id === 's0').length);
   await p.click('#allCame'); await p.waitForSelector(`${row(1)} [data-att=came].on-came`);
   d = await db(); console.log('all came:', d.lessons.map((l) => l.student_id + ':' + l.status).sort().join(','));
   await p.click('#undoBar button'); await p.waitForSelector(`${row(1)} [data-att=came]:not(.on-came)`); console.log('all came undone:', (await db()).lessons.length);
   // aylıq ödəniş: ödə → geri al → yenə ödə
-  promptAnswer = '200'; await p.click(`${row(0)} [data-pay]`); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
+  await p.fill('#lsDate',first);await p.dispatchEvent('#lsDate','change');
+  await p.click('[data-ls-mode=payments]');
+  assert.equal(await p.isVisible('#allCame'),false);assert.equal(await p.isVisible('[data-att=came]'),false);
+  const pay=async()=>{await p.click(`${row(0)} [data-pay]`);await p.waitForSelector('#lessonPaymentForm');
+   assert.equal(await p.locator('#lessonPaymentForm [name=paid_on]').inputValue(),first.slice(0,8)+pad2(nd.getDate()));
+   await p.fill('#lessonPaymentForm [name=amount]','200');await p.click('#lessonPaymentForm button[type=submit]');};
+  await pay(); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
   console.log('paid:', await chip(0));
+  await p.waitForTimeout(13000);assert.equal(await p.isVisible('#undoBar'),true);
+  console.log('undo remains available until dismissed');
   await p.click('#undoBar button'); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('Gecikir'), row(0)); console.log('pay undone:', (await db()).payments.length);
-  await p.click(`${row(0)} [data-pay]`); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
+  await pay(); await p.waitForFunction((r) => document.querySelector(r + ' .ls-bal').textContent.includes('ödənilib'), row(0));
   // Nərgiz: aylıq 150, ayın 28-i
   await p.fill(`${row(1)} [data-price]`, '150'); await p.dispatchEvent(`${row(1)} [data-price]`, 'change'); await p.waitForSelector('text=Aylıq məbləğ yadda saxlandı');
   await p.fill(`${row(1)} [data-pday]`, '28'); await p.dispatchEvent(`${row(1)} [data-pday]`, 'change'); await p.waitForSelector('text=Ödəniş günü: ayın 28-i');
+  await p.click('#undoBar [data-undo]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).students.find(x=>x.id==='s1').pay_day===null);
+  await p.fill(`${row(1)} [data-pday]`, '28');await p.dispatchEvent(`${row(1)} [data-pday]`,'change');await p.waitForSelector('text=Ödəniş günü: ayın 28-i');
   d = await db(); const n1 = d.students.find((x) => x.id === 's1');
   const expect1 = nd.getDate() >= 28 ? 'Gecikir' : 'Gözlənilir';
   console.log('Nərgiz:', n1.lesson_price, n1.pay_day, n1.billing_start === first, '| chip ok:', (await chip(1)).includes(expect1));
   console.log('stats after:', await p.$$eval('.ls-stats4 .value', (x) => x.map((e) => e.textContent.trim()).join(' | ')));
+  for(const width of [390,768,1024]){await p.setViewportSize({width,height:1200});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+  console.log('clear ledger: separate tabs, explicit removal, payment form and responsive layout ok');
   await p.screenshot({ path: path.join(T, 'ls1-list.png'), fullPage: true });
   await p.click(`${row(0)} [data-hist]`); await p.waitForSelector('#rvDialog[open] .h-month');
   console.log('history months:', await p.$$eval('#rvDialog .h-month', (x) => x.map((e) => e.textContent.replace(/\s+/g, ' ').trim()).join(' || ')));
   console.log('report:', (await p.textContent('#rvDialog p.pre')).trim());
   await p.screenshot({ path: path.join(T, 'ls2-history.png') });
-  await p.click('#rvDialog [data-close]');
+  await p.click('#rvDialog [data-hdp]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).payments.length===0);
+  await p.click('#undoBar [data-undo]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).payments.length===1);
+  await p.click(`${row(0)} [data-hist]`);await p.waitForSelector('#rvDialog [data-hdl]');
+  await p.click('#rvDialog [data-hdl]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).lessons.length===0);
+  await p.click('#undoBar [data-undo]');await p.waitForFunction(()=>JSON.parse(localStorage.getItem('mockdb')).lessons.length===1);
+  console.log('history: payment and attendance deletions restored');
   // gizli qeyd + tələbə səhifəsində xülasə
   await p.goto('http://app.test/#/student/s0'); await p.waitForSelector('#tNote'); await p.waitForSelector('#ledgerCard .pchip');
   await p.fill('#tNote', 'Üslü sayılarda zəifdir'); await p.waitForSelector('#noteState >> text=yadda saxlandı');

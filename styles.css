@@ -850,3 +850,35 @@ body.ink-open { overflow: hidden; }
 .solver-progress input { flex:1; min-width:60px; min-height:44px; accent-color:#0e7490; }
 .solver-progress span { font-variant-numeric:tabular-nums; white-space:nowrap; }
 @media(max-width:650px) { .solver-board { padding:16px; }.solver-workspace { grid-template-columns:1fr; }.solver-figure { position:static; max-width:240px; width:100%; margin:auto; }.solver-math { font-size:18px; }.solver-toolbar .btn { flex:1 1 42%; }.solver-progress label { display:none; } }
+
+/* Dərs dəftəri: davamiyyət və pul iki ayrı işdir. */
+.lesson-workspace { display: grid; gap: 20px; }
+.ls-eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.ls-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ls-tabs .btn { display: flex; flex-direction: column; align-items: flex-start; white-space: normal; padding: 18px 20px; border-radius: 16px; font-size: 18px; gap: 5px; background: #fff; }
+.ls-tabs .btn span { font-size: 12px; font-weight: 400; }
+.ls-tabs .btn[aria-pressed=true] { background: #0e7490; border-color: #0e7490; color: white; box-shadow: 0 5px 16px #0e74901c; }
+.ls-guide { border-left: 3px solid var(--accent); padding: 6px 16px; }
+.ls-guide p { margin: 6px 0 0; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.ls-section-title { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; justify-content: space-between; }
+.ls-section-title h2 { margin: 0; font-size: 20px; }
+.lesson-workspace .ls-list { padding: 0; background: transparent; border: 0; box-shadow: none; display: grid; gap: 12px; }
+.lesson-workspace .ls-row { padding: 18px; border: 1px solid #dfe9ed; border-radius: 16px; background: white; box-shadow: 0 3px 10px #17333e05; }
+.lesson-workspace .ls-who { gap: 5px; }
+.lesson-workspace .ls-who strong { font-size: 16px; }
+.lesson-workspace .ls-att { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.lesson-workspace .ls-att .btn { min-height: 44px; padding: 10px 14px; }
+.ls-unmarked { font-size: 12px; color: var(--muted); }
+.ls-pay-person { background: #eef7f9; padding: 16px; border-radius: 12px; }
+.ls-pay-person h3,.ls-pay-person p { margin: 0 0 5px; }
+.lesson-workspace[data-mode=attendance] .ls-payment-only,
+.lesson-workspace[data-mode=payments] .ls-attendance-only { display: none; }
+@media(max-width:620px) {
+ .ls-tabs { gap: 8px; }
+ .ls-tabs .btn { padding: 14px 12px; font-size: 16px; }
+ .ls-tabs .btn span { line-height: 1.5; }
+ .lesson-workspace .ls-row { gap: 14px; }
+ .lesson-workspace .ls-att { width: 100%; }
+ .lesson-workspace .ls-att .att { flex: 1; }
+ .lesson-workspace .ls-who { flex-basis: 100%; }
+}
