@@ -29,3 +29,23 @@ export function mountParentContact(host,sb,student){
   }catch(err){status.textContent=/parent_phone|schema cache/i.test(err.message||'')?'Saxlanılmadı: bazada 022_parent_phone.sql yeniləməsini işə sal.':err.message||'Saxlanılmadı. Yenidən yoxla.';}finally{btn.disabled=false;}
  };
 }
+
+// Siyahıdan çıxmadan nömrə əlavə etmək və düzəltmək.
+export function mountInlineParentContact(host,sb,student,onSaved){
+ const render=()=>{
+  host.innerHTML=`<div class="row contact-summary"><span class="contact-link">${parentWhatsApp(student.parent_phone)||'<span class="tag amber">Nömrə yoxdur</span>'}</span><button class="btn small" type="button" data-edit-phone>${student.parent_phone?'Dəyiş':'Nömrə əlavə et'}</button></div><div data-contact-editor></div><p class="small" role="status" data-contact-status></p>`;
+  host.querySelector('[data-edit-phone]').onclick=()=>{
+   const editor=host.querySelector('[data-contact-editor]');
+   editor.innerHTML=`<form class="stack inline-phone-form"><label class="field">${esc(student.full_name)} · valideyn nömrəsi<input type="tel" name="phone" inputmode="tel" maxlength="32" value="${esc(student.parent_phone||'')}" placeholder="050 123 45 67"></label><span class="small muted">Silmək üçün xananı boş saxla.</span><div class="row"><button type="submit" class="btn primary small">Saxla</button><button type="button" class="btn small" data-cancel-phone>Ləğv et</button></div><p role="alert" class="small"></p></form>`;
+   const form=editor.querySelector('form'),input=form.querySelector('input'),msg=form.querySelector('[role=alert]');input.focus();
+   form.querySelector('[data-cancel-phone]').onclick=()=>editor.replaceChildren();
+   form.onsubmit=async e=>{
+    e.preventDefault();let phone;try{phone=normalizeParentPhone(input.value);}catch(err){msg.textContent=err.message;return;}
+    const buttons=[...form.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
+    try{const {data,error}=await sb.from('students').update({parent_phone:phone}).eq('id',student.id).select('id');if(error)throw error;if(!data?.length)throw new Error('Saxlanılmadı. Giriş icazəsini yoxla.');
+     student.parent_phone=phone;render();host.querySelector('[data-contact-status]').textContent=phone?'✓ Saxlanıldı':'✓ Nömrə silindi';onSaved?.();
+    }catch(err){msg.textContent=err.code==='42703'||err.code==='PGRST204'?'Nömrə xanası bazada yoxdur. 022_parent_phone.sql yeniləməsi lazımdır.':err.message||'Saxlanılmadı. Yenidən yoxla.';buttons.forEach(b=>b.disabled=false);}
+   };
+  };
+ };render();
+}

@@ -29,6 +29,13 @@ const DB={lessons:[],payments:[],classes:[],students:[],questions:[],tests:[],su
  await p.goto('http://app.test/#/lessons');await p.waitForSelector('[data-ls-mode="payments"]');await p.locator('[data-ls-mode="payments"]').click();
  assert.equal(await p.locator('.parent-whatsapp').getAttribute('href'),'https://wa.me/905321234567');
  for(const width of [390,768,1024]){await p.setViewportSize({width,height:900});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);}
+ await p.locator('[data-edit-phone]').click();await p.locator('.inline-phone-form input').fill('051 234 56 78');await p.locator('.inline-phone-form [type=submit]').click();await p.waitForSelector('text=✓ Saxlanıldı');
+ assert.equal(await p.locator('.parent-whatsapp').getAttribute('href'),'https://wa.me/994512345678');
+ await p.locator('#missingPhonesOnly').check();assert.equal(await p.locator('[data-sid="s1"]').isVisible(),false);await p.locator('#missingPhonesOnly').uncheck();
+ await p.locator('[data-edit-phone]').click();await p.locator('.inline-phone-form input').fill('');await p.locator('.inline-phone-form [type=submit]').click();await p.waitForSelector('text=✓ Nömrə silindi');
+ await p.locator('#missingPhonesOnly').check();assert.equal(await p.locator('[data-sid="s1"]').isVisible(),true);assert.match(await p.locator('#phoneCount').innerText(),/1 tələbədən 1/);
+ await p.locator('[data-edit-phone]').click();await p.locator('.inline-phone-form input').fill('0551234567');await p.locator('.inline-phone-form [type=submit]').click();await p.waitForFunction(()=>document.querySelector('[data-sid="s1"]').hidden);
+ console.log('inline phone: save, delete, missing filter and live count ok');
  await p.goto('http://app.test/#/student/s1');await p.waitForSelector('#parentPhoneForm');await field.fill('');await save.click();await p.waitForSelector('text=✓ Nömrə silindi.');assert.equal(await p.locator('.parent-whatsapp').count(),0);
  console.log('parent phone: save, reload, edit, remove, validation and payment links ok');
  await p.evaluate(()=>{const d=JSON.parse(localStorage.getItem('mockdb'));d.__missing_columns={students:['parent_phone']};localStorage.setItem('mockdb',JSON.stringify(d));});

@@ -7,7 +7,7 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OK = /NO ERRORS/;
 const tests = {
-  'e2e/parent-phone-e2e.cjs': [OK, /parent phone: save, reload, edit, remove, validation and payment links ok/, /parent phone: missing migration keeps lessons usable/],
+  'e2e/parent-phone-e2e.cjs': [OK, /inline phone: save, delete, missing filter and live count ok/, /parent phone: save, reload, edit, remove, validation and payment links ok/, /parent phone: missing migration keeps lessons usable/],
   'e2e/payment-assistant-e2e.cjs': [OK, /restricted routes and responsive lessons ok/, /payment confirmed and audit saved ok/, /owner revokes access and helper blocked ok/],
   'e2e/student-solver-e2e.cjs': [OK, /whiteboard: ink, graph highlights, seek, cached replay and reduced motion ok/, /board: pause, next, full solution, replay and responsive layout ok/, /quota: three requests, reload persistence and student isolation ok/],
   'server/student-solve.mjs': [/Sol only, structured steps, private ticket and usage ok/, /invalid code, daily limit and missing migration block AI/, /unreadable image, incomplete solution and invalid image handled/],
@@ -26,7 +26,7 @@ const tests = {
   'e2e/flow3.cjs': [OK, /bank approve badge: true/, /tile badge: ✔ Təsdiqlənib/],
   'e2e/tryos-e2e.cjs': [OK, /student figs: 4 opt figs: 10/],
   'e2e/usage-ui.cjs': [OK, /Cəmi \| 16 \| 3 \| 13/],
-  'e2e/account-e2e.cjs': [OK, /forgot password sends link/, /recovery link → new password → app/, /expired session → back to login/],
+  'e2e/account-e2e.cjs': [OK, /settings password: mismatch and successful change/, /recovery marker survives hash navigation and clears after save/, /forgot password sends link/, /recovery link → new password → app/, /expired session → back to login/],
   'e2e/csp-e2e.cjs': [OK, /pdf rendered: true/, /csp violations: \[\]/],
   'e2e/data-e2e.cjs': [OK, /privacy page public/, /export all data \(paged\)/, /csp: \[\]/],
   'e2e/auto-e2e.cjs': [/total: 4/, /pdf info: book.pdf · 3 səhifə \| to: 3/, /book groups: Asan · 2 \| Orta · 1 \| Çətin · 1/, /book items: Orijinal sual \d \| Orijinal sual \d \| AI sual orta \d \| Orijinal sual \d/, /Kitabda çatmadı \(orta 1\)/, /want: extract:Fonksiyonlar/, /fill plan: tryos_plan:\{"asan":0,"orta":1,"cetin":0\}/, /newtest title: Fonksiyonlar \| checked: 4/, /ai plan: tryos_plan:\{"asan":1,"orta":1,"cetin":1\} \| groups: Asan · 1 \| Orta · 1 \| Çətin · 1/, /print ok: true/],
