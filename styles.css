@@ -885,3 +885,5 @@ body.ink-open { overflow: hidden; }
 
 /* Valideynlə əlaqə: telefonda rahat toxunma. */
 .parent-whatsapp{min-height:44px;color:#166534;white-space:normal;overflow-wrap:anywhere}.ls-who .parent-whatsapp{margin-top:5px;font-size:12px}
+
+.ls-row[hidden]{display:none!important}.inline-phone-form{margin-top:8px;padding:12px;background:var(--bg);border-radius:10px}.inline-phone-form input{width:100%;min-width:0}.contact-summary{flex-wrap:wrap}.contact-summary button,.inline-phone-form button{min-height:44px}#settingsPassword{max-width:460px}#missingPhonesOnly{width:20px;min-height:20px}

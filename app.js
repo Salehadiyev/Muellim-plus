@@ -1,4 +1,4 @@
-import { parentWhatsApp, mountParentContact } from './parent-contact.js';
+import { parentWhatsApp, mountParentContact, mountInlineParentContact } from './parent-contact.js';
 import { paymentAssistantView, paymentAssistantSettings } from './payment-assistant.js';
 import { mountStudentSolver } from './student-solver.js';
 let cleanupStudentSolver = null;
@@ -238,7 +238,7 @@ function questionHtml(q, { selectable = false, checked = false, showAnswer = tru
 
 let recoveryMode = false; // e-poçtdakı "şifrəni bərpa et" linki ilə gəlib
 async function boot() {
-  recoveryMode = /type=recovery/.test(location.hash);
+  recoveryMode = /type=recovery/.test(location.hash) || new URLSearchParams(location.search).get('mode') === 'recovery';
   try {
     const r = await fetch('/api/config');
     const cfg = await r.json();
@@ -252,16 +252,17 @@ async function boot() {
     </div></div>`;
     return;
   }
-  const { data } = await sb.auth.getSession();
-  session = data.session;
   sb.auth.onAuthStateChange((event, s) => {
     const wasIn = !!session;
     session = s;
     if (event === 'PASSWORD_RECOVERY') { recoveryMode = true; return newPasswordView(); }
+    if (event === 'SIGNED_OUT') recoveryMode = false;
     if (event === 'SIGNED_OUT' || (event === 'SIGNED_IN' && !wasIn)) { access = null; route(); }
   });
+  const { data } = await sb.auth.getSession();
+  session = data.session;
   window.addEventListener('hashchange', route);
-  if (recoveryMode) { history.replaceState(null, '', location.pathname); if (session) return newPasswordView(); }
+  if (recoveryMode) history.replaceState(null, '', location.pathname + '?mode=recovery');
   route();
 }
 
@@ -281,6 +282,7 @@ function newPasswordView() {
       const { error } = await sb.auth.updateUser({ password: f.get('p1') });
       if (error) throw error;
       recoveryMode = false;
+      history.replaceState(null, '', location.pathname);
       toast('Şifrə dəyişdirildi');
       access = null;
       go('#/');
@@ -290,6 +292,12 @@ function newPasswordView() {
 }
 
 function route() {
+  if (recoveryMode) {
+    if (session) return newPasswordView();
+    $app.innerHTML = '<div class="center-screen"><div class="card auth-card stack"><h1>Şifrə bərpası</h1><p>Keçidin vaxtı bitib və ya giriş təsdiqlənmədi. Yeni bərpa məktubu istə.</p><button class="btn primary" id="retryRecovery">Yeni keçid istə</button></div></div>';
+    $('#retryRecovery').onclick=()=>{recoveryMode=false;history.replaceState(null,'',location.pathname);loginView();$('#forgot').click();};
+    return;
+  }
   if (cleanupStudentSolver) { cleanupStudentSolver(); cleanupStudentSolver = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const [page, id] = parts;
@@ -357,7 +365,7 @@ function forgotView() {
     e.preventDefault();
     const email = String(new FormData(e.target).get('email') || '').trim();
     busy($('button[type=submit]', e.target), async () => {
-      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBase() });
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: appBase() + '?mode=recovery' });
       if (error && !/rate|limit/i.test(error.message)) throw error;
       // e-poçtun qeydiyyatda olub-olmadığını açıqlamırıq
       $('#forgotForm').innerHTML = `<div class="row"><span class="brand-mark" style="color:#fff">SH</span><h1>Poçtu yoxlayın</h1></div>
@@ -592,6 +600,7 @@ async function settingsView() {
   await loadAccess().catch(() => {});
   view().innerHTML = `
     <div class="page-head"><div><h1>Ayarlar</h1></div></div>
+    <section class="card stack"><h2>Şifrəni dəyiş</h2><form id="settingsPassword" class="stack"><label class="field">Yeni şifrə<input type="password" name="p1" required minlength="8" autocomplete="new-password" placeholder="Ən azı 8 simvol"></label><label class="field">Yeni şifrəni təkrar yaz<input type="password" name="p2" required minlength="8" autocomplete="new-password"></label><div><button type="submit" class="btn primary">Şifrəni yenilə</button></div><p role="status" id="settingsPasswordStatus"></p></form></section>
     <section class="card stack" id="paymentAssistantSettings"></section>
     <section class="card stack"><h2>AI xərci</h2>${limitLine() || '<p class="muted small">Limitlər üçün bazada 008 yeniləməsi lazımdır.</p>'}</section>
     <section class="card stack" id="usageCard"><div class="row"><span class="spinner sm" aria-hidden="true"></span><span class="muted small">AI sayğacı yüklənir…</span></div></section>
@@ -601,6 +610,13 @@ async function settingsView() {
       <div><button class="btn primary" id="exportBtn">Məlumatlarımı yüklə</button></div></section>
     <section class="card stack"><h2>Hesab</h2><p>${esc(session?.user?.email || '')}</p>
       <div class="row"><button class="btn" id="logout3">Çıxış</button><a class="btn" href="#/privacy">Məxfilik siyasəti</a></div></section>`;
+  $('#settingsPassword').onsubmit=async e=>{
+    e.preventDefault();const form=e.target,msg=$('#settingsPasswordStatus'),btn=$('button',form),f=new FormData(form);
+    if(f.get('p1')!==f.get('p2')){msg.textContent='Şifrələr eyni deyil';return;}
+    btn.disabled=true;msg.textContent='Saxlanılır…';
+    try{const {error}=await sb.auth.updateUser({password:f.get('p1')});if(error)throw error;form.reset();msg.textContent='✓ Şifrə dəyişdirildi.';}
+    catch(err){msg.textContent=err.message||'Şifrə dəyişdirilmədi. Yenidən yoxla.';}finally{btn.disabled=false;}
+  };
   $('#exportBtn').onclick = () => busy($('#exportBtn'), exportMyData).catch(fail);
   $('#logout3').onclick = async () => { await sb.auth.signOut(); go('#/'); };
   paymentAssistantSettings($('#paymentAssistantSettings'),sb).catch(()=>{});
@@ -3841,6 +3857,7 @@ async function lessonsView() {
     if (a.pick) lessonsDate = todayIso();
   }
   let cls = lessonsCls;
+  let missingPhonesOnly = false;
   const draw = () => {
     const date = lessonsDate;
     const ag = agenda();
@@ -3857,6 +3874,7 @@ async function lessonsView() {
       ${ledgerNeeds016 ? '<p class="notice">Aylıq ödəniş günü üçün bazanı yeniləyin: Supabase → SQL Editor → <strong>016_monthly.sql</strong> → Run.</p>' : ''}
       <div class="month-bar"><button class="btn small ls-payment-only" data-ym="-1" aria-label="Əvvəlki ay">‹</button><strong class="ls-payment-only">${esc(ymLabel(ym))}</strong><button class="btn small ls-payment-only" data-ym="1" aria-label="Növbəti ay">›</button>
         ${classes.length > 1 ? `<select id="lsClass" aria-label="Qrup" style="min-height:40px;width:auto;margin-left:auto"><option value="">Bütün qruplar</option>${classes.map(([id, n]) => `<option value="${id}" ${id === cls ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}</div>
+      <section class="card stack ls-payment-only"><div class="row between"><strong id="phoneCount"></strong><label class="row"><input type="checkbox" id="missingPhonesOnly" ${missingPhonesOnly?'checked':''}> Nömrəsi olmayanlar</label></div><p class="muted small">Valideyn nömrəsini tələbənin yanından əlavə et və ya dəyiş.</p><p id="noMissingPhones" hidden>Bu qrupda bütün valideyn nömrələri yazılıb.</p></section>
       <section class="grid ls-stats4 ls-payment-only">
         <div class="card stat"><div class="label">Tələbə</div><div class="value">${list.length}</div></div>
         <div class="card stat"><div class="label">${esc(monthName(ym))}: gözlənilən</div><div class="value" style="font-size:22px">${money(sum.exp)}</div></div>
@@ -3876,7 +3894,7 @@ async function lessonsView() {
       </div>
       <div class="ls-section-title"><h2>${lessonsMode==='attendance'?'Davamiyyət · '+esc(fmtDayAz(date)):'Aylıq ödənişlər'}</h2><span class="muted small">${lessonsMode==='attendance'?`${sum.came} gəldi · ${sum.missed} gəlmədi · ${list.length-sum.came-sum.missed} qeyd gözləyir`:list.length+' tələbə'}</span></div>
       ${rows.length ? `<section class="card ls-list">${rows.map(({ x, g, day }) => `<div class="ls-row" data-sid="${x.id}">
-          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><span class="ls-payment-only">${parentWhatsApp(x.parent_phone) || `<a class="btn small" href="#/student/${x.id}">+ Valideyn nömrəsi</a>`}</span><span class="small muted">${esc(x.classes?.name || '')} · ${esc(monthName(ym))}: ${g.came} dərs${g.missed ? `, ${g.missed} gəlmədi` : ''}</span></div>
+          <div class="ls-who"><a href="#/student/${x.id}"><strong>${esc(x.full_name)}</strong></a><div class="ls-payment-only" data-inline-contact="${x.id}"></div><span class="small muted">${esc(x.classes?.name || '')} · ${esc(monthName(ym))}: ${g.came} dərs${g.missed ? `, ${g.missed} gəlmədi` : ''}</span></div>
           <span class="ls-money ls-payment-only"><label class="ls-price" title="Aylıq məbləğ — qəbul edilən pul deyil">Aylıq ₼<input type="number" min="0" step="1" inputmode="decimal" value="${x.lesson_price ?? ''}" placeholder="aylıq" data-price="${x.id}" aria-label="${esc(x.full_name)}: aylıq ödəniş"></label>
             <label class="ls-day" title="Ödəniş günü">ayın<input type="number" min="1" max="31" inputmode="numeric" value="${x.pay_day ?? ''}" placeholder="1" data-pday="${x.id}" aria-label="${esc(x.full_name)}: ödəniş günü" ${ledgerNeeds016 ? 'disabled' : ''}>-i</label></span>
           <span class="ls-bal ls-payment-only">${monthChip(g, ym)}${g.balance > g.fee + 0.004 ? balanceChip(g.balance) : g.balance < -0.004 ? balanceChip(g.balance) : ''}</span>
@@ -3885,6 +3903,15 @@ async function lessonsView() {
             <button class="btn small att ${day?.status === 'missed' ? 'on-miss' : ''}" data-att="missed" data-s="${x.id}" aria-pressed="${day?.status === 'missed'}">✗ Gəlmədi</button>${day?`<button class="btn small" data-att="${day.status}" data-clear-att data-s="${x.id}">Qeydi sil</button>`:'<span class="ls-unmarked">Qeyd olunmayıb</span>'}</span>
           <span class="ls-act"><button class="btn small primary ls-payment-only" data-pay="${x.id}">+ Ödəniş qeyd et</button><button class="btn small" data-hist="${x.id}">Tarixçə</button></span>
         </div>`).join('')}</section>` : '<div class="card"><div class="empty">Hələ tələbə yoxdur. <a href="#/students">Tələbələr</a> bölməsindən əlavə edin.</div></div>'}</div>`;
+    const refreshContacts=()=>{
+      const missing=list.filter(x=>!x.parent_phone).length;
+      $('#phoneCount').textContent=`${list.length} tələbədən ${missing}-nin valideyn nömrəsi yoxdur`;
+      $('#noMissingPhones').hidden=!missingPhonesOnly||missing>0;
+      $$('[data-sid]').forEach(row=>{const x=list.find(s=>s.id===row.dataset.sid);row.hidden=lessonsMode==='payments'&&missingPhonesOnly&&!!x?.parent_phone;});
+    };
+    $$('[data-inline-contact]').forEach(host=>mountInlineParentContact(host,sb,list.find(x=>x.id===host.dataset.inlineContact),refreshContacts));
+    $('#missingPhonesOnly').onchange=e=>{missingPhonesOnly=e.target.checked;refreshContacts();};
+    refreshContacts();
     $$('[data-ls-mode]').forEach(b=>b.onclick=()=>{lessonsMode=b.dataset.lsMode;draw();});
     $$('[data-ym]').forEach((b) => b.onclick = () => { lessonsYm = shiftYm(ym, +b.dataset.ym); route(); });
     $('#lsClass') && ($('#lsClass').onchange = (e) => { cls = lessonsCls = e.target.value; draw(); });

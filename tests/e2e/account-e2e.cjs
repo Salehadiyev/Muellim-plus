@@ -25,9 +25,21 @@ const ok = (m) => console.log('✓', m); const fail = (m) => { throw new Error(m
   await p.fill('#newPw [name=p1]', 'yenisifre1'); await p.fill('#newPw [name=p2]', 'basqa1234'); await p.click('#newPw button'); await p.waitForSelector('text=Şifrələr eyni deyil');
   await p.fill('#newPw [name=p2]', 'yenisifre1'); await p.click('#newPw button'); await p.waitForSelector('text=Açıq testlər');
   console.log('  new password set:', await p.evaluate(() => window.__pw)); ok('recovery link → new password → app');
+  await p.goto('http://app.test/#/settings');await p.waitForSelector('#settingsPassword');
+  await p.fill('#settingsPassword [name=p1]','yeniSettings9');await p.fill('#settingsPassword [name=p2]','ferqliSettings9');await p.click('#settingsPassword button');await p.waitForSelector('text=Şifrələr eyni deyil');
+  await p.fill('#settingsPassword [name=p2]','yeniSettings9');await p.click('#settingsPassword button');await p.waitForSelector('text=✓ Şifrə dəyişdirildi.');
+  if(await p.inputValue('#settingsPassword [name=p1]')!=='')fail('password retained');
+  ok('settings password: mismatch and successful change');
+  await p.goto('http://app.test/?mode=recovery#/');await p.waitForSelector('#newPw');
+  await p.goto('http://app.test/?mode=recovery#/settings');await p.waitForSelector('#newPw');
+  await p.fill('#newPw [name=p1]','yenisifre2');await p.fill('#newPw [name=p2]','yenisifre2');await p.click('#newPw button');await p.waitForSelector('text=Açıq testlər');
+  if(p.url().includes('mode=recovery'))fail('recovery marker retained');
+  ok('recovery marker survives hash navigation and clears after save');
   // expired session on AI call
   await p.goto('http://app.test/#/ai'); await p.waitForSelector('[data-tab=topic]'); await p.click('[data-tab=topic]'); await p.waitForTimeout(300);
   await p.evaluate(() => document.querySelector('#tabBody form button[type=submit], #tabBody button.primary').click());
   await p.waitForSelector('#auth'); ok('expired session → back to login');
+  await p.evaluate(()=>localStorage.removeItem('mocksession'));await p.goto('http://app.test/?mode=recovery');await p.waitForSelector('#retryRecovery');await p.click('#retryRecovery');await p.waitForSelector('#forgotForm');
+  ok('expired recovery offers a fresh link');
   console.log(errs.length ? errs : 'NO ERRORS'); await b.close();
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });
